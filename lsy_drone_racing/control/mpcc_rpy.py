@@ -440,7 +440,7 @@ class MPCC(Controller):
         self.nx = model.x.rows()
         self.nu = model.u.rows()
         ocp.solver_options.N_horizon = N_horizon
-        ocp.cost.cost_type = "EXTERNAL"
+        ocp.cost.cost_type = "EXTERNAL" 
 
         self.q_l = 200
         self.q_c = 100
