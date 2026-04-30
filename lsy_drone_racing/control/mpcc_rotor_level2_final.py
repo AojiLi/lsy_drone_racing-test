@@ -641,8 +641,8 @@ class MPCC(Controller):
         # self.miu = 14.3377785384655  # 13.8
         self.miu = 13.8 
         self.w_v_gate = 2.7327203765511516
-        self.w_v_obst = 2.460291111562401 
-        # self.w_v_obst = 2.7
+        # self.w_v_obst = 2.460291111562401 
+        self.w_v_obst = 2.4
 
         ocp.model.cost_expr_ext_cost = self._stage_cost_expression()
 
