@@ -95,13 +95,14 @@ class Args:
     d_act_xy_coef: float = 0.05
     act_coef: float = 0.005
     progress_coef: float = 10.0
-    near_gate_coef: float = 0.15
-    gate_bonus: float = 12.0
-    finish_bonus: float = 40.0
+    gate_axis_coef: float = 20.0
+    near_gate_coef: float = 0.0
+    gate_bonus: float = 30.0
+    finish_bonus: float = 80.0
     crash_penalty: float = 50.0
     obstacle_coef: float = 1.5
     obstacle_margin: float = 0.35
-    time_penalty: float = 0.02
+    time_penalty: float = 0.05
     debug_obs: bool = False
     debug_reward_every: int = 0
     """reward coefficients for training"""
@@ -156,17 +157,18 @@ class Level2RaceReward(VectorRewardWrapper):
         env: VectorEnv,
         *,
         progress_coef: float = 10.0,
-        near_gate_coef: float = 0.15,
-        gate_bonus: float = 12.0,
-        finish_bonus: float = 40.0,
+        near_gate_coef: float = 0.0,
+        gate_bonus: float = 30.0,
+        finish_bonus: float = 80.0,
         crash_penalty: float = 50.0,
         rpy_coef: float = 0.03,
         act_coef: float = 0.005,
         d_act_th_coef: float = 0.02,
         d_act_xy_coef: float = 0.05,
+        gate_axis_coef: float = 20.0,
         obstacle_coef: float = 1.5,
         obstacle_margin: float = 0.35,
-        time_penalty: float = 0.02,
+        time_penalty: float = 0.05,
         debug_every: int = 0,
     ):
         """Initialize reward shaping."""
@@ -180,6 +182,7 @@ class Level2RaceReward(VectorRewardWrapper):
         self.act_coef = act_coef
         self.d_act_th_coef = d_act_th_coef
         self.d_act_xy_coef = d_act_xy_coef
+        self.gate_axis_coef = gate_axis_coef
         self.obstacle_coef = obstacle_coef
         self.obstacle_margin = obstacle_margin
         self.time_penalty = time_penalty
@@ -187,6 +190,7 @@ class Level2RaceReward(VectorRewardWrapper):
         self._debug_step = 0
         self._last_action = jp.zeros((self.num_envs, 4), dtype=jp.float32)
         self._prev_gate_dist = jp.zeros((self.num_envs,), dtype=jp.float32)
+        self._prev_gate_x = jp.zeros((self.num_envs,), dtype=jp.float32)
         self._prev_target_gate = jp.zeros((self.num_envs,), dtype=jp.int32)
 
     def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
@@ -194,6 +198,7 @@ class Level2RaceReward(VectorRewardWrapper):
         observations, infos = self.env.reset(seed=seed, options=options)
         self._last_action = jp.zeros((self.num_envs, 4), dtype=jp.float32)
         self._prev_gate_dist = self._gate_distance(observations)
+        self._prev_gate_x = self._gate_frame_pos(observations)[:, 0]
         self._prev_target_gate = observations["target_gate"]
         return observations, infos
 
@@ -204,6 +209,7 @@ class Level2RaceReward(VectorRewardWrapper):
             observations, actions, terminations, truncations
         )
         self._prev_gate_dist = self._gate_distance(observations)
+        self._prev_gate_x = self._gate_frame_pos(observations)[:, 0]
         self._prev_target_gate = observations["target_gate"]
         self._last_action = jp.asarray(actions)
 
@@ -229,6 +235,17 @@ class Level2RaceReward(VectorRewardWrapper):
         raw_progress = self._prev_gate_dist - gate_dist
         progress = jp.where(passed_gate | finished, 0.0, jp.clip(raw_progress, -0.25, 0.25))
         near_gate = jp.exp(-gate_dist)
+        gate_local = self._gate_frame_pos(observations)
+        gate_x = gate_local[:, 0]
+        centerline_dist = jp.linalg.norm(gate_local[:, 1:3], axis=-1)
+        centerline_weight = jp.exp(-10.0 * centerline_dist**2)
+        same_gate = (target_gate == self._prev_target_gate) & (self._prev_target_gate >= 0)
+        raw_axis_progress = jp.clip(gate_x - self._prev_gate_x, -0.1, 0.1)
+        gate_axis_progress = jp.where(
+            same_gate & ~finished,
+            raw_axis_progress * centerline_weight,
+            0.0,
+        )
 
         action_diff = actions - self._last_action
         act_penalty = jp.sum(actions[..., :3] ** 2, axis=-1) + actions[..., -1] ** 2
@@ -241,6 +258,7 @@ class Level2RaceReward(VectorRewardWrapper):
 
         components = {
             "progress": self.progress_coef * progress,
+            "gate_axis_progress": self.gate_axis_coef * gate_axis_progress,
             "near_gate": self.near_gate_coef * near_gate,
             "gate_bonus": self.gate_bonus * passed_gate.astype(jp.float32),
             "finish_bonus": self.finish_bonus * finished.astype(jp.float32),
@@ -259,6 +277,8 @@ class Level2RaceReward(VectorRewardWrapper):
             "crashed_rate": crashed.astype(jp.float32),
             "done_rate": (terminations | truncations).astype(jp.float32),
             "target_gate": jp.maximum(target_gate, 0).astype(jp.float32),
+            "gate_axis_x": gate_x,
+            "gate_centerline_dist": centerline_dist,
         }
         return reward, components, metrics
 
@@ -270,6 +290,18 @@ class Level2RaceReward(VectorRewardWrapper):
         batch_idx = jp.arange(gates_pos.shape[0])
         target_pos = gates_pos[batch_idx, gate_idx]
         return jp.linalg.norm(target_pos - observations["pos"], axis=-1)
+
+    def _gate_frame_pos(self, observations: dict[str, Array]) -> Array:
+        target_gate = observations["target_gate"]
+        gates_pos = observations["gates_pos"]
+        n_gates = gates_pos.shape[1]
+        gate_idx = jp.mod(target_gate, n_gates)
+        batch_idx = jp.arange(gates_pos.shape[0])
+        gate_pos = gates_pos[batch_idx, gate_idx]
+        gate_quat = observations["gates_quat"][batch_idx, gate_idx]
+        gate_rot = RaceObservation.quat_to_rotmat(gate_quat)
+        gate_rot_t = jp.swapaxes(gate_rot, -1, -2)
+        return jp.einsum("nij,nj->ni", gate_rot_t, observations["pos"] - gate_pos)
 
     @staticmethod
     def _tilt(quat: Array) -> Array:
@@ -495,6 +527,7 @@ def set_seeds(seed: int):
 
 REWARD_COMPONENT_KEYS = (
     "progress",
+    "gate_axis_progress",
     "near_gate",
     "gate_bonus",
     "finish_bonus",
@@ -513,6 +546,8 @@ RACE_METRIC_KEYS = (
     "crashed_rate",
     "done_rate",
     "target_gate",
+    "gate_axis_x",
+    "gate_centerline_dist",
 )
 
 
@@ -575,17 +610,18 @@ def make_envs(
     env = Level2RaceReward(
         env,
         progress_coef=coefs.get("progress_coef", 10.0),
-        near_gate_coef=coefs.get("near_gate_coef", 0.15),
-        gate_bonus=coefs.get("gate_bonus", 12.0),
-        finish_bonus=coefs.get("finish_bonus", 40.0),
+        near_gate_coef=coefs.get("near_gate_coef", 0.0),
+        gate_bonus=coefs.get("gate_bonus", 30.0),
+        finish_bonus=coefs.get("finish_bonus", 80.0),
         crash_penalty=coefs.get("crash_penalty", 50.0),
         rpy_coef=coefs.get("rpy_coef", 0.03),
         act_coef=coefs.get("act_coef", 0.005),
         d_act_th_coef=coefs.get("d_act_th_coef", 0.02),
         d_act_xy_coef=coefs.get("d_act_xy_coef", 0.05),
+        gate_axis_coef=coefs.get("gate_axis_coef", 20.0),
         obstacle_coef=coefs.get("obstacle_coef", 1.5),
         obstacle_margin=coefs.get("obstacle_margin", 0.35),
-        time_penalty=coefs.get("time_penalty", 0.02),
+        time_penalty=coefs.get("time_penalty", 0.05),
         debug_every=debug_reward_every,
     )
     env = RaceObservation(env, n_history=coefs.get("n_obs", 0), debug_obs=debug_obs)
@@ -669,6 +705,7 @@ def train_ppo(
         "d_act_th_coef": args.d_act_th_coef,
         "act_coef": args.act_coef,
         "progress_coef": args.progress_coef,
+        "gate_axis_coef": args.gate_axis_coef,
         "near_gate_coef": args.near_gate_coef,
         "gate_bonus": args.gate_bonus,
         "finish_bonus": args.finish_bonus,
@@ -909,6 +946,7 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
         "d_act_th_coef": args.d_act_th_coef,
         "act_coef": args.act_coef,
         "progress_coef": args.progress_coef,
+        "gate_axis_coef": args.gate_axis_coef,
         "near_gate_coef": args.near_gate_coef,
         "gate_bonus": args.gate_bonus,
         "finish_bonus": args.finish_bonus,
@@ -960,6 +998,7 @@ def debug_rollout(args: Args, n_steps: int, device: torch.device, jax_device: st
         "d_act_th_coef": args.d_act_th_coef,
         "act_coef": args.act_coef,
         "progress_coef": args.progress_coef,
+        "gate_axis_coef": args.gate_axis_coef,
         "near_gate_coef": args.near_gate_coef,
         "gate_bonus": args.gate_bonus,
         "finish_bonus": args.finish_bonus,
@@ -1018,13 +1057,14 @@ def main(
     model_name: str = "ppo_level2_racing.ckpt",
     n_obs: int = 2,
     progress_coef: float = 10.0,
-    near_gate_coef: float = 0.15,
-    gate_bonus: float = 12.0,
-    finish_bonus: float = 40.0,
+    gate_axis_coef: float = 20.0,
+    near_gate_coef: float = 0.0,
+    gate_bonus: float = 30.0,
+    finish_bonus: float = 80.0,
     crash_penalty: float = 50.0,
     obstacle_coef: float = 1.5,
     obstacle_margin: float = 0.35,
-    time_penalty: float = 0.02,
+    time_penalty: float = 0.05,
     act_coef: float = 0.005,
     d_act_th_coef: float = 0.02,
     d_act_xy_coef: float = 0.05,
@@ -1049,6 +1089,7 @@ def main(
         jax_device=jax_device,
         n_obs=n_obs,
         progress_coef=progress_coef,
+        gate_axis_coef=gate_axis_coef,
         near_gate_coef=near_gate_coef,
         gate_bonus=gate_bonus,
         finish_bonus=finish_bonus,
