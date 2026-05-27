@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 
 MODEL_NAME = "checkpoints/ppo_level2_safe/ppo_level2_safe_final.ckpt"
+# MODEL_NAME = "ppo_level2_notebook_gatepass1.ckpt"
 N_HISTORY = 2
 HISTORY_DIM = 13
 GATE_CORNERS_LOCAL = np.array(
@@ -101,7 +102,7 @@ class PPOLevel2Inference(Controller):
         self.n_gates = int(np.asarray(obs["gates_pos"]).shape[0])
         self.n_obstacles = int(np.asarray(obs["obstacles_pos"]).shape[0])
         self.action_dim = 4
-        self.obs_dim = (
+        current_obs_dim = (
             1
             + 3
             + 3
@@ -118,13 +119,20 @@ class PPOLevel2Inference(Controller):
         )
 
         self.device = torch.device("cpu")
-        self.agent = PPOAgent((self.obs_dim,), (self.action_dim,)).to(self.device)
         model_path = Path(__file__).parent / MODEL_NAME
         if not model_path.exists():
             raise FileNotFoundError(f"PPO checkpoint not found: {model_path}")
         checkpoint = torch.load(model_path, map_location=self.device)
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
             checkpoint = checkpoint["model_state_dict"]
+        self.obs_dim = int(checkpoint["actor_mean.0.weight"].shape[1])
+        self._include_prev_gate = self.obs_dim == current_obs_dim
+        if self.obs_dim not in (current_obs_dim, current_obs_dim - 12):
+            raise ValueError(
+                f"Unsupported PPO checkpoint input size {self.obs_dim}; "
+                f"expected {current_obs_dim} or {current_obs_dim - 12}."
+            )
+        self.agent = PPOAgent((self.obs_dim,), (self.action_dim,)).to(self.device)
         self.agent.load_state_dict(checkpoint)
         self.agent.eval()
 
@@ -176,14 +184,17 @@ class PPOLevel2Inference(Controller):
             [self.n_gates if target_gate < 0 else target_gate], dtype=np.float32
         ) / self.n_gates
 
-        flat = np.concatenate(
+        obs_parts = [
+            pos[2:3],
+            vel_body,
+            ang_vel,
+            rot.reshape(-1),
+            target_progress,
+        ]
+        if self._include_prev_gate:
+            obs_parts.append(gate_prev)
+        obs_parts.extend(
             [
-                pos[2:3],
-                vel_body,
-                ang_vel,
-                rot.reshape(-1),
-                target_progress,
-                gate_prev,
                 gate_current,
                 gate_next,
                 obstacles_body,
@@ -192,7 +203,8 @@ class PPOLevel2Inference(Controller):
                 self._last_action_norm,
                 self._history.reshape(-1),
             ]
-        ).astype(np.float32)
+        )
+        flat = np.concatenate(obs_parts).astype(np.float32)
 
         self._history = np.concatenate([self._history[1:], self._basic_history(obs)[None, :]])
         return flat
