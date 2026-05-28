@@ -93,6 +93,7 @@ class Args:
     rpy_coef: float = 1.0
     tilt_limit_deg: float = 35.0
     tilt_excess_coef: float = 10.0
+    cmd_tilt_coef: float = 1.0
     d_act_th_coef: float = 0.02
     d_act_xy_coef: float = 0.05
     act_coef: float = 0.005
@@ -174,6 +175,7 @@ class Level2RaceReward(VectorRewardWrapper):
         rpy_coef: float = 1.0,
         tilt_limit_deg: float = 35.0,
         tilt_excess_coef: float = 10.0,
+        cmd_tilt_coef: float = 1.0,
         act_coef: float = 0.005,
         d_act_th_coef: float = 0.02,
         d_act_xy_coef: float = 0.05,
@@ -201,6 +203,7 @@ class Level2RaceReward(VectorRewardWrapper):
         self.rpy_coef = rpy_coef
         self.tilt_limit_rad = float(np.deg2rad(tilt_limit_deg))
         self.tilt_excess_coef = tilt_excess_coef
+        self.cmd_tilt_coef = cmd_tilt_coef
         self.act_coef = act_coef
         self.d_act_th_coef = d_act_th_coef
         self.d_act_xy_coef = d_act_xy_coef
@@ -217,6 +220,10 @@ class Level2RaceReward(VectorRewardWrapper):
         self.obstacle_margin = obstacle_margin
         self.time_penalty = time_penalty
         self.debug_every = debug_every
+        action_sim_low = np.asarray(getattr(env, "action_sim_low"), dtype=np.float32)
+        action_sim_high = np.asarray(getattr(env, "action_sim_high"), dtype=np.float32)
+        self._action_scale = jp.asarray((action_sim_high - action_sim_low) / 2.0)
+        self._action_mean = jp.asarray((action_sim_high + action_sim_low) / 2.0)
         self._debug_step = 0
         self._last_action = jp.zeros((self.num_envs, 4), dtype=jp.float32)
         self._prev_gate_dist = jp.zeros((self.num_envs,), dtype=jp.float32)
@@ -383,7 +390,9 @@ class Level2RaceReward(VectorRewardWrapper):
         new_gate_stage = jp.where(target_changed | finished, 0, stage_after_pass)
 
         action_diff = actions - self._last_action
-        act_penalty = jp.sum(actions[..., :3] ** 2, axis=-1) + actions[..., -1] ** 2
+        cmd_tilt = self._action_tilt(actions)
+        cmd_tilt_penalty = (cmd_tilt / (jp.pi / 2.0)) ** 2
+        act_penalty = actions[..., 2] ** 2 + actions[..., -1] ** 2
         smooth_penalty = (
             self.d_act_xy_coef * jp.sum(action_diff[..., :3] ** 2, axis=-1)
             + self.d_act_th_coef * action_diff[..., -1] ** 2
@@ -407,6 +416,7 @@ class Level2RaceReward(VectorRewardWrapper):
             "wrong_side": -self.wrong_side_penalty * wrong_side_gate.astype(jp.float32),
             "crash": -self.crash_penalty * crashed.astype(jp.float32),
             "action": -self.act_coef * act_penalty,
+            "cmd_tilt": -self.cmd_tilt_coef * cmd_tilt_penalty,
             "smooth": -smooth_penalty,
             "tilt": -self.rpy_coef * tilt,
             "tilt_excess": -self.tilt_excess_coef * tilt_excess,
@@ -432,6 +442,7 @@ class Level2RaceReward(VectorRewardWrapper):
             "gate_back_hit_rate": back_hit.astype(jp.float32),
             "wrong_side_gate_rate": wrong_side_gate.astype(jp.float32),
             "tilt_angle_deg": jp.rad2deg(tilt_angle),
+            "cmd_tilt_deg": jp.rad2deg(cmd_tilt),
         }
         return (
             reward,
@@ -489,6 +500,13 @@ class Level2RaceReward(VectorRewardWrapper):
     def _tilt_angle(quat: Array) -> Array:
         rot = RaceObservation.quat_to_rotmat(quat)
         body_z_world_z = jp.clip(rot[..., 2, 2], -1.0, 1.0)
+        return jp.arccos(body_z_world_z)
+
+    def _action_tilt(self, actions: Array) -> Array:
+        scaled_actions = jp.clip(actions, -1.0, 1.0) * self._action_scale + self._action_mean
+        roll_cmd = scaled_actions[..., 0]
+        pitch_cmd = scaled_actions[..., 1]
+        body_z_world_z = jp.clip(jp.cos(roll_cmd) * jp.cos(pitch_cmd), -1.0, 1.0)
         return jp.arccos(body_z_world_z)
 
     def _obstacle_penalty(self, observations: dict[str, Array]) -> Array:
@@ -735,6 +753,7 @@ REWARD_COMPONENT_KEYS = (
     "wrong_side",
     "crash",
     "action",
+    "cmd_tilt",
     "smooth",
     "tilt",
     "tilt_excess",
@@ -760,6 +779,7 @@ RACE_METRIC_KEYS = (
     "gate_back_hit_rate",
     "wrong_side_gate_rate",
     "tilt_angle_deg",
+    "cmd_tilt_deg",
 )
 
 
@@ -829,6 +849,7 @@ def make_envs(
         rpy_coef=coefs.get("rpy_coef", 1.0),
         tilt_limit_deg=coefs.get("tilt_limit_deg", 35.0),
         tilt_excess_coef=coefs.get("tilt_excess_coef", 10.0),
+        cmd_tilt_coef=coefs.get("cmd_tilt_coef", 1.0),
         act_coef=coefs.get("act_coef", 0.005),
         d_act_th_coef=coefs.get("d_act_th_coef", 0.02),
         d_act_xy_coef=coefs.get("d_act_xy_coef", 0.05),
@@ -941,6 +962,7 @@ def train_ppo(
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
+        "cmd_tilt_coef": args.cmd_tilt_coef,
         "d_act_xy_coef": args.d_act_xy_coef,
         "d_act_th_coef": args.d_act_th_coef,
         "act_coef": args.act_coef,
@@ -1200,6 +1222,7 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
+        "cmd_tilt_coef": args.cmd_tilt_coef,
         "d_act_xy_coef": args.d_act_xy_coef,
         "d_act_th_coef": args.d_act_th_coef,
         "act_coef": args.act_coef,
@@ -1262,6 +1285,7 @@ def debug_rollout(args: Args, n_steps: int, device: torch.device, jax_device: st
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
+        "cmd_tilt_coef": args.cmd_tilt_coef,
         "d_act_xy_coef": args.d_act_xy_coef,
         "d_act_th_coef": args.d_act_th_coef,
         "act_coef": args.act_coef,
@@ -1357,6 +1381,7 @@ def main(
     rpy_coef: float = 1.0,
     tilt_limit_deg: float = 35.0,
     tilt_excess_coef: float = 10.0,
+    cmd_tilt_coef: float = 1.0,
     debug_obs: bool = False,
     debug_reward_every: int = 0,
 ):
@@ -1399,6 +1424,7 @@ def main(
         rpy_coef=rpy_coef,
         tilt_limit_deg=tilt_limit_deg,
         tilt_excess_coef=tilt_excess_coef,
+        cmd_tilt_coef=cmd_tilt_coef,
         debug_obs=debug_obs,
         debug_reward_every=debug_reward_every,
     )
