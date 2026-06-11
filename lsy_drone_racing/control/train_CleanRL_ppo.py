@@ -259,6 +259,168 @@ class ThrustScaleBatterySag(VectorWrapper):
         return actions.at[..., -1].set(actions[..., -1] * thrust_scale)
 
 
+class ActionLatencyResponseLag(VectorWrapper):
+    """Apply train-only command delay and first-order attitude/thrust response lag."""
+
+    def __init__(
+        self,
+        env: VectorEnv,
+        latency_config: dict | None,
+        response_config: dict | None,
+        *,
+        env_freq: int,
+        seed: int | None = None,
+    ):
+        """Initialize per-episode action delay and response parameters."""
+        super().__init__(env)
+        latency_config = {} if latency_config is None else latency_config
+        response_config = {} if response_config is None else response_config
+        self.delay_min_steps = int(latency_config.get("delay_min_steps", 0))
+        self.delay_max_steps = int(latency_config.get("delay_max_steps", 0))
+        self.rp_tau_min_s = float(
+            response_config.get("rp_tau_min_s", response_config.get("rpy_tau_min_s", 0.0))
+        )
+        self.rp_tau_max_s = float(
+            response_config.get("rp_tau_max_s", response_config.get("rpy_tau_max_s", 0.0))
+        )
+        self.yaw_tau_min_s = float(response_config.get("yaw_tau_min_s", self.rp_tau_min_s))
+        self.yaw_tau_max_s = float(response_config.get("yaw_tau_max_s", self.rp_tau_max_s))
+        self.thrust_tau_min_s = float(response_config.get("thrust_tau_min_s", 0.0))
+        self.thrust_tau_max_s = float(response_config.get("thrust_tau_max_s", 0.0))
+        if self.delay_min_steps < 0 or self.delay_max_steps < 0:
+            raise ValueError("action delay bounds must be non-negative.")
+        if self.delay_min_steps > self.delay_max_steps:
+            raise ValueError("action delay_min_steps must be <= delay_max_steps.")
+        for name, min_s, max_s in (
+            ("rp_tau", self.rp_tau_min_s, self.rp_tau_max_s),
+            ("yaw_tau", self.yaw_tau_min_s, self.yaw_tau_max_s),
+            ("thrust_tau", self.thrust_tau_min_s, self.thrust_tau_max_s),
+        ):
+            if min_s < 0.0 or max_s < 0.0:
+                raise ValueError(f"{name} bounds must be non-negative.")
+            if min_s > max_s:
+                raise ValueError(f"{name}_min_s must be <= {name}_max_s.")
+
+        self.single_action_space = env.single_action_space
+        self.action_space = env.action_space
+        if self.single_action_space.shape != (4,):
+            raise ValueError("ActionLatencyResponseLag expects attitude action shape (4,).")
+        self._dt = 1.0 / float(env_freq)
+        self._action_shape = (self.num_envs,) + tuple(self.single_action_space.shape)
+        self._delay_mask_shape = (self.num_envs,) + (1,) * len(self.single_action_space.shape)
+        action_low = jp.asarray(self.single_action_space.low, dtype=jp.float32)
+        action_high = jp.asarray(self.single_action_space.high, dtype=jp.float32)
+        neutral = (action_low + action_high) / 2.0
+        self._neutral_action = jp.broadcast_to(neutral, self._action_shape)
+        rng_seed = random.randrange(2**31) if seed is None or seed == -1 else int(seed) + 10_003
+        self._rng_key = jax.random.PRNGKey(rng_seed)
+        self._delay_steps = jp.zeros((self.num_envs,), dtype=jp.int32)
+        self._rp_tau = jp.zeros((self.num_envs,), dtype=jp.float32)
+        self._yaw_tau = jp.zeros((self.num_envs,), dtype=jp.float32)
+        self._thrust_tau = jp.zeros((self.num_envs,), dtype=jp.float32)
+        self._applied_action = self._neutral_action
+        self._action_buffer = self._initial_action_buffer()
+        self._sample_episode_params(jp.ones((self.num_envs,), dtype=bool))
+
+    def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
+        """Reset wrapper state and sample per-episode response parameters."""
+        observations, infos = self.env.reset(seed=seed, options=options)
+        if seed is not None:
+            self._rng_key = jax.random.PRNGKey(int(seed) + 10_003)
+        self._applied_action = self._neutral_action
+        self._action_buffer = self._initial_action_buffer()
+        self._sample_episode_params(jp.ones((self.num_envs,), dtype=bool))
+        return observations, infos
+
+    def step(self, actions: Array) -> tuple[dict, Array, Array, Array, dict]:
+        """Delay and low-pass-filter physical actions before stepping the simulator."""
+        actions = jp.asarray(actions)
+        self._action_buffer = jp.concatenate(
+            [actions[:, None, ...], self._action_buffer[:, :-1, ...]], axis=1
+        )
+        delayed_action = self._action_buffer[jp.arange(self.num_envs), self._delay_steps]
+        applied_action = self._apply_response_lag(delayed_action)
+        observations, rewards, terminations, truncations, infos = self.env.step(applied_action)
+        self._applied_action = applied_action
+        done = self._done_mask(terminations, truncations)
+        self._reset_episode_state(done)
+        return observations, rewards, terminations, truncations, infos
+
+    def _initial_action_buffer(self) -> Array:
+        """Create a delay buffer initialized with neutral hover-like commands."""
+        return jp.repeat(self._neutral_action[:, None, ...], self.delay_max_steps + 1, axis=1)
+
+    def _sample_episode_params(self, mask: Array) -> None:
+        """Sample fixed command delay and response lags for newly reset vector slots."""
+        self._rng_key, delay_key, rp_key, yaw_key, thrust_key = jax.random.split(
+            self._rng_key, 5
+        )
+        delay_steps = jax.random.randint(
+            delay_key,
+            (self.num_envs,),
+            minval=self.delay_min_steps,
+            maxval=self.delay_max_steps + 1,
+            dtype=jp.int32,
+        )
+        rp_tau = jax.random.uniform(
+            rp_key,
+            (self.num_envs,),
+            dtype=jp.float32,
+            minval=self.rp_tau_min_s,
+            maxval=self.rp_tau_max_s,
+        )
+        yaw_tau = jax.random.uniform(
+            yaw_key,
+            (self.num_envs,),
+            dtype=jp.float32,
+            minval=self.yaw_tau_min_s,
+            maxval=self.yaw_tau_max_s,
+        )
+        thrust_tau = jax.random.uniform(
+            thrust_key,
+            (self.num_envs,),
+            dtype=jp.float32,
+            minval=self.thrust_tau_min_s,
+            maxval=self.thrust_tau_max_s,
+        )
+        mask = jp.asarray(mask, dtype=bool)
+        self._delay_steps = jp.where(mask, delay_steps, self._delay_steps)
+        self._rp_tau = jp.where(mask, rp_tau, self._rp_tau)
+        self._yaw_tau = jp.where(mask, yaw_tau, self._yaw_tau)
+        self._thrust_tau = jp.where(mask, thrust_tau, self._thrust_tau)
+
+    def _apply_response_lag(self, delayed_action: Array) -> Array:
+        """Apply per-axis first-order response lag to delayed actions."""
+        rp_alpha = self._tau_to_alpha(self._rp_tau)
+        yaw_alpha = self._tau_to_alpha(self._yaw_tau)
+        thrust_alpha = self._tau_to_alpha(self._thrust_tau)
+        alpha = jp.stack([rp_alpha, rp_alpha, yaw_alpha, thrust_alpha], axis=-1)
+        applied = self._applied_action + alpha * (delayed_action - self._applied_action)
+        return jp.clip(applied, self.single_action_space.low, self.single_action_space.high)
+
+    def _reset_episode_state(self, done: Array) -> None:
+        """Reset action memory and sample new parameters for completed vector slots."""
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        mask = done.reshape(self._delay_mask_shape)
+        neutral_buffer = self._initial_action_buffer()
+        self._applied_action = jp.where(mask, self._neutral_action, self._applied_action)
+        buffer_mask = done.reshape((self.num_envs,) + (1,) * (self._action_buffer.ndim - 1))
+        self._action_buffer = jp.where(buffer_mask, neutral_buffer, self._action_buffer)
+        self._sample_episode_params(done)
+
+    def _tau_to_alpha(self, tau_s: Array) -> Array:
+        """Convert first-order time constants to discrete-time filter coefficients."""
+        return jp.where(tau_s <= 0.0, 1.0, 1.0 - jp.exp(-self._dt / tau_s))
+
+    @staticmethod
+    def _done_mask(terminations: Array, truncations: Array) -> Array:
+        done = jp.asarray(terminations) | jp.asarray(truncations)
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        return done
+
+
 class Level2RaceReward(VectorRewardWrapper):
     """Dense reward for direct level2 gate racing.
 
@@ -667,6 +829,187 @@ class Level2RaceReward(VectorRewardWrapper):
         )
 
 
+class ObservationLatencyNoise(VectorObservationWrapper):
+    """Apply train-only observation delay and sensor/object measurement noise."""
+
+    def __init__(
+        self,
+        env: VectorEnv,
+        latency_config: dict | None,
+        noise_config: dict | None,
+        *,
+        seed: int | None = None,
+    ):
+        """Initialize observation delay buffers and noise parameters."""
+        super().__init__(env)
+        latency_config = {} if latency_config is None else latency_config
+        noise_config = {} if noise_config is None else noise_config
+        self.delay_min_steps = int(latency_config.get("delay_min_steps", 0))
+        self.delay_max_steps = int(latency_config.get("delay_max_steps", 0))
+        if self.delay_min_steps < 0 or self.delay_max_steps < 0:
+            raise ValueError("observation delay bounds must be non-negative.")
+        if self.delay_min_steps > self.delay_max_steps:
+            raise ValueError("observation delay_min_steps must be <= delay_max_steps.")
+        self.pos_std_m = float(noise_config.get("pos_std_m", 0.0))
+        self.vel_std_mps = float(noise_config.get("vel_std_mps", 0.0))
+        self.ang_vel_std_radps = float(noise_config.get("ang_vel_std_radps", 0.0))
+        self.quat_rpy_std_rad = float(noise_config.get("quat_rpy_std_rad", 0.0))
+        self.gate_pos_std_m = float(noise_config.get("gate_pos_std_m", 0.0))
+        self.gate_rpy_std_rad = float(noise_config.get("gate_rpy_std_rad", 0.0))
+        self.obstacle_pos_std_m = float(noise_config.get("obstacle_pos_std_m", 0.0))
+        for name in (
+            "pos_std_m",
+            "vel_std_mps",
+            "ang_vel_std_radps",
+            "quat_rpy_std_rad",
+            "gate_pos_std_m",
+            "gate_rpy_std_rad",
+            "obstacle_pos_std_m",
+        ):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be non-negative.")
+
+        self.single_observation_space = env.single_observation_space
+        self.observation_space = env.observation_space
+        rng_seed = random.randrange(2**31) if seed is None or seed == -1 else int(seed) + 20_003
+        self._rng_key = jax.random.PRNGKey(rng_seed)
+        self._delay_steps = jp.zeros((self.num_envs,), dtype=jp.int32)
+        self._obs_buffer: dict[str, Array] | None = None
+
+    def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
+        """Reset observation delay buffers and sample per-episode delay."""
+        observations, infos = self.env.reset(seed=seed, options=options)
+        if seed is not None:
+            self._rng_key = jax.random.PRNGKey(int(seed) + 20_003)
+        observations = {key: jp.asarray(value) for key, value in observations.items()}
+        self._obs_buffer = self._initial_obs_buffer(observations)
+        self._sample_episode_params(jp.ones((self.num_envs,), dtype=bool))
+        return self._add_noise(self._select_delayed_observations()), infos
+
+    def step(self, actions: Array) -> tuple[dict, Array, Array, Array, dict]:
+        """Return delayed and noisy observations after stepping the wrapped environment."""
+        observations, rewards, terminations, truncations, infos = self.env.step(actions)
+        observations = {key: jp.asarray(value) for key, value in observations.items()}
+        if self._obs_buffer is None:
+            self._obs_buffer = self._initial_obs_buffer(observations)
+        else:
+            self._obs_buffer = {
+                key: jp.concatenate(
+                    [value[:, None, ...], self._obs_buffer[key][:, :-1, ...]], axis=1
+                )
+                for key, value in observations.items()
+            }
+        delayed_observations = self._select_delayed_observations()
+        noisy_observations = self._add_noise(delayed_observations)
+        done = self._done_mask(terminations, truncations)
+        self._reset_episode_state(done, observations)
+        return noisy_observations, rewards, terminations, truncations, infos
+
+    def _initial_obs_buffer(self, observations: dict[str, Array]) -> dict[str, Array]:
+        """Create delay buffers initialized with the current observations."""
+        return {
+            key: jp.repeat(value[:, None, ...], self.delay_max_steps + 1, axis=1)
+            for key, value in observations.items()
+        }
+
+    def _select_delayed_observations(self) -> dict[str, Array]:
+        """Select per-env delayed observations from the delay buffers."""
+        assert self._obs_buffer is not None
+        env_idx = jp.arange(self.num_envs)
+        return {
+            key: value[env_idx, self._delay_steps] for key, value in self._obs_buffer.items()
+        }
+
+    def _sample_episode_params(self, mask: Array) -> None:
+        """Sample fixed observation delay for newly reset vector slots."""
+        self._rng_key, delay_key = jax.random.split(self._rng_key)
+        delay_steps = jax.random.randint(
+            delay_key,
+            (self.num_envs,),
+            minval=self.delay_min_steps,
+            maxval=self.delay_max_steps + 1,
+            dtype=jp.int32,
+        )
+        mask = jp.asarray(mask, dtype=bool)
+        self._delay_steps = jp.where(mask, delay_steps, self._delay_steps)
+
+    def _reset_episode_state(self, done: Array, observations: dict[str, Array]) -> None:
+        """Reset delay buffers for completed vector slots."""
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        if self._obs_buffer is None:
+            return
+        fresh_buffer = self._initial_obs_buffer(observations)
+        reset_mask = done[:, None]
+        self._obs_buffer = {
+            key: jp.where(
+                reset_mask.reshape((self.num_envs, 1) + (1,) * (value.ndim - 2)),
+                fresh_buffer[key],
+                value,
+            )
+            for key, value in self._obs_buffer.items()
+        }
+        self._sample_episode_params(done)
+
+    def _add_noise(self, observations: dict[str, Array]) -> dict[str, Array]:
+        """Add zero-mean measurement noise to continuous observation fields."""
+        noisy = dict(observations)
+        for key, std in (
+            ("pos", self.pos_std_m),
+            ("vel", self.vel_std_mps),
+            ("ang_vel", self.ang_vel_std_radps),
+            ("gates_pos", self.gate_pos_std_m),
+            ("obstacles_pos", self.obstacle_pos_std_m),
+        ):
+            if std > 0.0 and key in noisy:
+                self._rng_key, subkey = jax.random.split(self._rng_key)
+                noisy[key] = noisy[key] + std * jax.random.normal(
+                    subkey, noisy[key].shape, dtype=noisy[key].dtype
+                )
+        if self.quat_rpy_std_rad > 0.0 and "quat" in noisy:
+            self._rng_key, subkey = jax.random.split(self._rng_key)
+            noisy["quat"] = self._noise_quat(noisy["quat"], subkey, self.quat_rpy_std_rad)
+        if self.gate_rpy_std_rad > 0.0 and "gates_quat" in noisy:
+            self._rng_key, subkey = jax.random.split(self._rng_key)
+            noisy["gates_quat"] = self._noise_quat(
+                noisy["gates_quat"], subkey, self.gate_rpy_std_rad
+            )
+        return noisy
+
+    @staticmethod
+    def _noise_quat(quat: Array, key: Array, std_rad: float) -> Array:
+        """Apply small-angle quaternion noise to xyzw quaternions."""
+        delta = std_rad * jax.random.normal(key, quat.shape[:-1] + (3,), dtype=quat.dtype)
+        delta_quat = jp.concatenate(
+            [0.5 * delta, jp.ones(delta.shape[:-1] + (1,), dtype=quat.dtype)], axis=-1
+        )
+        delta_quat = delta_quat / jp.linalg.norm(delta_quat, axis=-1, keepdims=True)
+        noisy_quat = ObservationLatencyNoise._quat_multiply(delta_quat, quat)
+        return noisy_quat / jp.linalg.norm(noisy_quat, axis=-1, keepdims=True)
+
+    @staticmethod
+    def _quat_multiply(q1: Array, q2: Array) -> Array:
+        """Multiply xyzw quaternions."""
+        x1, y1, z1, w1 = jp.moveaxis(q1, -1, 0)
+        x2, y2, z2, w2 = jp.moveaxis(q2, -1, 0)
+        return jp.stack(
+            [
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            ],
+            axis=-1,
+        )
+
+    @staticmethod
+    def _done_mask(terminations: Array, truncations: Array) -> Array:
+        done = jp.asarray(terminations) | jp.asarray(truncations)
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        return done
+
+
 class RaceObservation(VectorObservationWrapper):
     """Flatten level2 race observations into a PPO-friendly vector."""
 
@@ -971,6 +1314,10 @@ def make_envs(
         legacy_thrust_disturbance = disturbances.pop("thrust", None)
     train_cfg = cfg.get("train", {})
     thrust_disturbance = train_cfg.get("thrust") if train_cfg is not None else None
+    action_latency = train_cfg.get("action_latency") if train_cfg is not None else None
+    command_response = train_cfg.get("command_response") if train_cfg is not None else None
+    observation_latency = train_cfg.get("observation_latency") if train_cfg is not None else None
+    observation_noise = train_cfg.get("observation_noise") if train_cfg is not None else None
     if thrust_disturbance is None:
         thrust_disturbance = legacy_thrust_disturbance
     if cfg.env.control_mode != "attitude":
@@ -992,6 +1339,14 @@ def make_envs(
         env = ThrustScaleBatterySag(
             env,
             thrust_disturbance,
+            env_freq=cfg.env.freq,
+            seed=cfg.env.seed,
+        )
+    if action_latency is not None or command_response is not None:
+        env = ActionLatencyResponseLag(
+            env,
+            action_latency,
+            command_response,
             env_freq=cfg.env.freq,
             seed=cfg.env.seed,
         )
@@ -1027,6 +1382,13 @@ def make_envs(
         time_penalty=coefs.get("time_penalty", 0.05),
         debug_every=debug_reward_every,
     )
+    if observation_latency is not None or observation_noise is not None:
+        env = ObservationLatencyNoise(
+            env,
+            observation_latency,
+            observation_noise,
+            seed=cfg.env.seed,
+        )
     env = RaceObservation(env, n_history=coefs.get("n_obs", 0), debug_obs=debug_obs)
     env = JaxToTorch(env, torch_device)
     return env

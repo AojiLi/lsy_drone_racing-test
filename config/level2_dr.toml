@@ -5,7 +5,9 @@
 # - stronger horizontal force disturbance for airflow-like effects
 # - slightly larger action noise
 # - per-episode thrust scale and short-horizon battery sag for cf21B_500
-# - wider mass randomization
+# - command latency plus first-order attitude/thrust response lag
+# - observation latency and sensor/object measurement noise
+# - mass randomization
 # - wider diagonal inertia randomization
 
 [controller]
@@ -23,12 +25,44 @@ drone_model = "cf21B_500"
 
 [train.thrust]
 # Train-only DR: cf21B_500-like total thrust calibration and battery sag.
-# Effective thrust multiplier starts in [0.94, 1.04] and can drop by up to 5% over 8s.
+# Effective thrust multiplier starts in [0.94, 1.06] and can drop by up to 3% over 8s.
 scale_min = 0.94
-scale_max = 1.04
+scale_max = 1.06
 battery_sag_min = 0.0
-battery_sag_max = 0.05
+battery_sag_max = 0.03
 battery_sag_horizon_s = 8.0
+
+[train.action_latency]
+# Train-only DR: policy runs at 50 Hz, so one step is 20 ms.
+# Models radio/PC scheduling and command pipeline delay without changing deploy code.
+delay_min_steps = 0
+delay_max_steps = 1
+
+[train.command_response]
+# Train-only DR: first-order setpoint/thrust response lag.
+# CFB motor dynamics literature identifies motor time constant around 50 ms;
+# roll/pitch attitude dynamics are mostly handled by the onboard controller/physics.
+rp_tau_min_s = 0.00
+rp_tau_max_s = 0.02
+yaw_tau_min_s = 0.01
+yaw_tau_max_s = 0.04
+thrust_tau_min_s = 0.03
+thrust_tau_max_s = 0.08
+
+[train.observation_latency]
+# Train-only DR: EKF/mocap/controller timing is approximated as 0-1 policy step delay.
+delay_min_steps = 0
+delay_max_steps = 1
+
+[train.observation_noise]
+# Train-only DR: moderate Vicon/EKF-like state and object measurement noise.
+pos_std_m = 0.01
+vel_std_mps = 0.05
+ang_vel_std_radps = 0.08
+quat_rpy_std_rad = 0.02
+gate_pos_std_m = 0.01
+gate_rpy_std_rad = 0.01
+obstacle_pos_std_m = 0.01
 
 [sim]
 physics = "first_principles"
@@ -94,9 +128,9 @@ scale = 0.006
 [env.disturbances.dynamics]
 fn = "uniform"
 [env.disturbances.dynamics.kwargs]
-# DR delta vs level2.toml: x/y disturbance range +/-0.1 -> +/-0.15; z stays +/-0.1.
-minval = [-0.15, -0.15, -0.1]
-maxval = [0.15, 0.15, 0.1]
+# DR delta vs level2.toml: reduce force disturbance to stay near 20% cf21B_500 body weight.
+minval = [-0.1, -0.1, -0.1]
+maxval = [0.1, 0.1, 0.1]
 
 [env.randomizations.drone_pos]
 fn = "uniform"
@@ -113,16 +147,24 @@ maxval = [0.1, 0.1, 0.1]
 [env.randomizations.drone_mass]
 fn = "uniform"
 [env.randomizations.drone_mass.kwargs]
-# DR delta vs level2.toml: mass randomization +/-0.005 -> +/-0.01.
-minval = -0.01
-maxval = 0.01
+# DR delta vs level2.toml: keep mass randomization at +/-0.005 (~11.5% of cf21B_500 mass).
+minval = -0.005
+maxval = 0.005
 
 [env.randomizations.drone_inertia]
 fn = "uniform"
 [env.randomizations.drone_inertia.kwargs]
-# DR delta vs level2.toml: inertia randomization +/-1e-6 -> +/-2e-6.
-minval = [-0.000002, -0.000002, -0.000002]
-maxval = [0.000002, 0.000002, 0.000002]
+# DR delta vs level2.toml: diagonal-only inertia perturbation; off-diagonal stays zero.
+minval = [
+    [-0.0000056, 0.0, 0.0],
+    [0.0, -0.0000056, 0.0],
+    [0.0, 0.0, -0.00001],
+]
+maxval = [
+    [0.0000056, 0.0, 0.0],
+    [0.0, 0.0000056, 0.0],
+    [0.0, 0.0, 0.00001],
+]
 
 [env.randomizations.gate_pos]
 fn = "uniform"

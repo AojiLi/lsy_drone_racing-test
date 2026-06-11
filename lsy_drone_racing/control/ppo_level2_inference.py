@@ -22,12 +22,22 @@ from lsy_drone_racing.control.ppo_level2_observation import (
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-# most smooth without DR
+
+# Most smooth without DR; lower real-deploy robustness than DR checkpoints.
 # MODEL_NAME = "checkpoints/ppo_level2_cmdtilt1p5_160M/ppo_level2_cmdtilt1p5_160M_step_100000000.ckpt"
-# most smooth with DR(mass,inertia,dynamic,action)
+
+# Best current real-deploy baseline: DR(mass,inertia,dynamics,action), level2 seeds 1-100 success 85%.
 # MODEL_NAME = "checkpoints/ppo_level2_DR_nn256/ppo_level2_DR_nn256_final.ckpt"
-# DR(mass,inertia,dynamic,action,trust scale,battery sag)
-MODEL_NAME = "checkpoints/ppo_level2_DR_nn256_thrustsag/ppo_level2_DR_nn256_thrustsag_final.ckpt"
+
+# DR(mass,inertia,dynamics,action,thrust scale,battery sag); nominal level2 success 71%.
+# MODEL_NAME = "checkpoints/ppo_level2_DR_nn256_thrustsag/ppo_level2_DR_nn256_thrustsag_final.ckpt"
+
+# DR with 20% thrust-to-weight style randomization; best checkpoint was 110M, fast but aggressive.
+# MODEL_NAME = "checkpoints/ppo_level2_DR_nn256_th2w20per/ppo_level2_DR_nn256_th2w20per_step_110000000.ckpt"
+
+# Next training run: DR + thrust/sag + action latency/response lag + observation latency/noise.
+MODEL_NAME = "checkpoints/ppo_level2_DR_nn256_latencyobs/ppo_level2_DR_nn256_latencyobs_step_090000000.ckpt"
+
 N_HISTORY = 2
 HISTORY_DIM = 13
 GATE_CORNERS_LOCAL = np.array(
