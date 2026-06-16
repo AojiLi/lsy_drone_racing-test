@@ -1,0 +1,183 @@
+# Level 3 domain-randomized training config
+#
+# This keeps the level3 full track randomization enabled, and adds the same deploy-oriented
+# train-only robustness settings used by config/level2_dr.toml:
+# - slightly larger action noise
+# - per-episode thrust scale and short-horizon battery sag for cf21B_500
+# - command latency plus first-order attitude/thrust response lag
+# - observation latency and sensor/object measurement noise
+# - mass randomization
+# - wider diagonal inertia randomization
+
+[controller]
+file = "ppo_level2_inference.py"
+
+[deploy]
+check_race_track = true
+check_drone_start_pos = true
+real_track_objects = true
+
+[[deploy.drones]]
+id = 10
+channel = 100
+drone_model = "cf21B_500"
+
+[train.thrust]
+# Train-only DR: cf21B_500-like total thrust calibration and battery sag.
+# Effective thrust multiplier starts in [0.94, 1.06] and can drop by up to 3% over 8s.
+scale_min = 0.94
+scale_max = 1.06
+battery_sag_min = 0.0
+battery_sag_max = 0.03
+battery_sag_horizon_s = 8.0
+
+[train.action_latency]
+# Train-only DR: policy runs at 50 Hz, so one step is 20 ms.
+# Models radio/PC scheduling and command pipeline delay without changing deploy code.
+delay_min_steps = 0
+delay_max_steps = 1
+
+[train.command_response]
+# Train-only DR: first-order setpoint/thrust response lag.
+# CFB motor dynamics literature identifies motor time constant around 50 ms;
+# roll/pitch attitude dynamics are mostly handled by the onboard controller/physics.
+rp_tau_min_s = 0.00
+rp_tau_max_s = 0.02
+yaw_tau_min_s = 0.01
+yaw_tau_max_s = 0.04
+thrust_tau_min_s = 0.03
+thrust_tau_max_s = 0.08
+
+[train.observation_latency]
+# Train-only DR: EKF/mocap/controller timing is approximated as 0-1 policy step delay.
+delay_min_steps = 0
+delay_max_steps = 1
+
+[train.observation_noise]
+# Train-only DR: moderate Vicon/EKF-like state and object measurement noise.
+pos_std_m = 0.01
+vel_std_mps = 0.05
+ang_vel_std_radps = 0.08
+quat_rpy_std_rad = 0.02
+gate_pos_std_m = 0.01
+gate_rpy_std_rad = 0.01
+obstacle_pos_std_m = 0.01
+
+[sim]
+physics = "first_principles"
+drone_model = "cf21B_500"
+freq = 500
+attitude_freq = 500
+render = true
+camera = -1
+[[sim.cam_config]]
+distance = 5.0
+azimuth = 180.0
+elevation = -25.0
+lookat = [0.0, 0.0, 0.0]
+
+[env]
+id = "DroneRacing-v0"
+seed = -1
+freq = 50
+sensor_range = 0.7
+control_mode = "attitude"
+
+[env.track]
+# Full level3 track randomization. Position x/y and yaw are randomized inside safety limits.
+# Gate/obstacle heights and gate order are kept fixed.
+randomize = true
+
+[[env.track.gates]]
+pos = [0.0, 0.0, 0.7]
+rpy = [0.0, 0.0, 0.0]
+[[env.track.gates]]
+pos = [0.0, 0.0, 1.2]
+rpy = [0.0, 0.0, 0.0]
+[[env.track.gates]]
+pos = [0.0, 0.0, 0.7]
+rpy = [0.0, 0.0, 0.0]
+[[env.track.gates]]
+pos = [0.0, 0.0, 1.2]
+rpy = [0.0, 0.0, 0.0]
+
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+
+[[env.track.drones]]
+pos = [0.0, 0.0, 0.0]
+rpy = [0.0, 0.0, 0.0]
+vel = [0, 0, 0]
+ang_vel = [0, 0, 0]
+
+[env.track.safety_limits]
+pos_limit_low = [-2.5, -1.5, -1e-3]
+pos_limit_high = [2.5, 1.5, 2.0]
+
+[env.disturbances.action]
+fn = "normal"
+# Same DR action noise scale as level2_dr.toml.
+scale = 0.006
+
+[env.disturbances.dynamics]
+fn = "uniform"
+[env.disturbances.dynamics.kwargs]
+minval = [-0.1, -0.1, -0.1]
+maxval = [0.1, 0.1, 0.1]
+
+[env.randomizations.drone_pos]
+fn = "uniform"
+[env.randomizations.drone_pos.kwargs]
+minval = [-0.1, -0.1, 0.0]
+maxval = [0.1, 0.1, 0.02]
+
+[env.randomizations.drone_rpy]
+fn = "uniform"
+[env.randomizations.drone_rpy.kwargs]
+minval = [-0.1, -0.1, -0.1]
+maxval = [0.1, 0.1, 0.1]
+
+[env.randomizations.drone_mass]
+fn = "uniform"
+[env.randomizations.drone_mass.kwargs]
+minval = -0.005
+maxval = 0.005
+
+[env.randomizations.drone_inertia]
+fn = "uniform"
+[env.randomizations.drone_inertia.kwargs]
+# Same diagonal-only inertia perturbation as level2_dr.toml; off-diagonal stays zero.
+minval = [
+    [-0.0000056, 0.0, 0.0],
+    [0.0, -0.0000056, 0.0],
+    [0.0, 0.0, -0.00001],
+]
+maxval = [
+    [0.0000056, 0.0, 0.0],
+    [0.0, 0.0000056, 0.0],
+    [0.0, 0.0, 0.00001],
+]
+
+[env.randomizations.gate_pos]
+fn = "uniform"
+[env.randomizations.gate_pos.kwargs]
+minval = [-0.15, -0.15, -0.1]
+maxval = [0.15, 0.15, 0.1]
+
+[env.randomizations.gate_rpy]
+fn = "uniform"
+[env.randomizations.gate_rpy.kwargs]
+minval = [-0.05, -0.1, -0.2]
+maxval = [0.05, 0.1, 0.2]
+
+[env.randomizations.obstacle_pos]
+fn = "uniform"
+[env.randomizations.obstacle_pos.kwargs]
+minval = [-0.15, -0.15, -0.05]
+maxval = [0.15, 0.15, 0.05]
