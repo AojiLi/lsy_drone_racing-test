@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-MODEL_NAME = "checkpoints/level3_DR_initial/level3_DR_initial_step_085000000.ckpt"
+MODEL_NAME = "checkpoints/level3_DR_initial/level3_DR_initial_final.ckpt"
 
 
 N_HISTORY = 2
