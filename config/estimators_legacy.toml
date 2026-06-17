@@ -1,0 +1,22 @@
+# Legacy estimator settings for real deployment.
+# Pass this file to drone_estimators.ros_nodes.ros2_node with --settings.
+
+# python -m drone_estimators.ros_nodes.ros2_node \
+#   --settings config/estimators_legacy.toml \
+#   --drone_name cf52
+
+[global]
+frequency = 300
+timings = true
+save_data = false
+integrator = "euler"
+jit_compile = false
+
+[estimator1]
+estimator_type = "legacy"
+drone_name = "cf1"
+drone_config = "cf21B_500"
+dynamics_model = "so_rpy_rotor_drag"
+estimate_rotor_vel = false
+estimate_dist_f = false
+estimate_dist_t = false
