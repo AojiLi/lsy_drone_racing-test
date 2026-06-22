@@ -884,11 +884,50 @@ def build_track_randomization_fn(
     randomization_fns = ()
 
     if track.randomize:
+        raw_generator = track.get("generator", {})
+        if raw_generator is None:
+            raw_generator = {}
+        elif hasattr(raw_generator, "to_dict"):
+            raw_generator = raw_generator.to_dict()
+        else:
+            raw_generator = dict(raw_generator)
+
+        allowed_generator_keys = {
+            "border_margin",
+            "start_excl_r",
+            "gate_excl_r",
+            "obstacle_excl_r",
+            "gate_corridor_width",
+            "obstacle_corridor_width",
+            "first_obstacle_corridor_width",
+            "yaw_range",
+            "first_yaw_range",
+            "hard_case_probability",
+            "replay_seed_probability",
+            "replay_seeds",
+            "grid_h",
+            "grid_w",
+        }
+        unknown_generator_keys = sorted(set(raw_generator) - allowed_generator_keys)
+        if unknown_generator_keys:
+            raise ValueError(
+                "Invalid track.generator keys: "
+                f"{unknown_generator_keys}. Allowed: {sorted(allowed_generator_keys)}"
+            )
+        generator_kwargs = {}
+        for key, value in raw_generator.items():
+            if key in {"grid_h", "grid_w"}:
+                generator_kwargs[key] = int(value)
+            elif key == "replay_seeds":
+                generator_kwargs[key] = tuple(int(seed) for seed in value)
+            else:
+                generator_kwargs[key] = float(value)
         random_layout_fn = build_full_track_randomization_fn(
             [gate["pos"][2] for gate in track.gates],
             [obstacle["pos"][2] for obstacle in track.obstacles],
             track.safety_limits.pos_limit_low,
             track.safety_limits.pos_limit_high,
+            **generator_kwargs,
         )
         randomization_fns += (random_layout_fn,)
 

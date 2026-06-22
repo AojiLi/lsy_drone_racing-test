@@ -1,0 +1,143 @@
+# Level 3 Stage 2 diagnostic config: no train-only robustness wrappers.
+#
+# Purpose:
+# - isolate whether extra train-only robustness pressure is blocking gate
+#   acquisition before the policy has stable Level3 competence.
+# - keep the hard Level3 track randomization, env disturbances, gate/obstacle
+#   randomizations, action space, observation layout, reward numbers, PPO
+#   hyperparameters, and hard eval config unchanged.
+#
+# This file intentionally omits all [train.*] sections from level3_dr.toml:
+# - train.thrust
+# - train.action_latency
+# - train.command_response
+# - train.observation_latency
+# - train.observation_noise
+
+[controller]
+file = "ppo_level3_inference.py"
+
+[deploy]
+check_race_track = true
+check_drone_start_pos = true
+real_track_objects = true
+
+[[deploy.drones]]
+id = 10
+channel = 100
+drone_model = "cf21B_500"
+
+[sim]
+physics = "first_principles"
+drone_model = "cf21B_500"
+freq = 500
+attitude_freq = 500
+render = true
+camera = -1
+[[sim.cam_config]]
+distance = 5.0
+azimuth = 180.0
+elevation = -25.0
+lookat = [0.0, 0.0, 0.0]
+
+[env]
+id = "DroneRacing-v0"
+seed = -1
+freq = 50
+sensor_range = 0.7
+control_mode = "attitude"
+
+[env.track]
+randomize = true
+
+[[env.track.gates]]
+pos = [0.0, 0.0, 0.7]
+rpy = [0.0, 0.0, 0.0]
+[[env.track.gates]]
+pos = [0.0, 0.0, 1.2]
+rpy = [0.0, 0.0, 0.0]
+[[env.track.gates]]
+pos = [0.0, 0.0, 0.7]
+rpy = [0.0, 0.0, 0.0]
+[[env.track.gates]]
+pos = [0.0, 0.0, 1.2]
+rpy = [0.0, 0.0, 0.0]
+
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+[[env.track.obstacles]]
+pos = [0.0, 0.0, 1.55]
+
+[[env.track.drones]]
+pos = [0.0, 0.0, 0.0]
+rpy = [0.0, 0.0, 0.0]
+vel = [0, 0, 0]
+ang_vel = [0, 0, 0]
+
+[env.track.safety_limits]
+pos_limit_low = [-2.5, -1.5, -1e-3]
+pos_limit_high = [2.5, 1.5, 2.0]
+
+[env.disturbances.action]
+fn = "normal"
+scale = 0.006
+
+[env.disturbances.dynamics]
+fn = "uniform"
+[env.disturbances.dynamics.kwargs]
+minval = [-0.1, -0.1, -0.1]
+maxval = [0.1, 0.1, 0.1]
+
+[env.randomizations.drone_pos]
+fn = "uniform"
+[env.randomizations.drone_pos.kwargs]
+minval = [-0.1, -0.1, 0.0]
+maxval = [0.1, 0.1, 0.02]
+
+[env.randomizations.drone_rpy]
+fn = "uniform"
+[env.randomizations.drone_rpy.kwargs]
+minval = [-0.1, -0.1, -0.1]
+maxval = [0.1, 0.1, 0.1]
+
+[env.randomizations.drone_mass]
+fn = "uniform"
+[env.randomizations.drone_mass.kwargs]
+minval = -0.005
+maxval = 0.005
+
+[env.randomizations.drone_inertia]
+fn = "uniform"
+[env.randomizations.drone_inertia.kwargs]
+minval = [
+    [-0.0000056, 0.0, 0.0],
+    [0.0, -0.0000056, 0.0],
+    [0.0, 0.0, -0.00001],
+]
+maxval = [
+    [0.0000056, 0.0, 0.0],
+    [0.0, 0.0000056, 0.0],
+    [0.0, 0.0, 0.00001],
+]
+
+[env.randomizations.gate_pos]
+fn = "uniform"
+[env.randomizations.gate_pos.kwargs]
+minval = [-0.15, -0.15, -0.1]
+maxval = [0.15, 0.15, 0.1]
+
+[env.randomizations.gate_rpy]
+fn = "uniform"
+[env.randomizations.gate_rpy.kwargs]
+minval = [-0.05, -0.1, -0.2]
+maxval = [0.05, 0.1, 0.2]
+
+[env.randomizations.obstacle_pos]
+fn = "uniform"
+[env.randomizations.obstacle_pos.kwargs]
+minval = [-0.15, -0.15, -0.05]
+maxval = [0.15, 0.15, 0.05]

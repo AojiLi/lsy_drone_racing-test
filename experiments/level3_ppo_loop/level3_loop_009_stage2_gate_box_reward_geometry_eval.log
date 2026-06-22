@@ -1,0 +1,16 @@
+$ /home/aojili/lsy_drone_racing/.pixi/envs/gpu/bin/python /home/aojili/lsy_drone_racing/scripts/evaluate_level2_selected_ppo.py --config level3_dr.toml --seed-start 1 --num-seeds 20 --out-prefix /home/aojili/lsy_drone_racing/experiments/level3_ppo_loop/level3_loop_009_stage2_gate_box_reward_geometry_eval /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_010000000.ckpt /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_015000000.ckpt /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_020000000.ckpt /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_025000000.ckpt /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_final.ckpt
+
+W0618 15:13:33.322973 4124523 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+W0618 15:13:33.325691 4124446 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+/home/aojili/lsy_drone_racing/.pixi/envs/gpu/lib/python3.13/site-packages/jax/_src/abstract_arrays.py:135: RuntimeWarning: overflow encountered in cast
+  return literals.TypedNdArray(np.asarray(x, dtype), weak_type=False)
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_010000000.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0679 max_tilt=43.7deg max_cmd_tilt=85.4deg
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_015000000.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0764 max_tilt=41.5deg max_cmd_tilt=86.0deg
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_020000000.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0801 max_tilt=43.3deg max_cmd_tilt=85.9deg
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_step_025000000.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0727 max_tilt=45.5deg max_cmd_tilt=87.0deg
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_009_stage2_gate_box_reward_geometry/level3_loop_009_stage2_gate_box_reward_geometry_final.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0760 max_tilt=46.8deg max_cmd_tilt=86.4deg

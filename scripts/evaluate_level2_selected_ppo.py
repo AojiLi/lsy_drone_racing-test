@@ -1,4 +1,4 @@
-"""Evaluate selected level2 PPO checkpoints through the inference controller.
+"""Evaluate selected PPO checkpoints through an inference controller.
 
 This path supports both current and legacy observation-layout checkpoints because
 ``PPOLevel2Inference`` already contains the compatibility logic used for deployment.
@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +17,6 @@ import gymnasium
 import numpy as np
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 
-from lsy_drone_racing.control import ppo_level2_inference
-from lsy_drone_racing.control.ppo_level2_inference import N_HISTORY
 from lsy_drone_racing.utils import load_config
 
 ROOT = Path(__file__).parents[1]
@@ -31,16 +31,20 @@ def label_for_checkpoint(path: Path) -> str:
     """Make a compact label that remains unique across checkpoint families."""
     parent = path.parent.name.removeprefix("ppo_level2_")
     stem = path.stem
-    if "_step_" in stem:
-        step = int(stem.rsplit("_step_", 1)[1]) // 1_000_000
+    step_match = re.search(r"_step_(\d+)$", stem)
+    if step_match:
+        step = int(step_match.group(1)) // 1_000_000
         return f"{parent}:{step}M"
     return f"{parent}:final"
 
 
-def reset_controller_state(controller: Any, obs: dict[str, Any]) -> None:
+def reset_controller_state(controller: Any, obs: dict[str, Any], n_history: int) -> None:
     """Reset inference-only recurrent state between episodes."""
+    if hasattr(controller, "reset_episode_state"):
+        controller.reset_episode_state(obs)
+        return
     controller._history = np.repeat(  # noqa: SLF001
-        controller._basic_history(obs)[None, :], N_HISTORY, axis=0  # noqa: SLF001
+        controller._basic_history(obs)[None, :], n_history, axis=0  # noqa: SLF001
     )
     controller._last_action_norm = np.zeros(controller.action_dim, dtype=np.float32)  # noqa: SLF001
     controller._finished = False  # noqa: SLF001
@@ -55,12 +59,15 @@ def run_checkpoint(
     smooth_coef_rpy: float,
     smooth_coef_thrust: float,
     tilt_limit_deg: float,
+    inference_module_name: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run exact single-env episodes for one checkpoint."""
     config = load_config(ROOT / "config" / config_name)
     config.sim.render = False
-    control_dir = Path(ppo_level2_inference.__file__).parent
-    ppo_level2_inference.MODEL_NAME = str(checkpoint.resolve().relative_to(control_dir))
+    inference_module = importlib.import_module(f"lsy_drone_racing.control.{inference_module_name}")
+    control_dir = Path(inference_module.__file__).parent
+    inference_module.MODEL_NAME = str(checkpoint.resolve().relative_to(control_dir))
+    n_history = int(getattr(inference_module, "N_HISTORY", 2))
     env = gymnasium.make(
         config.env.id,
         freq=config.env.freq,
@@ -80,9 +87,9 @@ def run_checkpoint(
         for seed in range(seed_start, seed_start + num_seeds):
             obs, info = env.reset(seed=seed)
             if controller is None:
-                controller = ppo_level2_inference.PPOLevel2Inference(obs, info, config)
+                controller = inference_module.PPOLevel2Inference(obs, info, config)
             else:
-                reset_controller_state(controller, obs)
+                reset_controller_state(controller, obs, n_history)
 
             steps = 0
             previous_action_norm = np.zeros(controller.action_dim, dtype=np.float64)
@@ -128,6 +135,7 @@ def run_checkpoint(
                 {
                     "checkpoint": label,
                     "checkpoint_file": str(checkpoint.relative_to(ROOT)),
+                    "inference_module": inference_module_name,
                     "seed": seed,
                     "success": finished,
                     "crashed": crashed,
@@ -154,6 +162,7 @@ def run_checkpoint(
     summary = {
         "checkpoint": label,
         "checkpoint_file": str(checkpoint.relative_to(ROOT)),
+        "inference_module": inference_module_name,
         "episodes": len(rows),
         "success_rate": safe_mean([float(row["success"]) for row in rows]),
         "crash_rate": safe_mean([float(row["crashed"]) for row in rows]),
@@ -198,6 +207,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--smooth-coef-rpy", type=float, default=0.15)
     parser.add_argument("--smooth-coef-thrust", type=float, default=0.15)
     parser.add_argument("--tilt-limit-deg", type=float, default=30.0)
+    parser.add_argument(
+        "--inference-module",
+        choices=["ppo_level2_inference", "ppo_level3_inference"],
+        default="ppo_level2_inference",
+        help="Controller module to load and inject the checkpoint into.",
+    )
     parser.add_argument("checkpoints", nargs="+", type=Path)
     return parser.parse_args()
 
@@ -218,6 +233,7 @@ def main() -> None:
             smooth_coef_rpy=args.smooth_coef_rpy,
             smooth_coef_thrust=args.smooth_coef_thrust,
             tilt_limit_deg=args.tilt_limit_deg,
+            inference_module_name=args.inference_module,
         )
         all_rows.extend(rows)
         summaries.append(summary)

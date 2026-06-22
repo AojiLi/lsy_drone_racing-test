@@ -105,6 +105,18 @@ def checkpoint_label(path: Path) -> tuple[str, float | str]:
     return ("final", "final")
 
 
+def parse_steps_m(value: str | None) -> set[int] | None:
+    """Parse a comma-separated list of checkpoint steps in millions."""
+    if value is None:
+        return None
+    steps = set()
+    for raw_item in value.split(","):
+        item = raw_item.strip()
+        if item:
+            steps.add(int(item) * 1_000_000)
+    return steps
+
+
 def scalar(value: Any) -> float:
     """Convert a 1-env tensor/array/scalar to float."""
     if isinstance(value, torch.Tensor):
@@ -117,6 +129,13 @@ def array1(value: Any) -> np.ndarray:
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().numpy().reshape(-1)
     return np.asarray(value).reshape(-1)
+
+
+def base_env_from_wrappers(env: Any) -> Any:
+    """Return the raw vector race environment beneath all wrappers."""
+    while hasattr(env, "env"):
+        env = env.env
+    return env
 
 
 def bool_scalar(value: Any) -> bool:
@@ -494,6 +513,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Only evaluate step checkpoints with at least this many timesteps; final is kept.",
     )
+    parser.add_argument(
+        "--only-steps-m",
+        default=None,
+        help="Comma-separated checkpoint steps in millions to evaluate, e.g. 30,60,100.",
+    )
+    parser.add_argument(
+        "--include-final",
+        action="store_true",
+        help="Keep the final checkpoint when --only-steps-m is used.",
+    )
     parser.add_argument("--tilt-limit-deg", type=float, default=30.0)
     parser.add_argument("--safety-tol-m", type=float, default=1e-3)
     return parser.parse_args()
@@ -513,10 +542,18 @@ def main() -> None:
         torch_device=device,
         coefs=TRAINING_REWARD_COEFS,
     )
-    base_env = env.env.env.env.env
+    base_env = base_env_from_wrappers(env)
     base_env.settings = base_env.settings.replace(autoreset=False)
     base_env._step = base_env.build_step_fn()
     checkpoints = sorted(checkpoint_dir.glob("*.ckpt"), key=checkpoint_sort_key)
+    only_steps = parse_steps_m(args.only_steps_m)
+    if only_steps is not None:
+        checkpoints = [
+            checkpoint_path
+            for checkpoint_path in checkpoints
+            if checkpoint_step(checkpoint_path) in only_steps
+            or (args.include_final and checkpoint_step(checkpoint_path) is None)
+        ]
     if args.min_step is not None:
         checkpoints = [
             checkpoint_path

@@ -1,0 +1,15 @@
+$ /home/aojili/lsy_drone_racing/.pixi/envs/gpu/bin/python /home/aojili/lsy_drone_racing/lsy_drone_racing/control/train_CleanRL_ppo_level3.py --config=level3_dr.toml --wandb_enabled=True --wandb_project_name=ADR-PPO-Racing-Level3 --wandb_mode=online --train=True --eval=0 --total_timesteps=20000000 --num_envs=1024 --num_steps=32 --cuda=True --jax_device=gpu --model_name=checkpoints/level3_loop_003_gate_acquisition_safety/level3_loop_003_gate_acquisition_safety_final.ckpt --checkpoint_dir=/home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_003_gate_acquisition_safety --checkpoint_interval=5000000 --wandb_entity=aojili77-technical-university-of-munich --wandb_run_name=level3_loop_003_gate_acquisition_safety --wandb_run_id=level3_loop_003_gate_acquisition_safety --initial_model_name=/home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_final.ckpt --learning_rate=0.0003 --gamma=0.99 --gae_lambda=0.95 --update_epochs=5 --num_minibatches=8 --ent_coef=0.02 --target_kl=0.03 --hidden_dim=256 --n_obs=2 --progress_coef=0.0 --gate_stage_coef=14.0 --gate_axis_coef=28.0 --near_gate_coef=0.0 --gate_bonus=220.0 --gate_front_bonus=10.0 --gate_plane_bonus=0.0 --gate_back_bonus=45.0 --finish_bonus=190.0 --missed_gate_penalty=0.0 --wrong_side_penalty=8.0 --crash_penalty=55.0 --obstacle_coef=5.25 --obstacle_margin=0.2 --obstacle_clearance_coef=0.0 --timeout_penalty=80.0 --time_penalty=0.015 --act_coef=0.015 --d_act_th_coef=0.075 --d_act_xy_coef=0.08 --cmd_tilt_coef=0.9 --rpy_coef=0.75 --tilt_limit_deg=38.0 --tilt_excess_coef=14.0
+
+W0618 01:38:43.029955  404761 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+W0618 01:38:43.032559  404684 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/aojili/.netrc.
+wandb: Currently logged in as: aojili77 (aojili77-technical-university-of-munich) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run level3_loop_003_gate_acquisition_safety
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/aojili/lsy_drone_racing/wandb/run-20260618_013846-level3_loop_003_gate_acquisition_safety
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run level3_loop_003_gate_acquisition_safety
+wandb: ⭐️ View project at https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3
+wandb: 🚀 View run at https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/level3_loop_003_gate_acquisition_safety
+/home/aojili/lsy_drone_racing/.pixi/envs/gpu/lib/python3.13/site-packages/jax/_src/abstract_arrays.py:135: RuntimeWarning: overflow encountered in cast
+  return literals.TypedNdArray(np.asarray(x, dtype), weak_type=False)

@@ -1,0 +1,14 @@
+$ /home/aojili/lsy_drone_racing/.pixi/envs/gpu/bin/python /home/aojili/lsy_drone_racing/scripts/evaluate_level2_selected_ppo.py --config level3_dr.toml --seed-start 1 --num-seeds 20 --out-prefix /home/aojili/lsy_drone_racing/experiments/level3_ppo_loop/level3_loop_001_baseline_eval /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_step_005000000.ckpt /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_step_010000000.ckpt /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_step_015000000.ckpt /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_final.ckpt
+
+W0618 01:01:29.907130   40527 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+W0618 01:01:29.909750   40450 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+/home/aojili/lsy_drone_racing/.pixi/envs/gpu/lib/python3.13/site-packages/jax/_src/abstract_arrays.py:135: RuntimeWarning: overflow encountered in cast
+  return literals.TypedNdArray(np.asarray(x, dtype), weak_type=False)
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_step_005000000.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0321 max_tilt=40.0deg max_cmd_tilt=77.4deg
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_step_010000000.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0385 max_tilt=42.0deg max_cmd_tilt=78.2deg
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_step_015000000.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0429 max_tilt=42.6deg max_cmd_tilt=78.3deg
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_loop_001_baseline/level3_loop_001_baseline_final.ckpt
+  success=0.00% crash=100.00% time_success=nans smooth=0.0421 max_tilt=47.4deg max_cmd_tilt=80.2deg

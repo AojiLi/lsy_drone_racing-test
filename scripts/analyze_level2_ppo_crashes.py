@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib
 import json
 import os
 import time
@@ -45,6 +46,20 @@ GATE_BOXES = {
     "right": (np.array([0.0, 0.28, 0.0]), np.array([0.01, 0.08, 0.36])),
     "stand": (np.array([0.0, 0.0, -0.86]), np.array([0.05, 0.05, 0.5])),
 }
+
+
+def reset_controller_state(controller: Any, obs: dict[str, Any], n_history: int) -> None:
+    """Reset inference controller state consistently with the selected evaluator."""
+    if hasattr(controller, "reset_episode_state"):
+        controller.reset_episode_state(obs)
+        return
+    controller._history = np.repeat(  # noqa: SLF001
+        controller._basic_history(obs)[None, :],
+        n_history,
+        axis=0,
+    )
+    controller._last_action_norm = np.zeros(controller.action_dim, dtype=np.float32)  # noqa: SLF001
+    controller._finished = False  # noqa: SLF001
 
 
 def array1(value: Any) -> np.ndarray:
@@ -213,11 +228,17 @@ def run_batch(
 
 
 def run_single_seed_episodes(
-    config: Any, checkpoint: Path, seed_start: int, num_seeds: int
+    config: Any,
+    checkpoint: Path,
+    seed_start: int,
+    num_seeds: int,
+    inference_module_name: str,
 ) -> list[dict[str, Any]]:
-    """Run exact single-environment episodes through PPOLevel2Inference."""
-    control_dir = Path(ppo_level2_inference.__file__).parent
-    ppo_level2_inference.MODEL_NAME = str(checkpoint.relative_to(control_dir))
+    """Run exact single-environment episodes through an inference controller."""
+    inference_module = importlib.import_module(f"lsy_drone_racing.control.{inference_module_name}")
+    control_dir = Path(inference_module.__file__).parent
+    inference_module.MODEL_NAME = str(checkpoint.relative_to(control_dir))
+    n_history = int(getattr(inference_module, "N_HISTORY", N_HISTORY))
     config.sim.render = False
     env = gymnasium.make(
         config.env.id,
@@ -232,21 +253,15 @@ def run_single_seed_episodes(
     )
     env = JaxToNumpy(env)
     rows: list[dict[str, Any]] = []
-    controller: ppo_level2_inference.PPOLevel2Inference | None = None
+    controller: Any | None = None
 
     try:
         for seed in range(seed_start, seed_start + num_seeds):
             obs, info = env.reset(seed=seed)
             if controller is None:
-                controller = ppo_level2_inference.PPOLevel2Inference(obs, info, config)
+                controller = inference_module.PPOLevel2Inference(obs, info, config)
             else:
-                controller._history = np.repeat(  # noqa: SLF001
-                    controller._basic_history(obs)[None, :],
-                    N_HISTORY,
-                    axis=0,  # noqa: SLF001
-                )
-                controller._last_action_norm = np.zeros(controller.action_dim, dtype=np.float32)  # noqa: SLF001
-                controller._finished = False  # noqa: SLF001
+                reset_controller_state(controller, obs, n_history)
 
             base_env = env.unwrapped
             gates_pos = np.asarray(base_env.data.gates_pos[0], dtype=np.float64).copy()
@@ -455,6 +470,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-seeds", type=int, default=100)
     parser.add_argument("--seed-start", type=int, default=1)
     parser.add_argument("--out-prefix", type=Path, default=DEFAULT_OUT_PREFIX)
+    parser.add_argument(
+        "--inference-module",
+        choices=["ppo_level2_inference", "ppo_level3_inference"],
+        default="ppo_level2_inference",
+        help="Controller module to use in --mode single.",
+    )
     return parser.parse_args()
 
 
@@ -467,7 +488,13 @@ def main() -> None:
     start = time.time()
 
     if args.mode == "single":
-        rows = run_single_seed_episodes(config, checkpoint, args.seed_start, args.num_seeds)
+        rows = run_single_seed_episodes(
+            config,
+            checkpoint,
+            args.seed_start,
+            args.num_seeds,
+            args.inference_module,
+        )
         num_worlds = 1
     else:
         device = torch.device("cpu")

@@ -10,7 +10,7 @@
 # - wider diagonal inertia randomization
 
 [controller]
-file = "ppo_level2_inference.py"
+file = "ppo_level3_inference.py"
 
 [deploy]
 check_race_track = true

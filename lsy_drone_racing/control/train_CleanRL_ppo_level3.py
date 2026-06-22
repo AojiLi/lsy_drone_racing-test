@@ -14,22 +14,79 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import wandb
 from gymnasium import spaces
 from gymnasium.vector import VectorEnv, VectorObservationWrapper, VectorRewardWrapper, VectorWrapper
 from gymnasium.vector.utils import batch_space
 from gymnasium.wrappers.vector.jax_to_torch import JaxToTorch
 from jax import Array
+from ml_collections import ConfigDict
 from torch import Tensor
 from torch.distributions.normal import Normal
 
-import wandb
-from lsy_drone_racing.control.ppo_level2_observation import (
-    OBSERVATION_LAYOUT,
+from lsy_drone_racing.control.ppo_level3_observation import (
+    LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+    LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS,
+    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+    LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS,
+    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUT,
+    LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+    LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUTS,
+    LOCAL_NEXT_GATE_OBSERVATION_LAYOUT,
+    LOCAL_NEXT_GATE_OBSERVATION_LAYOUTS,
+    LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+    LOCAL_OBSTACLE_OBSERVATION_LAYOUTS,
+    LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUT,
+    LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
+    POLICY_ARCH_MLP,
+    POLICY_ARCH_RECURRENT_ACTOR_GRU256,
+    SUPPORTED_OBSERVATION_LAYOUTS,
+    WORLD_HISTORY_OBSERVATION_LAYOUT,
+    checkpoint_action_lowpass_alpha,
+    checkpoint_action_rp_limit_deg,
     checkpoint_hidden_dim,
+    checkpoint_policy_arch,
+    checkpoint_recurrent_hidden_dim,
     make_checkpoint,
+    normalize_action_lowpass_alpha,
+    normalize_action_rp_limit_deg,
+    normalize_policy_arch,
     unpack_checkpoint,
 )
 from lsy_drone_racing.utils import load_config
+
+
+TRACK_GENERATOR_PROFILES: dict[str, dict[str, Any]] = {
+    "default": {},
+    "first_gate_hard_corridor": {
+        "first_obstacle_corridor_width": 0.22,
+        "obstacle_corridor_width": 0.35,
+        "first_yaw_range": 1.05,
+        "yaw_range": 0.85,
+    },
+    "trace_mixed_corridor": {
+        "first_obstacle_corridor_width": 0.22,
+        "obstacle_corridor_width": 0.4,
+        "first_yaw_range": 1.05,
+        "yaw_range": 0.75,
+        "hard_case_probability": 0.4,
+    },
+    "trace_seed_replay_default_retention": {
+        "replay_seed_probability": 0.25,
+        "replay_seeds": [2, 3, 5, 7, 9, 14, 15, 17, 18, 20],
+        "hard_case_probability": 0.0,
+    },
+    "trace_seed_replay_lowprob_success_retention": {
+        "replay_seed_probability": 0.12,
+        "replay_seeds": [1, 4, 9, 11, 12, 16, 17, 18, 20],
+        "hard_case_probability": 0.0,
+    },
+    "loop078_v23_success_replay_lowprob": {
+        "replay_seed_probability": 0.12,
+        "replay_seeds": [4, 5, 9, 12, 18, 19],
+        "hard_case_probability": 0.0,
+    },
+}
 
 
 # region Arguments
@@ -47,10 +104,16 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     jax_device: str = "gpu"
     """environment device"""
-    wandb_project_name: str = "ADR-PPO-Racing"
+    wandb_project_name: str = "ADR-PPO-Racing-Level3"
     """the wandb's project name"""
     wandb_entity: str = None
     """the entity (team) of wandb's project"""
+    wandb_run_name: str | None = None
+    """the W&B run display name"""
+    wandb_run_id: str | None = None
+    """stable W&B run id, used so the loop can resume and append eval metrics"""
+    wandb_mode: str = "online"
+    """W&B mode: online, offline, or disabled"""
 
     # Algorithm specific arguments
     total_timesteps: int = 2_000_000
@@ -87,6 +150,24 @@ class Args:
     """the target KL divergence threshold"""
     hidden_dim: int = 128
     """shared width of the two actor and critic hidden layers"""
+    policy_arch: str = POLICY_ARCH_MLP
+    """policy architecture stored in checkpoints"""
+    recurrent_hidden_dim: int = 256
+    """GRU hidden width for recurrent actor policies"""
+    recurrent_sequence_len: int = 32
+    """sequence length used for recurrent PPO updates"""
+    allow_hidden_dim_warmstart: bool = False
+    """allow explicit block-copy warm-start from a narrower 2-layer MLP checkpoint"""
+    observation_layout: str = WORLD_HISTORY_OBSERVATION_LAYOUT
+    """flat observation layout stored in checkpoints"""
+    action_rp_limit_deg: float = 90.0
+    """roll/pitch command envelope in degrees, stored in checkpoints"""
+    action_lowpass_alpha: float = 1.0
+    """normalized-action low-pass factor, stored in checkpoints"""
+    reward_structure: str = "legacy_staged"
+    """reward structure used by the training wrapper"""
+    track_generator_profile: str = "default"
+    """training-only random-track generator profile"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -118,6 +199,7 @@ class Args:
     gate_bonus: float = 30.0
     finish_bonus: float = 80.0
     missed_gate_penalty: float = 8.0
+    gate_frame_pressure_coef: float = 0.0
     crash_penalty: float = 50.0
     obstacle_coef: float = 1.5
     obstacle_margin: float = 0.35
@@ -132,6 +214,21 @@ class Args:
     def create(**kwargs: Any) -> "Args":
         """Create arguments class."""
         args = Args(**kwargs)
+        args.policy_arch = normalize_policy_arch(args.policy_arch)
+        if args.track_generator_profile not in TRACK_GENERATOR_PROFILES:
+            choices = ", ".join(sorted(TRACK_GENERATOR_PROFILES))
+            raise ValueError(
+                f"Unsupported track_generator_profile={args.track_generator_profile!r}. "
+                f"Choices: {choices}."
+            )
+        if (
+            args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
+            and args.recurrent_sequence_len != args.num_steps
+        ):
+            raise ValueError(
+                "recurrent_sequence_len must equal num_steps for the first "
+                "Level3 recurrent PPO implementation."
+            )
         args.batch_size = int(args.num_envs * args.num_steps)
         args.minibatch_size = int(args.batch_size // args.num_minibatches)
         args.num_iterations = args.total_timesteps // args.batch_size
@@ -142,11 +239,21 @@ class Args:
 class NormalizeVectorActions(VectorWrapper):
     """Normalize vector env actions to [-1, 1] and scale them to the sim action space."""
 
-    def __init__(self, env: VectorEnv):
+    def __init__(self, env: VectorEnv, action_rp_limit_deg: float = 90.0):
         """Initialize action scaling from the wrapped action space."""
         super().__init__(env)
         self.action_sim_low = np.asarray(env.single_action_space.low, dtype=np.float32)
         self.action_sim_high = np.asarray(env.single_action_space.high, dtype=np.float32)
+        self.action_rp_limit_deg = normalize_action_rp_limit_deg(action_rp_limit_deg)
+        if self.action_sim_low.shape[0] < 2:
+            raise ValueError("roll/pitch action envelope expects at least two action dimensions.")
+        rp_limit_rad = np.deg2rad(self.action_rp_limit_deg)
+        self.action_sim_low[:2] = np.maximum(self.action_sim_low[:2], -rp_limit_rad)
+        self.action_sim_high[:2] = np.minimum(self.action_sim_high[:2], rp_limit_rad)
+        if np.any(self.action_sim_low[:2] >= self.action_sim_high[:2]):
+            raise ValueError(
+                f"Invalid roll/pitch action envelope: {self.action_rp_limit_deg} deg."
+            )
         self._scale = jp.asarray((self.action_sim_high - self.action_sim_low) / 2.0)
         self._mean = jp.asarray((self.action_sim_high + self.action_sim_low) / 2.0)
         self.single_action_space = spaces.Box(
@@ -453,15 +560,27 @@ class Level2RaceReward(VectorRewardWrapper):
         gate_stage_radius: float = 0.24,
         wrong_side_penalty: float = 6.0,
         missed_gate_penalty: float = 8.0,
+        gate_frame_pressure_coef: float = 0.0,
         obstacle_coef: float = 1.5,
         obstacle_margin: float = 0.35,
         obstacle_clearance_coef: float = 0.0,
         timeout_penalty: float = 0.0,
         time_penalty: float = 0.05,
+        reward_structure: str = "legacy_staged",
+        shaping_gamma: float = 0.99,
         debug_every: int = 0,
     ):
         """Initialize reward shaping."""
         super().__init__(env)
+        if reward_structure not in {
+            "legacy_staged",
+            "gate_potential",
+            "legacy_frame_clearance",
+            "decoupled_frame_clearance",
+            "direct_aperture",
+            "soft_centerline_followthrough",
+        }:
+            raise ValueError(f"Unsupported reward_structure={reward_structure!r}.")
         self.progress_coef = progress_coef
         self.near_gate_coef = near_gate_coef
         self.gate_bonus = gate_bonus
@@ -483,11 +602,14 @@ class Level2RaceReward(VectorRewardWrapper):
         self.gate_stage_radius = gate_stage_radius
         self.wrong_side_penalty = wrong_side_penalty
         self.missed_gate_penalty = missed_gate_penalty
+        self.gate_frame_pressure_coef = gate_frame_pressure_coef
         self.obstacle_coef = obstacle_coef
         self.obstacle_margin = obstacle_margin
         self.obstacle_clearance_coef = obstacle_clearance_coef
         self.timeout_penalty = timeout_penalty
         self.time_penalty = time_penalty
+        self.reward_structure = reward_structure
+        self.shaping_gamma = shaping_gamma
         self.debug_every = debug_every
         action_sim_low = np.asarray(getattr(env, "action_sim_low"), dtype=np.float32)
         action_sim_high = np.asarray(getattr(env, "action_sim_high"), dtype=np.float32)
@@ -619,6 +741,23 @@ class Level2RaceReward(VectorRewardWrapper):
             jp.clip(self._prev_stage_dist - stage_dist, -0.2, 0.2),
             0.0,
         )
+        stage_x = self._gate_stage_x(self._gate_stage, gate_x)
+        prev_axis_error = jp.abs(self._prev_gate_local[:, 0] - stage_x)
+        next_axis_error = jp.abs(gate_x - stage_x)
+        prev_centerline_dist = jp.linalg.norm(self._prev_gate_local[:, 1:3], axis=-1)
+        prev_potential = -(
+            self.gate_stage_coef * prev_axis_error
+            + self.gate_axis_coef * prev_centerline_dist
+        )
+        next_potential = -(
+            self.gate_stage_coef * next_axis_error
+            + self.gate_axis_coef * centerline_dist
+        )
+        gate_potential = jp.where(
+            same_gate & ~finished,
+            self.shaping_gamma * next_potential - prev_potential,
+            0.0,
+        )
         front_hit = (
             same_gate
             & (self._gate_stage == 0)
@@ -684,30 +823,134 @@ class Level2RaceReward(VectorRewardWrapper):
         obstacle_clearance_progress = jp.where(
             clearance_active, obstacle_clearance_progress, 0.0
         )
+        gate_plane_center_hit = (
+            crossed_gate_plane
+            & (gate_plane_dist < self.gate_stage_radius)
+            & same_gate
+            & ~finished
+        )
+        near_plane_weight = jp.clip(1.0 - jp.abs(gate_x) / 0.8, 0.0, 1.0)
+        frame_excess = jp.maximum(0.0, centerline_dist - self.gate_stage_radius)
+        gate_frame_pressure = jp.where(
+            same_gate & ~finished,
+            near_plane_weight * (frame_excess / jp.maximum(self.gate_stage_radius, 1e-3)) ** 2,
+            0.0,
+        )
 
-        components = {
-            "progress": self.progress_coef * progress,
-            "gate_axis_progress": self.gate_axis_coef * gate_axis_progress,
-            "gate_stage_progress": self.gate_stage_coef * gate_stage_progress,
-            "gate_front": self.gate_front_bonus * front_hit.astype(jp.float32),
-            "gate_plane": self.gate_plane_bonus * passed_gate.astype(jp.float32),
-            "gate_back": self.gate_back_bonus * back_hit.astype(jp.float32),
-            "near_gate": self.near_gate_coef * near_gate,
-            "gate_bonus": self.gate_bonus * passed_gate.astype(jp.float32),
-            "finish_bonus": self.finish_bonus * finished.astype(jp.float32),
-            "missed_gate": -self.missed_gate_penalty * missed_gate.astype(jp.float32),
-            "wrong_side": -self.wrong_side_penalty * wrong_side_gate.astype(jp.float32),
-            "crash": -self.crash_penalty * crashed.astype(jp.float32),
-            "action": -self.act_coef * act_penalty,
-            "cmd_tilt": -self.cmd_tilt_coef * cmd_tilt_penalty,
-            "smooth": -smooth_penalty,
-            "tilt": -self.rpy_coef * tilt,
-            "tilt_excess": -self.tilt_excess_coef * tilt_excess,
-            "obstacle": -self.obstacle_coef * obstacle_penalty,
-            "obstacle_clearance": self.obstacle_clearance_coef * obstacle_clearance_progress,
-            "timeout": -self.timeout_penalty * timed_out.astype(jp.float32),
-            "time": -self.time_penalty * jp.ones_like(gate_dist),
-        }
+        if self.reward_structure == "gate_potential":
+            components = {
+                "progress": jp.zeros_like(gate_dist),
+                "gate_axis_progress": jp.zeros_like(gate_dist),
+                "gate_stage_progress": gate_potential,
+                "gate_front": jp.zeros_like(gate_dist),
+                "gate_plane": jp.zeros_like(gate_dist),
+                "gate_back": jp.zeros_like(gate_dist),
+                "near_gate": jp.zeros_like(gate_dist),
+                "gate_bonus": self.gate_bonus * passed_gate.astype(jp.float32),
+                "finish_bonus": self.finish_bonus * finished.astype(jp.float32),
+                "missed_gate": -self.missed_gate_penalty * missed_gate.astype(jp.float32),
+                "gate_frame_pressure": jp.zeros_like(gate_dist),
+                "wrong_side": -self.wrong_side_penalty * wrong_side_gate.astype(jp.float32),
+                "crash": -self.crash_penalty * crashed.astype(jp.float32),
+                "action": -self.act_coef * act_penalty,
+                "cmd_tilt": -self.cmd_tilt_coef * cmd_tilt_penalty,
+                "smooth": -smooth_penalty,
+                "tilt": -self.rpy_coef * tilt,
+                "tilt_excess": -self.tilt_excess_coef * tilt_excess,
+                "obstacle": -self.obstacle_coef * obstacle_penalty,
+                "obstacle_clearance": self.obstacle_clearance_coef
+                * obstacle_clearance_progress,
+                "timeout": -self.timeout_penalty * timed_out.astype(jp.float32),
+                "time": -self.time_penalty * jp.ones_like(gate_dist),
+            }
+        else:
+            components = {
+                "progress": self.progress_coef * progress,
+                "gate_axis_progress": self.gate_axis_coef * gate_axis_progress,
+                "gate_stage_progress": self.gate_stage_coef * gate_stage_progress,
+                "gate_front": self.gate_front_bonus * front_hit.astype(jp.float32),
+                "gate_plane": self.gate_plane_bonus * passed_gate.astype(jp.float32),
+                "gate_back": self.gate_back_bonus * back_hit.astype(jp.float32),
+                "near_gate": self.near_gate_coef * near_gate,
+                "gate_bonus": self.gate_bonus * passed_gate.astype(jp.float32),
+                "finish_bonus": self.finish_bonus * finished.astype(jp.float32),
+                "missed_gate": -self.missed_gate_penalty * missed_gate.astype(jp.float32),
+                "gate_frame_pressure": jp.zeros_like(gate_dist),
+                "wrong_side": -self.wrong_side_penalty * wrong_side_gate.astype(jp.float32),
+                "crash": -self.crash_penalty * crashed.astype(jp.float32),
+                "action": -self.act_coef * act_penalty,
+                "cmd_tilt": -self.cmd_tilt_coef * cmd_tilt_penalty,
+                "smooth": -smooth_penalty,
+                "tilt": -self.rpy_coef * tilt,
+                "tilt_excess": -self.tilt_excess_coef * tilt_excess,
+                "obstacle": -self.obstacle_coef * obstacle_penalty,
+                "obstacle_clearance": self.obstacle_clearance_coef
+                * obstacle_clearance_progress,
+                "timeout": -self.timeout_penalty * timed_out.astype(jp.float32),
+                "time": -self.time_penalty * jp.ones_like(gate_dist),
+            }
+            if self.reward_structure == "legacy_frame_clearance":
+                components["gate_plane"] = (
+                    self.gate_plane_bonus * gate_plane_center_hit.astype(jp.float32)
+                )
+                components["missed_gate"] = -self.missed_gate_penalty * (
+                    missed_gate.astype(jp.float32) + gate_frame_pressure
+                )
+            elif self.reward_structure == "decoupled_frame_clearance":
+                components["gate_plane"] = (
+                    self.gate_plane_bonus * gate_plane_center_hit.astype(jp.float32)
+                )
+                components["missed_gate"] = -self.missed_gate_penalty * missed_gate.astype(
+                    jp.float32
+                )
+                components["gate_frame_pressure"] = (
+                    -self.gate_frame_pressure_coef * gate_frame_pressure
+                )
+            elif self.reward_structure == "direct_aperture":
+                components["gate_axis_progress"] = (
+                    self.gate_axis_coef * raw_axis_progress * centerline_weight
+                )
+                components["gate_stage_progress"] = (
+                    self.gate_stage_coef
+                    * gate_stage_progress
+                    * jp.where(centerline_dist < 2.0 * self.gate_stage_radius, 1.0, 0.25)
+                )
+                components["gate_front"] = (
+                    self.gate_front_bonus * gate_plane_center_hit.astype(jp.float32)
+                )
+                components["gate_plane"] = (
+                    self.gate_plane_bonus * gate_pass_hit.astype(jp.float32)
+                )
+                components["gate_bonus"] = (
+                    self.gate_bonus * gate_pass_hit.astype(jp.float32)
+                )
+                components["missed_gate"] = -self.missed_gate_penalty * missed_gate.astype(
+                    jp.float32
+                )
+                components["gate_frame_pressure"] = (
+                    -self.gate_frame_pressure_coef * gate_frame_pressure
+                )
+            elif self.reward_structure == "soft_centerline_followthrough":
+                soft_centerline_weight = 0.35 + 0.65 * centerline_weight
+                soft_axis_progress = jp.where(
+                    same_gate & ~finished,
+                    raw_axis_progress * soft_centerline_weight,
+                    0.0,
+                )
+                components["gate_axis_progress"] = self.gate_axis_coef * soft_axis_progress
+                components["gate_front"] = self.gate_front_bonus * (
+                    front_hit.astype(jp.float32)
+                    + 0.5 * gate_plane_center_hit.astype(jp.float32)
+                )
+                components["gate_plane"] = (
+                    self.gate_plane_bonus * gate_plane_center_hit.astype(jp.float32)
+                )
+                components["missed_gate"] = -self.missed_gate_penalty * missed_gate.astype(
+                    jp.float32
+                )
+                components["gate_frame_pressure"] = (
+                    -self.gate_frame_pressure_coef * gate_frame_pressure
+                )
         reward = sum(components.values())
         metrics = {
             "gate_distance": gate_dist,
@@ -720,7 +963,9 @@ class Level2RaceReward(VectorRewardWrapper):
             "gate_centerline_dist": centerline_dist,
             "gate_plane_dist": gate_plane_dist,
             "gate_plane_cross_rate": crossed_gate_plane.astype(jp.float32),
+            "gate_plane_center_hit_rate": gate_plane_center_hit.astype(jp.float32),
             "missed_gate_rate": missed_gate.astype(jp.float32),
+            "gate_frame_pressure": gate_frame_pressure,
             "gate_stage": self._gate_stage.astype(jp.float32),
             "gate_front_hit_rate": front_hit.astype(jp.float32),
             "gate_pass_hit_rate": gate_pass_hit.astype(jp.float32),
@@ -770,13 +1015,18 @@ class Level2RaceReward(VectorRewardWrapper):
     ) -> Array:
         gate_local = self._gate_frame_pos_for_gate(observations, target_gate)
         zero = jp.zeros_like(gate_local[:, 0])
-        stage_x = jp.where(
-            stage == 0,
-            -self.gate_stage_offset,
-            jp.where(stage == 1, 0.0, self.gate_stage_offset),
-        )
+        stage_x = self._gate_stage_x(stage, gate_local[:, 0])
         stage_target = jp.stack([stage_x, zero, zero], axis=-1)
         return jp.linalg.norm(gate_local - stage_target, axis=-1)
+
+    def _gate_stage_x(self, stage: Array, reference: Array) -> Array:
+        """Return the current gate-coordinate x target for a stage."""
+        zero = jp.zeros_like(reference)
+        return jp.where(
+            stage == 0,
+            -self.gate_stage_offset,
+            jp.where(stage == 1, zero, self.gate_stage_offset),
+        )
 
     @staticmethod
     def _tilt(quat: Array) -> Array:
@@ -1011,7 +1261,7 @@ class ObservationLatencyNoise(VectorObservationWrapper):
 
 
 class RaceObservation(VectorObservationWrapper):
-    """Flatten level2 race observations into a PPO-friendly vector."""
+    """Flatten level3 race observations into PPO-friendly vectors."""
 
     GATE_CORNERS_LOCAL = jp.array(
         [
@@ -1022,18 +1272,48 @@ class RaceObservation(VectorObservationWrapper):
         ],
         dtype=jp.float32,
     )
-    HISTORY_DIM = 13
+    WORLD_HISTORY_DIM = 13
+    LOCAL_HISTORY_DIM = 7
+    N_LOCAL_OBSTACLES = 2
+    GATE_APERTURE_HALF_WIDTH = 0.2
 
-    def __init__(self, env: VectorEnv, n_history: int = 2, debug_obs: bool = False):
+    def __init__(
+        self,
+        env: VectorEnv,
+        n_history: int = 2,
+        debug_obs: bool = False,
+        observation_layout: str = WORLD_HISTORY_OBSERVATION_LAYOUT,
+        action_lowpass_alpha: float = 1.0,
+    ):
         """Initialize observation vector layout."""
         super().__init__(env)
+        if observation_layout not in SUPPORTED_OBSERVATION_LAYOUTS:
+            raise ValueError(f"Unsupported Level3 observation layout: {observation_layout}.")
         self.n_history = n_history
         self.debug_obs = debug_obs
+        self.observation_layout = observation_layout
+        self.action_lowpass_alpha = normalize_action_lowpass_alpha(action_lowpass_alpha)
         self._printed_obs_debug = False
         raw_space = env.single_observation_space
         self.n_gates = raw_space["gates_pos"].shape[0]
         self.n_obstacles = raw_space["obstacles_pos"].shape[0]
         self.action_dim = env.single_action_space.shape[0]
+        self.n_local_obstacles = min(self.N_LOCAL_OBSTACLES, self.n_obstacles)
+        self._use_local_obstacles = observation_layout in LOCAL_OBSTACLE_OBSERVATION_LAYOUTS
+        self._use_local_next_gate = observation_layout in LOCAL_NEXT_GATE_OBSERVATION_LAYOUTS
+        self._use_local_phase_progress = (
+            observation_layout in LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS
+        )
+        self._use_local_gate_corridor_obstacles = (
+            observation_layout in LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUTS
+        )
+        self._use_local_gate_aperture_margin = (
+            observation_layout in LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS
+        )
+        self._use_local_gate_aperture_margin_minimal = (
+            observation_layout in LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS
+        )
+        self.history_dim = self.LOCAL_HISTORY_DIM if self._use_local_obstacles else self.WORLD_HISTORY_DIM
         self.layout = self._build_layout()
         self.obs_dim = self.layout[-1][1].stop
         self.single_observation_space = spaces.Box(
@@ -1041,7 +1321,7 @@ class RaceObservation(VectorObservationWrapper):
         )
         self.observation_space = batch_space(self.single_observation_space, self.num_envs)
         self._history = jp.zeros(
-            (self.num_envs, self.n_history, self.HISTORY_DIM), dtype=jp.float32
+            (self.num_envs, self.n_history, self.history_dim), dtype=jp.float32
         )
         self._last_action = jp.zeros((self.num_envs, self.action_dim), dtype=jp.float32)
 
@@ -1055,9 +1335,17 @@ class RaceObservation(VectorObservationWrapper):
 
     def step(self, actions: Array) -> tuple[Array, Array, Array, Array, dict]:
         """Update the last action before returning the next observation vector."""
-        observations, rewards, terminations, truncations, infos = self.env.step(actions)
-        self._last_action = jp.asarray(actions)
+        filtered_actions = self._filter_actions(actions, self._last_action, self.action_lowpass_alpha)
+        observations, rewards, terminations, truncations, infos = self.env.step(filtered_actions)
+        self._last_action = filtered_actions
         return self.observations(observations), rewards, terminations, truncations, infos
+
+    @staticmethod
+    @jax.jit
+    def _filter_actions(actions: Array, last_action: Array, alpha: float) -> Array:
+        actions = jp.clip(jp.asarray(actions), -1.0, 1.0)
+        filtered = last_action + alpha * (actions - last_action)
+        return jp.clip(filtered, -1.0, 1.0)
 
     def observations(self, observations: dict) -> Array:
         """Convert raw dict observations to a flat vector."""
@@ -1081,6 +1369,27 @@ class RaceObservation(VectorObservationWrapper):
         add("vel_body", 3)
         add("ang_vel", 3)
         add("rotmat", 9)
+        if self._use_local_obstacles:
+            add("gate_current_corners_body", 12)
+            add("gate_current_known", 1)
+            if self._use_local_next_gate:
+                add("gate_next_corners_body", 12)
+                add("gate_next_known", 1)
+            else:
+                add("nearest_other_gate_corners_body", 12)
+                add("nearest_other_gate_known", 1)
+            add("nearest_obstacles_heading_xy", 4 * self.n_local_obstacles)
+            add("last_action", self.action_dim)
+            add("history", self.n_history * self.history_dim)
+            if self._use_local_phase_progress:
+                add("phase_progress", 4)
+            if self._use_local_gate_corridor_obstacles:
+                add("gate_corridor_obstacles", 5 * self.n_local_obstacles)
+            if self._use_local_gate_aperture_margin:
+                add("gate_aperture_margin", 9)
+            if self._use_local_gate_aperture_margin_minimal:
+                add("gate_aperture_margins_only", 5)
+            return layout
         add("target_progress", 1)
         add("gate_prev_corners_body", 12)
         add("gate_current_corners_body", 12)
@@ -1088,7 +1397,7 @@ class RaceObservation(VectorObservationWrapper):
         add("obstacles_heading_xy", 4 * self.n_obstacles)
         add("gates_visited", self.n_gates)
         add("last_action", self.action_dim)
-        add("history", self.n_history * self.HISTORY_DIM)
+        add("history", self.n_history * self.history_dim)
         return layout
 
     def _flatten_observations(
@@ -1101,6 +1410,7 @@ class RaceObservation(VectorObservationWrapper):
         rot = self.quat_to_rotmat(quat)
         rot_t = jp.swapaxes(rot, -1, -2)
         vel_body = jp.einsum("nij,nj->ni", rot_t, vel)
+        obstacles_heading_xy = self._obstacle_heading_xy(observations, pos, rot)
         active_target_gate = jp.where(
             observations["target_gate"] < 0,
             self.n_gates - 1,
@@ -1118,11 +1428,63 @@ class RaceObservation(VectorObservationWrapper):
         )
         next_gate = jp.minimum(jp.maximum(observations["target_gate"], 0) + 1, self.n_gates - 1)
         gate_next = self._gate_corners_body(observations, next_gate, pos, rot_t)
-        obstacles_heading_xy = self._obstacle_heading_xy(observations, pos, rot)
         target_progress = (
             jp.where(observations["target_gate"] < 0, self.n_gates, observations["target_gate"])
             / self.n_gates
         )[:, None]
+        if self._use_local_obstacles:
+            if self._use_local_next_gate:
+                other_gate = next_gate
+            else:
+                other_gate = self._nearest_other_gate_idx(observations, pos, active_target_gate)
+            parts = [
+                pos[:, 2:3],
+                vel_body,
+                ang_vel,
+                rot.reshape(pos.shape[0], -1),
+                gate_current,
+                self._gate_known_flag(observations, active_target_gate),
+                self._gate_corners_body(observations, other_gate, pos, rot_t),
+                self._gate_known_flag(observations, other_gate),
+                self._nearest_obstacles_heading_xy(observations, pos, rot),
+                last_action,
+                history.reshape(pos.shape[0], -1),
+            ]
+            if self._use_local_phase_progress:
+                parts.append(
+                    jp.concatenate(
+                        [
+                            target_progress.astype(jp.float32),
+                            self._gate_frame_pos_for_gate(observations, active_target_gate),
+                        ],
+                        axis=-1,
+                    )
+                )
+            if self._use_local_gate_corridor_obstacles:
+                parts.append(
+                    self._nearest_obstacles_gate_corridor(
+                        observations,
+                        pos,
+                        active_target_gate,
+                    )
+                )
+            if self._use_local_gate_aperture_margin:
+                parts.append(
+                    self._gate_aperture_margin(
+                        observations,
+                        active_target_gate,
+                        target_progress.astype(jp.float32),
+                    )
+                )
+            if self._use_local_gate_aperture_margin_minimal:
+                parts.append(
+                    self._gate_aperture_margins_only(
+                        observations,
+                        active_target_gate,
+                    )
+                )
+            return jp.concatenate(parts, axis=-1)
+
         parts = [
             pos[:, 2:3],
             vel_body,
@@ -1153,6 +1515,95 @@ class RaceObservation(VectorObservationWrapper):
         features = jp.stack([relative_forward, relative_left, distance_xy, detected], axis=-1)
         return features.reshape(pos.shape[0], -1)
 
+    def _nearest_obstacles_heading_xy(
+        self, observations: dict[str, Array], pos: Array, rot: Array
+    ) -> Array:
+        """Return nearest obstacle [forward, left, XY distance, detected] features."""
+        relative_xy = observations["obstacles_pos"][..., :2] - pos[:, None, :2]
+        heading_forward = rot[:, :2, 0]
+        heading_forward /= jp.maximum(jp.linalg.norm(heading_forward, axis=-1, keepdims=True), 1e-6)
+        heading_left = jp.stack([-heading_forward[:, 1], heading_forward[:, 0]], axis=-1)
+        relative_forward = jp.einsum("nki,ni->nk", relative_xy, heading_forward)
+        relative_left = jp.einsum("nki,ni->nk", relative_xy, heading_left)
+        distance_xy = jp.linalg.norm(relative_xy, axis=-1)
+        detected = observations["obstacles_visited"].astype(jp.float32)
+        features = jp.stack([relative_forward, relative_left, distance_xy, detected], axis=-1)
+        order = jp.argsort(distance_xy, axis=-1)[:, : self.n_local_obstacles]
+        batch_idx = jp.arange(pos.shape[0])[:, None]
+        return features[batch_idx, order].reshape(pos.shape[0], -1)
+
+    def _nearest_obstacles_gate_corridor(
+        self,
+        observations: dict[str, Array],
+        pos: Array,
+        active_target_gate: Array,
+    ) -> Array:
+        """Return nearest obstacle geometry in the current gate frame."""
+        relative_xy = observations["obstacles_pos"][..., :2] - pos[:, None, :2]
+        distance_xy = jp.linalg.norm(relative_xy, axis=-1)
+        order = jp.argsort(distance_xy, axis=-1)[:, : self.n_local_obstacles]
+        batch_idx = jp.arange(pos.shape[0])
+        gate_idx = jp.mod(active_target_gate, self.n_gates)
+        gate_pos = observations["gates_pos"][batch_idx, gate_idx]
+        gate_quat = observations["gates_quat"][batch_idx, gate_idx]
+        gate_rot = self.quat_to_rotmat(gate_quat)
+        gate_rot_t = jp.swapaxes(gate_rot, -1, -2)
+
+        selected_obstacles = observations["obstacles_pos"][batch_idx[:, None], order]
+        obstacle_gate_frame = jp.einsum(
+            "nij,nkj->nki", gate_rot_t, selected_obstacles - gate_pos[:, None, :]
+        )
+        lateral_dist = jp.linalg.norm(obstacle_gate_frame[..., 1:3], axis=-1, keepdims=True)
+        detected = observations["obstacles_visited"][batch_idx[:, None], order, None].astype(
+            jp.float32
+        )
+        features = jp.concatenate([obstacle_gate_frame, lateral_dist, detected], axis=-1)
+        return features.reshape(pos.shape[0], -1)
+
+    def _gate_aperture_margin(
+        self,
+        observations: dict[str, Array],
+        active_target_gate: Array,
+        target_progress: Array,
+    ) -> Array:
+        """Return explicit current-gate frame position and square-aperture margins."""
+        gate_local = self._gate_frame_pos_for_gate(observations, active_target_gate)
+        y = gate_local[:, 1]
+        z = gate_local[:, 2]
+        half_width = self.GATE_APERTURE_HALF_WIDTH
+        margins = jp.stack(
+            [
+                y + half_width,
+                half_width - y,
+                z + half_width,
+                half_width - z,
+                half_width - jp.linalg.norm(gate_local[:, 1:3], axis=-1),
+            ],
+            axis=-1,
+        )
+        return jp.concatenate([target_progress, gate_local, margins], axis=-1)
+
+    def _gate_aperture_margins_only(
+        self,
+        observations: dict[str, Array],
+        active_target_gate: Array,
+    ) -> Array:
+        """Return only square-aperture and radial clearance margins."""
+        gate_local = self._gate_frame_pos_for_gate(observations, active_target_gate)
+        y = gate_local[:, 1]
+        z = gate_local[:, 2]
+        half_width = self.GATE_APERTURE_HALF_WIDTH
+        return jp.stack(
+            [
+                y + half_width,
+                half_width - y,
+                z + half_width,
+                half_width - z,
+                half_width - jp.linalg.norm(gate_local[:, 1:3], axis=-1),
+            ],
+            axis=-1,
+        )
+
     def _gate_corners_body(
         self, observations: dict[str, Array], gate_idx: Array, pos: Array, rot_t: Array
     ) -> Array:
@@ -1167,8 +1618,46 @@ class RaceObservation(VectorObservationWrapper):
         corners_body = jp.einsum("nij,nkj->nki", rot_t, corners_world - pos[:, None, :])
         return corners_body.reshape(pos.shape[0], -1)
 
-    @staticmethod
-    def _basic_history(observations: dict[str, Array]) -> Array:
+    def _gate_frame_pos_for_gate(self, observations: dict[str, Array], gate_idx: Array) -> Array:
+        """Return drone position in the selected gate frame."""
+        gate_idx = jp.mod(gate_idx, self.n_gates)
+        batch_idx = jp.arange(observations["pos"].shape[0])
+        gate_pos = observations["gates_pos"][batch_idx, gate_idx]
+        gate_quat = observations["gates_quat"][batch_idx, gate_idx]
+        gate_rot = self.quat_to_rotmat(gate_quat)
+        gate_rot_t = jp.swapaxes(gate_rot, -1, -2)
+        return jp.einsum("nij,nj->ni", gate_rot_t, observations["pos"] - gate_pos)
+
+    def _nearest_other_gate_idx(
+        self, observations: dict[str, Array], pos: Array, active_target_gate: Array
+    ) -> Array:
+        """Return the nearest non-target gate index in XY."""
+        distance_xy = jp.linalg.norm(observations["gates_pos"][..., :2] - pos[:, None, :2], axis=-1)
+        gate_idx = jp.mod(active_target_gate, self.n_gates)
+        distance_xy = distance_xy.at[jp.arange(pos.shape[0]), gate_idx].set(jp.inf)
+        return jp.argmin(distance_xy, axis=-1)
+
+    def _gate_known_flag(self, observations: dict[str, Array], gate_idx: Array) -> Array:
+        """Return selected gate known/visited flags."""
+        gate_idx = jp.mod(gate_idx, self.n_gates)
+        return observations["gates_visited"][jp.arange(gate_idx.shape[0]), gate_idx, None].astype(
+            jp.float32
+        )
+
+    def _basic_history(self, observations: dict[str, Array]) -> Array:
+        if self.history_dim == self.LOCAL_HISTORY_DIM:
+            rot = self.quat_to_rotmat(observations["quat"])
+            rot_t = jp.swapaxes(rot, -1, -2)
+            vel_body = jp.einsum("nij,nj->ni", rot_t, observations["vel"])
+            return jp.concatenate(
+                [
+                    observations["pos"][:, 2:3],
+                    vel_body,
+                    observations["ang_vel"],
+                ],
+                axis=-1,
+            )
+
         return jp.concatenate(
             [
                 observations["pos"],
@@ -1229,6 +1718,7 @@ REWARD_COMPONENT_KEYS = (
     "gate_bonus",
     "finish_bonus",
     "missed_gate",
+    "gate_frame_pressure",
     "wrong_side",
     "crash",
     "action",
@@ -1253,7 +1743,9 @@ RACE_METRIC_KEYS = (
     "gate_centerline_dist",
     "gate_plane_dist",
     "gate_plane_cross_rate",
+    "gate_plane_center_hit_rate",
     "missed_gate_rate",
+    "gate_frame_pressure",
     "gate_stage",
     "gate_front_hit_rate",
     "gate_pass_hit_rate",
@@ -1277,10 +1769,20 @@ def mean_scalar(value: Any) -> float:
 def setup_wandb(args: Args) -> None:
     """Start or configure a W&B run with explicit metric names."""
     if wandb.run is None:
-        wandb.init(project=args.wandb_project_name, entity=args.wandb_entity, config=vars(args))
+        init_kwargs = {
+            "project": args.wandb_project_name,
+            "entity": args.wandb_entity,
+            "name": args.wandb_run_name,
+            "id": args.wandb_run_id,
+            "mode": args.wandb_mode,
+            "config": vars(args),
+        }
+        if args.wandb_run_id:
+            init_kwargs["resume"] = "allow"
+        wandb.init(**init_kwargs)
     else:
         wandb.config.update(vars(args), allow_val_change=True)
-    wandb.config.update({"observation_layout": OBSERVATION_LAYOUT}, allow_val_change=True)
+    wandb.config.update({"observation_layout": args.observation_layout}, allow_val_change=True)
 
     wandb.define_metric("global_step")
     for metric_pattern in (
@@ -1322,6 +1824,17 @@ def make_envs(
         thrust_disturbance = legacy_thrust_disturbance
     if cfg.env.control_mode != "attitude":
         raise ValueError("Direct level2 PPO currently expects env.control_mode = 'attitude'.")
+    track_generator_profile = str(coefs.get("track_generator_profile", "default"))
+    if track_generator_profile not in TRACK_GENERATOR_PROFILES:
+        choices = ", ".join(sorted(TRACK_GENERATOR_PROFILES))
+        raise ValueError(
+            f"Unsupported track_generator_profile={track_generator_profile!r}. "
+            f"Choices: {choices}."
+        )
+    track = cfg.env.track
+    if track_generator_profile != "default":
+        track = ConfigDict(cfg.env.track.to_dict())
+        track.generator = ConfigDict(TRACK_GENERATOR_PROFILES[track_generator_profile])
     env = gym.make_vec(
         cfg.env.id,
         num_envs=num_envs,
@@ -1329,7 +1842,7 @@ def make_envs(
         sim_config=cfg.sim,
         sensor_range=cfg.env.sensor_range,
         control_mode=cfg.env.control_mode,
-        track=cfg.env.track,
+        track=track,
         disturbances=disturbances,
         randomizations=cfg.env.get("randomizations"),
         seed=cfg.env.seed,
@@ -1351,7 +1864,10 @@ def make_envs(
             seed=cfg.env.seed,
         )
 
-    env = NormalizeVectorActions(env)
+    env = NormalizeVectorActions(
+        env,
+        action_rp_limit_deg=coefs.get("action_rp_limit_deg", 90.0),
+    )
     env = Level2RaceReward(
         env,
         progress_coef=coefs.get("progress_coef", 10.0),
@@ -1375,11 +1891,14 @@ def make_envs(
         gate_stage_radius=coefs.get("gate_stage_radius", 0.24),
         wrong_side_penalty=coefs.get("wrong_side_penalty", 6.0),
         missed_gate_penalty=coefs.get("missed_gate_penalty", 8.0),
+        gate_frame_pressure_coef=coefs.get("gate_frame_pressure_coef", 0.0),
         obstacle_coef=coefs.get("obstacle_coef", 1.5),
         obstacle_margin=coefs.get("obstacle_margin", 0.35),
         obstacle_clearance_coef=coefs.get("obstacle_clearance_coef", 0.0),
         timeout_penalty=coefs.get("timeout_penalty", 0.0),
         time_penalty=coefs.get("time_penalty", 0.05),
+        reward_structure=str(coefs.get("reward_structure", "legacy_staged")),
+        shaping_gamma=float(coefs.get("gamma", 0.99)),
         debug_every=debug_reward_every,
     )
     if observation_latency is not None or observation_noise is not None:
@@ -1389,7 +1908,13 @@ def make_envs(
             observation_noise,
             seed=cfg.env.seed,
         )
-    env = RaceObservation(env, n_history=coefs.get("n_obs", 0), debug_obs=debug_obs)
+    env = RaceObservation(
+        env,
+        n_history=coefs.get("n_obs", 0),
+        debug_obs=debug_obs,
+        observation_layout=str(coefs.get("observation_layout", WORLD_HISTORY_OBSERVATION_LAYOUT)),
+        action_lowpass_alpha=coefs.get("action_lowpass_alpha", 1.0),
+    )
     env = JaxToTorch(env, torch_device)
     return env
 
@@ -1450,6 +1975,215 @@ class Agent(nn.Module):
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
+class RecurrentActorAgent(nn.Module):
+    """PPO agent with a recurrent Actor and feed-forward Critic."""
+
+    def __init__(
+        self,
+        obs_shape: tuple,
+        action_shape: tuple,
+        hidden_dim: int = 256,
+        recurrent_hidden_dim: int = 256,
+    ):
+        """Initialize recurrent Actor and same-observation Critic."""
+        super().__init__()
+        if hidden_dim <= 0:
+            raise ValueError(f"hidden_dim must be positive, got {hidden_dim}.")
+        if recurrent_hidden_dim <= 0:
+            raise ValueError(
+                f"recurrent_hidden_dim must be positive, got {recurrent_hidden_dim}."
+            )
+        obs_dim = int(torch.tensor(obs_shape).prod())
+        action_dim = int(torch.tensor(action_shape).prod())
+        self.hidden_dim = hidden_dim
+        self.recurrent_hidden_dim = recurrent_hidden_dim
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, 1), std=1.0),
+        )
+        self.actor_pre = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, 128)),
+            nn.Tanh(),
+            layer_init(nn.Linear(128, 128)),
+            nn.Tanh(),
+        )
+        self.actor_gru = nn.GRU(128, recurrent_hidden_dim)
+        for name, param in self.actor_gru.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0.0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, np.sqrt(2))
+        self.actor_post = nn.Sequential(
+            layer_init(nn.Linear(recurrent_hidden_dim, 192)),
+            nn.Tanh(),
+            layer_init(nn.Linear(192, 96)),
+            nn.Tanh(),
+            layer_init(nn.Linear(96, action_dim), std=0.01),
+            nn.Tanh(),
+        )
+        self.actor_logstd = nn.Parameter(
+            torch.tensor([[-1.2, -1.2, -2.0, -0.7]], dtype=torch.float32)
+        )
+
+    def get_initial_state(self, batch_size: int, device: torch.device) -> Tensor:
+        """Return zero GRU state shaped [num_layers, batch, hidden]."""
+        return torch.zeros((1, batch_size, self.recurrent_hidden_dim), device=device)
+
+    def get_value(self, x: Tensor) -> Tensor:
+        """Value estimation from same observation as the Actor."""
+        return self.critic(x.reshape(-1, x.shape[-1]))
+
+    def _actor_mean(
+        self,
+        x: Tensor,
+        hidden_state: Tensor,
+        done: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Run the recurrent Actor over a batch or time-major sequence."""
+        if x.dim() == 2:
+            done = done.float().view(1, x.shape[0], 1)
+            hidden_state = hidden_state * (1.0 - done)
+            features = self.actor_pre(x).unsqueeze(0)
+            output, next_hidden_state = self.actor_gru(features, hidden_state)
+            return self.actor_post(output.squeeze(0)), next_hidden_state
+
+        if x.dim() != 3:
+            raise ValueError(f"Expected recurrent Actor input rank 2 or 3, got {x.dim()}.")
+
+        seq_len, batch_size, obs_dim = x.shape
+        done = done.float().view(seq_len, batch_size)
+        features = self.actor_pre(x.reshape(seq_len * batch_size, obs_dim)).view(
+            seq_len, batch_size, -1
+        )
+        outputs = []
+        next_hidden_state = hidden_state
+        for t in range(seq_len):
+            mask = (1.0 - done[t]).view(1, batch_size, 1)
+            next_hidden_state = next_hidden_state * mask
+            output, next_hidden_state = self.actor_gru(
+                features[t : t + 1],
+                next_hidden_state,
+            )
+            outputs.append(output)
+        recurrent_output = torch.cat(outputs, dim=0).reshape(seq_len * batch_size, -1)
+        return self.actor_post(recurrent_output), next_hidden_state
+
+    def get_action_and_value(
+        self,
+        x: Tensor,
+        hidden_state: Tensor,
+        done: Tensor,
+        action: Tensor | None = None,
+        deterministic: bool = False,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """Return action, log-probability, entropy, value, and next GRU state."""
+        action_mean, next_hidden_state = self._actor_mean(x, hidden_state, done)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        if action is None:
+            action = probs.sample() if not deterministic else action_mean
+        else:
+            action = action.reshape_as(action_mean)
+        values = self.get_value(x)
+        return (
+            action,
+            probs.log_prob(action).sum(1),
+            probs.entropy().sum(1),
+            values,
+            next_hidden_state,
+        )
+
+
+def make_agent(
+    obs_shape: tuple,
+    action_shape: tuple,
+    args: Args,
+) -> Agent | RecurrentActorAgent:
+    """Build the requested PPO policy architecture."""
+    policy_arch = normalize_policy_arch(args.policy_arch)
+    if policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+        return RecurrentActorAgent(
+            obs_shape,
+            action_shape,
+            hidden_dim=args.hidden_dim,
+            recurrent_hidden_dim=args.recurrent_hidden_dim,
+        )
+    return Agent(obs_shape, action_shape, hidden_dim=args.hidden_dim)
+
+
+def expand_checkpoint_input_dim(
+    model_state_dict: dict[str, Tensor],
+    target_agent: Agent,
+) -> dict[str, Tensor]:
+    """Zero-pad first-layer weights when a new observation layout only appends features."""
+    expanded = dict(model_state_dict)
+    for key, target_weight in (
+        ("actor_mean.0.weight", target_agent.actor_mean[0].weight),
+        ("critic.0.weight", target_agent.critic[0].weight),
+    ):
+        source_weight = expanded[key]
+        source_dim = int(source_weight.shape[1])
+        target_dim = int(target_weight.shape[1])
+        if source_dim == target_dim:
+            continue
+        if source_dim > target_dim:
+            raise ValueError(
+                f"Cannot shrink checkpoint input layer {key}: {source_dim} -> {target_dim}."
+            )
+        padded = torch.zeros(
+            (source_weight.shape[0], target_dim),
+            dtype=source_weight.dtype,
+            device=source_weight.device,
+        )
+        padded[:, :source_dim] = source_weight
+        expanded[key] = padded
+    return expanded
+
+
+def expand_checkpoint_hidden_dim(
+    model_state_dict: dict[str, Tensor],
+    target_agent: Agent,
+) -> dict[str, Tensor]:
+    """Block-copy a narrower 2-layer MLP checkpoint into a wider target agent."""
+    target_state = target_agent.state_dict()
+    source_hidden_dim = int(model_state_dict["actor_mean.0.weight"].shape[0])
+    target_hidden_dim = int(target_agent.actor_mean[0].weight.shape[0])
+    if source_hidden_dim == target_hidden_dim:
+        return dict(model_state_dict)
+    if source_hidden_dim > target_hidden_dim:
+        raise ValueError(
+            "Cannot warm-start a narrower PPO agent from a wider checkpoint: "
+            f"{source_hidden_dim} -> {target_hidden_dim}."
+        )
+
+    expanded: dict[str, Tensor] = {}
+    for key, target_tensor in target_state.items():
+        if key not in model_state_dict:
+            raise ValueError(f"Checkpoint is missing PPO parameter {key!r}.")
+        source_tensor = model_state_dict[key]
+        resized = target_tensor.detach().clone()
+        if source_tensor.ndim == 0:
+            resized.copy_(source_tensor)
+        elif source_tensor.shape == target_tensor.shape:
+            resized.copy_(source_tensor)
+        else:
+            slices = tuple(
+                slice(0, min(src, dst))
+                for src, dst in zip(source_tensor.shape, target_tensor.shape)
+            )
+            resized[slices] = source_tensor[slices]
+            if key.endswith(".2.weight"):
+                resized[:source_hidden_dim, source_hidden_dim:] = 0.0
+            elif key.endswith(".4.weight"):
+                resized[:, source_hidden_dim:] = 0.0
+        expanded[key] = resized
+    return expanded
+
+
 # region Train
 def train_ppo(
     args: Args,
@@ -1488,6 +2222,11 @@ def train_ppo(
     # env setup
     r_coefs = {
         "n_obs": args.n_obs,
+        "observation_layout": args.observation_layout,
+        "action_rp_limit_deg": args.action_rp_limit_deg,
+        "action_lowpass_alpha": args.action_lowpass_alpha,
+        "reward_structure": args.reward_structure,
+        "track_generator_profile": args.track_generator_profile,
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
@@ -1508,6 +2247,7 @@ def train_ppo(
         "gate_bonus": args.gate_bonus,
         "finish_bonus": args.finish_bonus,
         "missed_gate_penalty": args.missed_gate_penalty,
+        "gate_frame_pressure_coef": args.gate_frame_pressure_coef,
         "crash_penalty": args.crash_penalty,
         "obstacle_coef": args.obstacle_coef,
         "obstacle_margin": args.obstacle_margin,
@@ -1528,27 +2268,120 @@ def train_ppo(
         "only continuous action space is supported"
     )
 
-    agent = Agent(
+    agent = make_agent(
         envs.single_observation_space.shape,
         envs.single_action_space.shape,
-        hidden_dim=args.hidden_dim,
+        args,
     ).to(device)
     if initial_model_path is not None:
         checkpoint = torch.load(initial_model_path, map_location=device)
         model_state_dict, observation_layout = unpack_checkpoint(checkpoint)
-        if observation_layout != OBSERVATION_LAYOUT:
+        initial_policy_arch = checkpoint_policy_arch(checkpoint, model_state_dict)
+        if initial_policy_arch != args.policy_arch:
             raise ValueError(
-                f"Cannot initialize {OBSERVATION_LAYOUT} training from checkpoint layout "
-                f"{observation_layout}. Train from scratch or use a matching checkpoint."
+                f"Cannot initialize policy_arch={args.policy_arch} training from a "
+                f"policy_arch={initial_policy_arch} checkpoint."
             )
-        initial_hidden_dim = checkpoint_hidden_dim(checkpoint, model_state_dict)
-        if initial_hidden_dim != args.hidden_dim:
-            raise ValueError(
-                f"Cannot initialize hidden_dim={args.hidden_dim} training from a "
-                f"hidden_dim={initial_hidden_dim} checkpoint. Use a matching hidden_dim."
+        if args.policy_arch != POLICY_ARCH_MLP:
+            if observation_layout != args.observation_layout:
+                raise ValueError(
+                    f"Cannot initialize {args.observation_layout} recurrent training "
+                    f"from checkpoint layout {observation_layout}."
+                )
+            initial_hidden_dim = checkpoint_hidden_dim(checkpoint, model_state_dict)
+            if initial_hidden_dim != args.hidden_dim:
+                raise ValueError(
+                    f"Cannot initialize hidden_dim={args.hidden_dim} recurrent training "
+                    f"from hidden_dim={initial_hidden_dim} checkpoint."
+                )
+            initial_recurrent_hidden_dim = checkpoint_recurrent_hidden_dim(
+                checkpoint, model_state_dict
             )
-        agent.load_state_dict(model_state_dict)
-        print(f"initialized agent weights from {initial_model_path}; optimizer starts fresh")
+            if initial_recurrent_hidden_dim != args.recurrent_hidden_dim:
+                raise ValueError(
+                    "Cannot initialize recurrent_hidden_dim="
+                    f"{args.recurrent_hidden_dim} training from "
+                    f"recurrent_hidden_dim={initial_recurrent_hidden_dim} checkpoint."
+                )
+            agent.load_state_dict(model_state_dict)
+            print(f"initialized recurrent agent weights from {initial_model_path}")
+            model_state_dict = None
+        if model_state_dict is None:
+            pass
+        else:
+            compatible_v5_to_v6 = (
+                observation_layout == LOCAL_OBSTACLE_OBSERVATION_LAYOUT
+                and args.observation_layout == LOCAL_NEXT_GATE_OBSERVATION_LAYOUT
+                and model_state_dict["actor_mean.0.weight"].shape[1]
+                == agent.actor_mean[0].weight.shape[1]
+                and model_state_dict["critic.0.weight"].shape[1]
+                == agent.critic[0].weight.shape[1]
+            )
+            compatible_append_local_features = (
+                args.observation_layout
+                in (
+                    LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUT,
+                    LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+                    LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+                    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+                    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUT,
+                )
+                and observation_layout in LOCAL_OBSTACLE_OBSERVATION_LAYOUTS
+                and model_state_dict["actor_mean.0.weight"].shape[1]
+                < agent.actor_mean[0].weight.shape[1]
+                and model_state_dict["critic.0.weight"].shape[1] < agent.critic[0].weight.shape[1]
+            )
+            if (
+                observation_layout != args.observation_layout
+                and not compatible_v5_to_v6
+                and not compatible_append_local_features
+            ):
+                raise ValueError(
+                    f"Cannot initialize {args.observation_layout} training from checkpoint "
+                    f"layout {observation_layout}. Train from scratch or use a matching "
+                    "checkpoint."
+                )
+            if compatible_v5_to_v6:
+                print(
+                    "initialized v6 next-gate observation from v5 local-obstacle weights; "
+                    "input dimensions match and optimizer starts fresh"
+                )
+            if compatible_append_local_features:
+                model_state_dict = expand_checkpoint_input_dim(model_state_dict, agent)
+                print(
+                    "initialized appended local observation from local-obstacle weights; "
+                    "appended input weights are zero-padded and optimizer starts fresh"
+                )
+            initial_hidden_dim = checkpoint_hidden_dim(checkpoint, model_state_dict)
+            if initial_hidden_dim != args.hidden_dim and args.allow_hidden_dim_warmstart:
+                model_state_dict = expand_checkpoint_hidden_dim(model_state_dict, agent)
+                print(
+                    "initialized wider hidden_dim training from narrower checkpoint; "
+                    f"block-copied hidden_dim {initial_hidden_dim} -> {args.hidden_dim} "
+                    "and optimizer starts fresh"
+                )
+            elif initial_hidden_dim != args.hidden_dim:
+                raise ValueError(
+                    f"Cannot initialize hidden_dim={args.hidden_dim} training from a "
+                    f"hidden_dim={initial_hidden_dim} checkpoint. Use a matching hidden_dim "
+                    "or pass allow_hidden_dim_warmstart=True for an explicit capacity lane."
+                )
+            initial_action_rp_limit_deg = checkpoint_action_rp_limit_deg(checkpoint)
+            if round(initial_action_rp_limit_deg, 6) != round(args.action_rp_limit_deg, 6):
+                print(
+                    "initialized checkpoint action_rp_limit_deg="
+                    f"{initial_action_rp_limit_deg}; training with "
+                    f"action_rp_limit_deg={args.action_rp_limit_deg}"
+                )
+            initial_action_lowpass_alpha = checkpoint_action_lowpass_alpha(checkpoint)
+            if round(initial_action_lowpass_alpha, 6) != round(args.action_lowpass_alpha, 6):
+                print(
+                    "initialized checkpoint action_lowpass_alpha="
+                    f"{initial_action_lowpass_alpha}; training with "
+                    f"action_lowpass_alpha={args.action_lowpass_alpha}"
+                )
+            agent.load_state_dict(model_state_dict)
+            print(f"initialized agent weights from {initial_model_path}; optimizer starts fresh")
     optimizer = optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -1562,6 +2395,12 @@ def train_ppo(
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    recurrent_enabled = args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
+    next_recurrent_state = (
+        agent.get_initial_state(args.num_envs, device)
+        if recurrent_enabled
+        else None
+    )
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -1577,6 +2416,9 @@ def train_ppo(
         reward_component_sums = dict.fromkeys(REWARD_COMPONENT_KEYS, 0.0)
         race_metric_sums = dict.fromkeys(RACE_METRIC_KEYS, 0.0)
         reward_component_batches = 0
+        initial_recurrent_state = (
+            next_recurrent_state.clone() if next_recurrent_state is not None else None
+        )
 
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
@@ -1591,7 +2433,14 @@ def train_ppo(
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value = agent.get_action_and_value(next_obs)
+                if recurrent_enabled:
+                    action, logprob, _, value, next_recurrent_state = agent.get_action_and_value(
+                        next_obs,
+                        next_recurrent_state,
+                        next_done,
+                    )
+                else:
+                    action, logprob, _, value = agent.get_action_and_value(next_obs)
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -1639,71 +2488,138 @@ def train_ppo(
                 )
             returns = advantages + values
 
-        # flatten the batch
-        b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
-        b_logprobs = logprobs.reshape(-1)
-        b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
-        b_advantages = advantages.reshape(-1)
-        b_returns = returns.reshape(-1)
-        b_values = values.reshape(-1)
-
         # Optimizing the policy and value network
-        b_inds = np.arange(args.batch_size)
         clipfracs = []
-        for epoch in range(args.update_epochs):
-            np.random.shuffle(b_inds)
-            for start in range(0, args.batch_size, args.minibatch_size):
-                end = start + args.minibatch_size
-                mb_inds = b_inds[start:end]
+        if recurrent_enabled:
+            b_values = values.reshape(-1)
+            b_returns = returns.reshape(-1)
+            env_inds = np.arange(args.num_envs)
+            env_minibatch_size = max(1, args.num_envs // args.num_minibatches)
+            for epoch in range(args.update_epochs):
+                np.random.shuffle(env_inds)
+                for start in range(0, args.num_envs, env_minibatch_size):
+                    end = start + env_minibatch_size
+                    mb_env_inds = env_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                    b_obs[mb_inds], b_actions[mb_inds]
-                )
-                logratio = newlogprob - b_logprobs[mb_inds]
-                ratio = logratio.exp()
-
-                with torch.no_grad():
-                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                    old_approx_kl = (-logratio).mean()
-                    approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
-
-                mb_advantages = b_advantages[mb_inds]
-                if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                        mb_advantages.std() + 1e-8
+                    _, newlogprob, entropy, newvalue, _ = agent.get_action_and_value(
+                        obs[:, mb_env_inds],
+                        initial_recurrent_state[:, mb_env_inds],
+                        dones[:, mb_env_inds],
+                        actions[:, mb_env_inds],
                     )
+                    mb_logprobs = logprobs[:, mb_env_inds].reshape(-1)
+                    logratio = newlogprob - mb_logprobs
+                    ratio = logratio.exp()
 
-                # Policy loss
-                pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * torch.clamp(
-                    ratio, 1 - args.clip_coef, 1 + args.clip_coef
-                )
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                    with torch.no_grad():
+                        old_approx_kl = (-logratio).mean()
+                        approx_kl = ((ratio - 1) - logratio).mean()
+                        clipfracs += [
+                            ((ratio - 1.0).abs() > args.clip_coef).float().mean().item()
+                        ]
 
-                # Value loss
-                newvalue = newvalue.view(-1)
-                if args.clip_vloss:
-                    v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                    v_clipped = b_values[mb_inds] + torch.clamp(
-                        newvalue - b_values[mb_inds], -args.clip_coef, args.clip_coef
+                    mb_advantages = advantages[:, mb_env_inds].reshape(-1)
+                    if args.norm_adv:
+                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (
+                            mb_advantages.std() + 1e-8
+                        )
+
+                    pg_loss1 = -mb_advantages * ratio
+                    pg_loss2 = -mb_advantages * torch.clamp(
+                        ratio, 1 - args.clip_coef, 1 + args.clip_coef
                     )
-                    v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * v_loss_max.mean()
-                else:
-                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                    newvalue = newvalue.view(-1)
+                    mb_returns = returns[:, mb_env_inds].reshape(-1)
+                    mb_values = values[:, mb_env_inds].reshape(-1)
+                    if args.clip_vloss:
+                        v_loss_unclipped = (newvalue - mb_returns) ** 2
+                        v_clipped = mb_values + torch.clamp(
+                            newvalue - mb_values, -args.clip_coef, args.clip_coef
+                        )
+                        v_loss_clipped = (v_clipped - mb_returns) ** 2
+                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                        v_loss = 0.5 * v_loss_max.mean()
+                    else:
+                        v_loss = 0.5 * ((newvalue - mb_returns) ** 2).mean()
 
-                optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-                optimizer.step()
+                    entropy_loss = entropy.mean()
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
-            if args.target_kl is not None and approx_kl > args.target_kl:
-                break
+                    optimizer.zero_grad()
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                    optimizer.step()
+
+                if args.target_kl is not None and approx_kl > args.target_kl:
+                    break
+        else:
+            # flatten the batch
+            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            b_logprobs = logprobs.reshape(-1)
+            b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
+            b_advantages = advantages.reshape(-1)
+            b_returns = returns.reshape(-1)
+            b_values = values.reshape(-1)
+
+            b_inds = np.arange(args.batch_size)
+            for epoch in range(args.update_epochs):
+                np.random.shuffle(b_inds)
+                for start in range(0, args.batch_size, args.minibatch_size):
+                    end = start + args.minibatch_size
+                    mb_inds = b_inds[start:end]
+
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                        b_obs[mb_inds], b_actions[mb_inds]
+                    )
+                    logratio = newlogprob - b_logprobs[mb_inds]
+                    ratio = logratio.exp()
+
+                    with torch.no_grad():
+                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                        old_approx_kl = (-logratio).mean()
+                        approx_kl = ((ratio - 1) - logratio).mean()
+                        clipfracs += [
+                            ((ratio - 1.0).abs() > args.clip_coef).float().mean().item()
+                        ]
+
+                    mb_advantages = b_advantages[mb_inds]
+                    if args.norm_adv:
+                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (
+                            mb_advantages.std() + 1e-8
+                        )
+
+                    # Policy loss
+                    pg_loss1 = -mb_advantages * ratio
+                    pg_loss2 = -mb_advantages * torch.clamp(
+                        ratio, 1 - args.clip_coef, 1 + args.clip_coef
+                    )
+                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+                    # Value loss
+                    newvalue = newvalue.view(-1)
+                    if args.clip_vloss:
+                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
+                        v_clipped = b_values[mb_inds] + torch.clamp(
+                            newvalue - b_values[mb_inds], -args.clip_coef, args.clip_coef
+                        )
+                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
+                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                        v_loss = 0.5 * v_loss_max.mean()
+                    else:
+                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+
+                    entropy_loss = entropy.mean()
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                    optimizer.step()
+
+                if args.target_kl is not None and approx_kl > args.target_kl:
+                    break
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
@@ -1751,7 +2667,21 @@ def train_ppo(
             checkpoint_name = f"{checkpoint_stem}_step_{next_checkpoint_step:09d}.ckpt"
             checkpoint_path = checkpoint_dir / checkpoint_name
             torch.save(
-                make_checkpoint(agent.state_dict(), hidden_dim=args.hidden_dim), checkpoint_path
+                make_checkpoint(
+                    agent.state_dict(),
+                    hidden_dim=args.hidden_dim,
+                    observation_layout=args.observation_layout,
+                    action_rp_limit_deg=args.action_rp_limit_deg,
+                    action_lowpass_alpha=args.action_lowpass_alpha,
+                    policy_arch=args.policy_arch,
+                    recurrent_hidden_dim=(
+                        args.recurrent_hidden_dim if recurrent_enabled else None
+                    ),
+                    recurrent_sequence_len=(
+                        args.recurrent_sequence_len if recurrent_enabled else None
+                    ),
+                ),
+                checkpoint_path,
             )
             print(f"checkpoint saved to {checkpoint_path} at global_step={global_step}")
             next_checkpoint_step += checkpoint_interval
@@ -1759,7 +2689,19 @@ def train_ppo(
     print(f"Training for {global_step} steps took {train_end_time - train_start_time:.2f} seconds.")
     if model_path is not None:
         model_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(make_checkpoint(agent.state_dict(), hidden_dim=args.hidden_dim), model_path)
+        torch.save(
+            make_checkpoint(
+                agent.state_dict(),
+                hidden_dim=args.hidden_dim,
+                observation_layout=args.observation_layout,
+                action_rp_limit_deg=args.action_rp_limit_deg,
+                action_lowpass_alpha=args.action_lowpass_alpha,
+                policy_arch=args.policy_arch,
+                recurrent_hidden_dim=args.recurrent_hidden_dim if recurrent_enabled else None,
+                recurrent_sequence_len=args.recurrent_sequence_len if recurrent_enabled else None,
+            ),
+            model_path,
+        )
         print(f"model saved to {model_path}")
     envs.close()
 
@@ -1773,6 +2715,11 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
     device = torch.device("cpu")
     r_coefs = {
         "n_obs": args.n_obs,
+        "observation_layout": args.observation_layout,
+        "action_rp_limit_deg": args.action_rp_limit_deg,
+        "action_lowpass_alpha": args.action_lowpass_alpha,
+        "reward_structure": args.reward_structure,
+        "track_generator_profile": args.track_generator_profile,
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
@@ -1793,6 +2740,7 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
         "gate_bonus": args.gate_bonus,
         "finish_bonus": args.finish_bonus,
         "missed_gate_penalty": args.missed_gate_penalty,
+        "gate_frame_pressure_coef": args.gate_frame_pressure_coef,
         "crash_penalty": args.crash_penalty,
         "obstacle_coef": args.obstacle_coef,
         "obstacle_margin": args.obstacle_margin,
@@ -1803,15 +2751,29 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
     eval_env = make_envs(config=args.config, num_envs=1, coefs=r_coefs)
     checkpoint = torch.load(model_path, map_location=device)
     model_state_dict, observation_layout = unpack_checkpoint(checkpoint)
-    if observation_layout != OBSERVATION_LAYOUT:
+    if observation_layout != args.observation_layout:
         raise ValueError(
-            f"Cannot evaluate checkpoint layout {observation_layout} with {OBSERVATION_LAYOUT} env."
+            f"Cannot evaluate checkpoint layout {observation_layout} "
+            f"with {args.observation_layout} env."
         )
     hidden_dim = checkpoint_hidden_dim(checkpoint, model_state_dict)
-    agent = Agent(
+    policy_arch = checkpoint_policy_arch(checkpoint, model_state_dict)
+    eval_args = Args.create(
+        **{
+            **vars(args),
+            "hidden_dim": hidden_dim,
+            "policy_arch": policy_arch,
+            "recurrent_hidden_dim": checkpoint_recurrent_hidden_dim(
+                checkpoint,
+                model_state_dict,
+            )
+            or args.recurrent_hidden_dim,
+        }
+    )
+    agent = make_agent(
         eval_env.single_observation_space.shape,
         eval_env.single_action_space.shape,
-        hidden_dim=hidden_dim,
+        eval_args,
     ).to(device)
     agent.load_state_dict(model_state_dict)
     with torch.no_grad():
@@ -1822,10 +2784,23 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
         for episode in range(n_eval):
             obs, _ = eval_env.reset(seed=(ep_seed := ep_seed + 1))
             done = torch.zeros(1, dtype=bool, device=device)
+            recurrent_state = (
+                agent.get_initial_state(1, device)
+                if policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
+                else None
+            )
             episode_reward = 0
             steps = 0
             while not done.any():
-                act, _, _, _ = agent.get_action_and_value(obs, deterministic=True)
+                if policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+                    act, _, _, _, recurrent_state = agent.get_action_and_value(
+                        obs,
+                        recurrent_state,
+                        done.float(),
+                        deterministic=True,
+                    )
+                else:
+                    act, _, _, _ = agent.get_action_and_value(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = eval_env.step(act)
                 eval_env.render()
                 done = terminated | truncated
@@ -1847,6 +2822,11 @@ def debug_rollout(args: Args, n_steps: int, device: torch.device, jax_device: st
     """Run zero-action rollouts to inspect observation layout and reward components."""
     r_coefs = {
         "n_obs": args.n_obs,
+        "observation_layout": args.observation_layout,
+        "action_rp_limit_deg": args.action_rp_limit_deg,
+        "action_lowpass_alpha": args.action_lowpass_alpha,
+        "reward_structure": args.reward_structure,
+        "track_generator_profile": args.track_generator_profile,
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
@@ -1867,6 +2847,7 @@ def debug_rollout(args: Args, n_steps: int, device: torch.device, jax_device: st
         "gate_bonus": args.gate_bonus,
         "finish_bonus": args.finish_bonus,
         "missed_gate_penalty": args.missed_gate_penalty,
+        "gate_frame_pressure_coef": args.gate_frame_pressure_coef,
         "crash_penalty": args.crash_penalty,
         "obstacle_coef": args.obstacle_coef,
         "obstacle_margin": args.obstacle_margin,
@@ -1906,6 +2887,11 @@ def debug_rollout(args: Args, n_steps: int, device: torch.device, jax_device: st
 def main(
     config: str = "level2.toml",
     wandb_enabled: bool = False,
+    wandb_project_name: str = "ADR-PPO-Racing-Level3",
+    wandb_entity: str | None = None,
+    wandb_run_name: str | None = None,
+    wandb_run_id: str | None = None,
+    wandb_mode: str = "online",
     train: bool = True,
     eval: int = 0,
     debug_steps: int = 0,
@@ -1913,13 +2899,27 @@ def main(
     num_envs: int = 256,
     num_steps: int = 32,
     learning_rate: float = 3e-4,
+    anneal_lr: bool = True,
     gamma: float = 0.99,
     gae_lambda: float = 0.95,
     update_epochs: int = 5,
     num_minibatches: int = 8,
+    clip_coef: float = 0.26,
+    clip_vloss: bool = True,
     ent_coef: float = 0.02,
+    vf_coef: float = 0.7,
+    max_grad_norm: float = 1.5,
     target_kl: float = 0.03,
     hidden_dim: int = 128,
+    policy_arch: str = POLICY_ARCH_MLP,
+    recurrent_hidden_dim: int = 256,
+    recurrent_sequence_len: int = 32,
+    allow_hidden_dim_warmstart: bool = False,
+    observation_layout: str = WORLD_HISTORY_OBSERVATION_LAYOUT,
+    action_rp_limit_deg: float = 90.0,
+    action_lowpass_alpha: float = 1.0,
+    reward_structure: str = "legacy_staged",
+    track_generator_profile: str = "default",
     cuda: bool = True,
     jax_device: str = "gpu",
     model_name: str = "ppo_level2_racing.ckpt",
@@ -1940,6 +2940,7 @@ def main(
     gate_bonus: float = 30.0,
     finish_bonus: float = 80.0,
     missed_gate_penalty: float = 8.0,
+    gate_frame_pressure_coef: float = 0.0,
     crash_penalty: float = 50.0,
     obstacle_coef: float = 1.5,
     obstacle_margin: float = 0.35,
@@ -1959,17 +2960,36 @@ def main(
     """Main."""
     args = Args.create(
         config=config,
+        wandb_project_name=wandb_project_name,
+        wandb_entity=wandb_entity,
+        wandb_run_name=wandb_run_name,
+        wandb_run_id=wandb_run_id,
+        wandb_mode=wandb_mode,
         total_timesteps=total_timesteps,
         num_envs=num_envs,
         num_steps=num_steps,
         learning_rate=learning_rate,
+        anneal_lr=anneal_lr,
         gamma=gamma,
         gae_lambda=gae_lambda,
         update_epochs=update_epochs,
         num_minibatches=num_minibatches,
+        clip_coef=clip_coef,
+        clip_vloss=clip_vloss,
         ent_coef=ent_coef,
+        vf_coef=vf_coef,
+        max_grad_norm=max_grad_norm,
         target_kl=target_kl,
         hidden_dim=hidden_dim,
+        policy_arch=policy_arch,
+        recurrent_hidden_dim=recurrent_hidden_dim,
+        recurrent_sequence_len=recurrent_sequence_len,
+        allow_hidden_dim_warmstart=allow_hidden_dim_warmstart,
+        observation_layout=observation_layout,
+        action_rp_limit_deg=action_rp_limit_deg,
+        action_lowpass_alpha=action_lowpass_alpha,
+        reward_structure=reward_structure,
+        track_generator_profile=track_generator_profile,
         cuda=cuda,
         jax_device=jax_device,
         n_obs=n_obs,
@@ -1986,6 +3006,7 @@ def main(
         gate_bonus=gate_bonus,
         finish_bonus=finish_bonus,
         missed_gate_penalty=missed_gate_penalty,
+        gate_frame_pressure_coef=gate_frame_pressure_coef,
         crash_penalty=crash_penalty,
         obstacle_coef=obstacle_coef,
         obstacle_margin=obstacle_margin,
@@ -2031,6 +3052,8 @@ def main(
                 }
             )
             wandb.finish()
+    elif wandb_enabled and wandb.run is not None:
+        wandb.finish()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,8 @@
+$ /home/aojili/lsy_drone_racing/.pixi/envs/gpu/bin/python /home/aojili/lsy_drone_racing/scripts/evaluate_level2_selected_ppo.py --config level3_dr.toml --seed-start 1 --num-seeds 20 --inference-module ppo_level3_inference --out-prefix /home/aojili/lsy_drone_racing/experiments/level3_ppo_loop/level3_initial_checkpoint_audit /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_localobs_safer_finetune_from_final_highcrashpenalty/level3_localobs_safer_finetune_from_final_highcrashpenalty_final.ckpt
+
+W0620 20:49:38.042520  480306 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+W0620 20:49:38.044767  480229 cuda_executor.cc:1802] GPU interconnect information not available: INTERNAL: NVML doesn't support extracting fabric info or NVLink is not used by the device.
+/home/aojili/lsy_drone_racing/.pixi/envs/gpu/lib/python3.13/site-packages/jax/_src/abstract_arrays.py:135: RuntimeWarning: overflow encountered in cast
+  return literals.TypedNdArray(np.asarray(x, dtype), weak_type=False)
+evaluating /home/aojili/lsy_drone_racing/lsy_drone_racing/control/checkpoints/level3_localobs_safer_finetune_from_final_highcrashpenalty/level3_localobs_safer_finetune_from_final_highcrashpenalty_final.ckpt
+  success=10.00% crash=90.00% time_success=5.64s smooth=0.0168 max_tilt=30.5deg max_cmd_tilt=54.6deg

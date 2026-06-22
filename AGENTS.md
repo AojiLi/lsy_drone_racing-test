@@ -1,0 +1,108 @@
+# AGENTS.md
+
+## Level3 PPO Loop
+
+- Primary objective: train a PPO controller for `config/level3_dr.toml` with
+  mean successful race time `<= 7.0s` and success rate `>= 0.60`.
+- Treat `experiments/level3_ppo_loop/state.json` as the resumable experiment
+  state. Read it before launching new training and update it after each
+  train/evaluate chunk.
+- Use `scripts/level3_ppo_loop.py` for the train/evaluate/tune loop instead of
+  hand-running ad hoc commands. Start with `--dry-run` when changing the loop.
+- Use the hard gate from competition-style checkpoint evaluation, not training
+  reward alone. Training reward can guide debugging, but it is not the target.
+- Use the Level2 checkpoint step-curve packet
+  `experiments/level3_ppo_loop/analysis/2026-06-18_level2_checkpoint_step_curve.md`
+  to calibrate training horizons: treat 30M as screening/debug evidence, not a
+  final success-rate judgment. If a branch has non-zero hard-eval success or
+  meaningful gate progress, mature the same hypothesis toward 60M-90M before
+  rejecting it.
+- Use milestone-aware checkpoint evaluation for longer chunks. Prefer checking
+  intermediate 30M/60M/90M-style checkpoints plus recent checkpoints; do not
+  assume the final checkpoint is best.
+- Reward-only mode is no longer the default. The user has approved structural
+  search for Level3, including observation layout, controller, reward
+  structure, PPO/training structure, and hyperparameter changes.
+- Hard boundary: do not edit Level3 track geometry/randomization to make the
+  task easier, and do not accept any result unless it is hard-evaluated on
+  `config/level3_dr.toml`. The competition target remains the real Level3
+  track.
+- Training curricula or alternate train configs may be explored only as named
+  structural lanes. Final acceptance and state `best` must always come from
+  hard eval on `config/level3_dr.toml`.
+- Each structural lane must have a clear hypothesis, source or local evidence,
+  a unique proposal/run name, W&B logging, checkpoint milestone evaluation, and
+  a post-run analysis packet before the next training chunk.
+- The remote stateirving reference packet
+  `experiments/level3_ppo_loop/research/2026-06-19_stateirving_level3_remote_reference.md`
+  supports trying the local-obstacle v5 observation lane
+  `level3_target_gate_nearest_gate_2obs_local_history_v5`. Do not restore the
+  rejected all-gates/v4 lane unless the user explicitly asks.
+- The orchestrator now has a built-in structural hypothesis
+  `v5_localobs_remote_reward`. To launch or dry-run the remote-inspired v5 lane,
+  prefer `--structural-hypothesis v5_localobs_remote_reward` instead of manually
+  spelling out every reward parameter and packet.
+- `--codex-autonomous-loop` enables automatic structural search. If no v5 trial
+  has been recorded yet, the first automatic structural choice is the v5
+  local-obstacle 30M screening run with the stateirving reward scale.
+- For full training, run through the GPU pixi environment:
+  `pixi run -e gpu python scripts/level3_ppo_loop.py --max-iterations 1 --wandb-enabled`.
+- For the first v5 structural screen, use:
+  `pixi run -e gpu python scripts/level3_ppo_loop.py --max-iterations 1 --wandb-enabled --structural-hypothesis v5_localobs_remote_reward`.
+- For the user's unattended Codex-supervised loop, use
+  `--codex-autonomous-loop` so each run records that Codex may spawn analysis
+  and research subagents and choose the next structural or reward hypothesis
+  without per-run confirmation.
+- For a long continuation justified by the Level2 step curve, use
+  `--allow-step-curve-maturation` only when the selected initial checkpoint has
+  promising hard-eval evidence already recorded in `state.json`. This does not
+  bypass the requirement to analyze after the chunk.
+- If `state.json` records a post-audit hold such as
+  `stage2_after_loop014_escalation_audit`, the loop must not start training
+  unless the command explicitly uses `--override-state-hold` together with a
+  named structural command and/or explicit parameter values plus an
+  `--approved-hypothesis-packet`.
+- For live W&B tracking, log in first with `pixi run -e gpu wandb login` or set
+  `WANDB_API_KEY` in the shell before starting the loop.
+- Default W&B project for Level3 loop runs is `ADR-PPO-Racing-Level3`.
+- Do not overwrite `notebooks/train_level3_ppo.ipynb` unless explicitly asked;
+  it is an interactive planning/debug notebook and may contain local edits.
+- Checkpoints live under `lsy_drone_racing/control/checkpoints/`. Prefer
+  continuing from the best level3 checkpoint recorded in state; otherwise use
+  the latest `level3_DR_initial` checkpoint when compatible.
+- Use `--from-scratch` when intentionally starting a new random-init baseline.
+  After that, let later runs continue from the best checkpoint recorded in
+  `state.json`.
+- Generated loop logs and CSVs belong under `experiments/level3_ppo_loop/`.
+  Keep final summaries concise and include the best checkpoint path, success
+  rate, mean successful time, crash rate, and next action.
+- After each completed train/evaluate iteration, run
+  `scripts/analyze_level3_ppo_trial.py` before launching another training
+  iteration. The analysis packet must combine evaluator CSV metrics, W&B curves,
+  W&B reward components, PPO diagnostics, and a next-lane recommendation.
+- The analyzer creates a post-run decision gate in `state.json`. If
+  `pending_post_run_decision.status` is `awaiting_main_agent_decision`, do not
+  launch another train/evaluate chunk until the main agent has synthesized the
+  reviews into a markdown decision packet under
+  `experiments/level3_ppo_loop/decisions/`.
+- Do not run `scripts/level3_ppo_loop.py` with `--max-iterations > 1` for the
+  Codex-supervised loop. Unattended mode still means one train/evaluate chunk,
+  then analyzer, subagent review, research if needed, and a main-agent decision
+  before the next chunk.
+- For substantive post-run analysis, use exactly three separate subagents:
+  evaluator metrics, W&B/PPO diagnostics, and structure/research synthesis. The
+  main agent owns the final decision and must enforce the immutable
+  `level3_dr.toml` hard eval.
+- The main-agent decision packet must choose exactly one next action:
+  `stop_target_met`, `hold_for_more_analysis`, `continue_same_hypothesis`,
+  `change_reward_or_training_numbers`, or `launch_named_structural_lane`.
+- The next training command after a completed analysis must attach both the
+  analysis packet and the main-agent decision packet, using `--analysis-packet`
+  and `--approved-hypothesis-packet`. Structural lanes must be named explicitly
+  and may not modify the Level3 race track.
+- For nontrivial tuning changes, use research-guided tuning: spawn distinct
+  research agents for papers, GitHub/open-source examples, and reward tuning
+  references; synthesize their source-backed findings into a markdown packet
+  under `experiments/level3_ppo_loop/research/`; attach it to the next run with
+  `--research-packet`. External evidence may guide structural hypotheses, but
+  local hard eval on `config/level3_dr.toml` decides.

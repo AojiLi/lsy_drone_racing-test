@@ -7,7 +7,7 @@ https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html#pure-f
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Sequence
 
 import jax
 import jax.numpy as jp
@@ -130,7 +130,12 @@ def build_random_track_fn(
     obstacle_excl_r: float = 1.0,
     gate_corridor_width: float = 0.4,
     obstacle_corridor_width: float = 0.4,
+    first_obstacle_corridor_width: float | None = None,
     yaw_range: float = 0.75,
+    first_yaw_range: float | None = None,
+    hard_case_probability: float = 1.0,
+    replay_seed_probability: float = 0.0,
+    replay_seeds: Sequence[int] | None = None,
     grid_h: int = 40,
     grid_w: int = 40,
 ) -> Callable[[Array], tuple[Array, Array, Array]]:
@@ -151,7 +156,12 @@ def build_random_track_fn(
         obstacle_excl_r: Min distance [m] from gates to obstacles and between obstacles.
         gate_corridor_width: Half-width [m] of the flight corridor masked out for gate placement.
         obstacle_corridor_width: Half-width [m] of the corridor used for obstacle placement.
+        first_obstacle_corridor_width: Optional half-width [m] for the first obstacle's corridor.
         yaw_range: Maximum yaw offset [rad] from the travel direction for gate orientation.
+        first_yaw_range: Optional yaw offset range [rad] for the first gate.
+        hard_case_probability: Probability of using first-gate hard-case overrides.
+        replay_seed_probability: Probability of generating the track layout from a hard-eval seed.
+        replay_seeds: Hard-eval seeds whose track layouts are mixed into training.
         grid_h: Grid height (number of rows).
         grid_w: Grid width (number of columns).
 
@@ -163,6 +173,15 @@ def build_random_track_fn(
     obstacles_z = jp.array(obstacles_z, dtype=jp.float32)
     N = gates_z.shape[0]
     assert obstacles_z.shape[0] == N, "Number of gates and obstacles must be the same."
+    first_obstacle_corridor_width = (
+        obstacle_corridor_width
+        if first_obstacle_corridor_width is None
+        else first_obstacle_corridor_width
+    )
+    first_yaw_range = yaw_range if first_yaw_range is None else first_yaw_range
+    replay_seed_probability = float(replay_seed_probability)
+    has_replay_seeds = bool(replay_seeds) and replay_seed_probability > 0.0
+    replay_seed_values = jp.array(tuple(replay_seeds or (0,)), dtype=jp.uint32)
 
     xmin, ymin = jp.array(pos_limit_low[:2], dtype=jp.float32) + border_margin
     xmax, ymax = jp.array(pos_limit_high[:2], dtype=jp.float32) - border_margin
@@ -198,6 +217,11 @@ def build_random_track_fn(
         perp = jp.linalg.norm(grid - closest, axis=-1)
         return ((perp < width) & (proj >= 0) & (proj <= n)).astype(jp.float32)
 
+    def _eval_track_key(seed: Array) -> Array:
+        """Rebuild the random-track key used by single-env hard eval for a reset seed."""
+        _, subkey = jax.random.split(jax.random.key(seed), 2)
+        return jax.random.split(subkey, 1)[0]
+
     def generate(key: Array) -> tuple[Array, Array, Array]:
         """Generate one random track.
 
@@ -205,13 +229,29 @@ def build_random_track_fn(
             key: JAX PRNG key.
 
         Returns:
-            ``(gates_pos, gates_quat, obstacles_pos)`` with shapes ``(N, 3)``, ``(N, 4)`` (xyzw),
-            ``(N, 3)``.
+        ``(gates_pos, gates_quat, obstacles_pos)`` with shapes ``(N, 3)``, ``(N, 4)`` (xyzw),
+        ``(N, 3)``.
         """
-        k_start, *sub_keys = jax.random.split(key, 1 + 3 * N)
+        use_replay_seed = jp.array(False)
+        if has_replay_seeds:
+            k_replay_case, k_replay_choice, key = jax.random.split(key, 3)
+            use_replay_seed = jax.random.uniform(k_replay_case) < replay_seed_probability
+            replay_idx = jax.random.randint(k_replay_choice, (), 0, replay_seed_values.shape[0])
+            replay_key = _eval_track_key(replay_seed_values[replay_idx])
+            key = jax.lax.cond(
+                use_replay_seed,
+                lambda _: replay_key,
+                lambda _: key,
+                operand=None,
+            )
+
+        k_start, k_case, *sub_keys = jax.random.split(key, 2 + 3 * N)
         k_gates = jp.array(sub_keys[:N])
         k_yaws = jp.array(sub_keys[N : 2 * N])
         k_obs = jp.array(sub_keys[2 * N :])
+        use_hard_case = (jax.random.uniform(k_case) < hard_case_probability) & (
+            ~use_replay_seed
+        )
 
         start_xy = jax.random.uniform(
             k_start,
@@ -242,12 +282,24 @@ def build_random_track_fn(
                 i == 0, lambda _: start_xy, lambda _: gates[i - 1, :2], operand=None
             )
             travel_dir = gate_xy - prev_xy
-            yaw_offset = jax.random.uniform(k_yaws[i], minval=-yaw_range, maxval=yaw_range)
+            gate_yaw_range = jp.where(
+                (i == 0) & use_hard_case,
+                first_yaw_range,
+                yaw_range,
+            )
+            yaw_offset = jax.random.uniform(
+                k_yaws[i], minval=-gate_yaw_range, maxval=gate_yaw_range
+            )
             yaw = (yaw_offset + jp.arctan2(travel_dir[1], travel_dir[0])) % (2 * jp.pi)
             gates = gates.at[i].set(jp.array([gate_xy[0], gate_xy[1], yaw]))
 
             # Place obstacle inside the travel corridor
-            in_corridor = _corridor(prev_xy, gate_xy, obstacle_corridor_width)
+            obs_corridor_width = jp.where(
+                (i == 0) & use_hard_case,
+                first_obstacle_corridor_width,
+                obstacle_corridor_width,
+            )
+            in_corridor = _corridor(prev_xy, gate_xy, obs_corridor_width)
             obs_weight = in_corridor * gate_excl_obs * obs_excl * start_excl
             obs_xy = _sample(obs_weight, k_obs[i])
             obstacles = obstacles.at[i].set(obs_xy)
@@ -286,7 +338,11 @@ def build_random_track_fn(
 
 
 def build_full_track_randomization_fn(
-    gates_z: Array, obstacles_z: Array, pos_limit_low: Array, pos_limit_high: Array
+    gates_z: Array,
+    obstacles_z: Array,
+    pos_limit_low: Array,
+    pos_limit_high: Array,
+    **generator_kwargs,
 ) -> Callable[[EnvData, Array, Array], EnvData]:
     """Build a track randomization function that fully regenerates the track per world.
 
@@ -304,7 +360,9 @@ def build_full_track_randomization_fn(
         ``randomize_track(data, mask, key) -> data`` compatible with the reset pipeline.
     """
     batched_generate = jax.vmap(
-        build_random_track_fn(gates_z, obstacles_z, pos_limit_low, pos_limit_high)
+        build_random_track_fn(
+            gates_z, obstacles_z, pos_limit_low, pos_limit_high, **generator_kwargs
+        )
     )
 
     def randomize_track(data: EnvData, mask: Array, key: Array) -> EnvData:
