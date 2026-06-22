@@ -213,6 +213,22 @@ def checkpoint_action_lowpass_alpha(checkpoint: Any) -> float:
     return DEFAULT_ACTION_LOWPASS_ALPHA
 
 
+def checkpoint_obs_normalization(checkpoint: Any) -> dict[str, Any] | None:
+    """Return actor observation normalization metadata, if present."""
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        value = checkpoint.get("obs_normalization")
+        return value if isinstance(value, dict) else None
+    return None
+
+
+def checkpoint_return_normalization(checkpoint: Any) -> dict[str, Any] | None:
+    """Return critic return/value normalization metadata, if present."""
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        value = checkpoint.get("return_normalization")
+        return value if isinstance(value, dict) else None
+    return None
+
+
 def make_checkpoint(
     model_state_dict: dict[str, Any],
     hidden_dim: int | None = None,
@@ -222,6 +238,8 @@ def make_checkpoint(
     policy_arch: str = POLICY_ARCH_MLP,
     recurrent_hidden_dim: int | None = None,
     recurrent_sequence_len: int | None = None,
+    obs_normalization: dict[str, Any] | None = None,
+    return_normalization: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Package model weights with Level3 observation-layout and network-width metadata."""
     policy_arch = normalize_policy_arch(policy_arch)
@@ -255,6 +273,10 @@ def make_checkpoint(
         checkpoint["recurrent_hidden_dim"] = inferred_recurrent_hidden_dim
     if recurrent_sequence_len is not None:
         checkpoint["recurrent_sequence_len"] = int(recurrent_sequence_len)
+    if obs_normalization is not None:
+        checkpoint["obs_normalization"] = obs_normalization
+    if return_normalization is not None:
+        checkpoint["return_normalization"] = return_normalization
     return checkpoint
 
 

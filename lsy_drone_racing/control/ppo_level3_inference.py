@@ -27,6 +27,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     checkpoint_action_lowpass_alpha,
     checkpoint_action_rp_limit_deg,
     checkpoint_hidden_dim,
+    checkpoint_obs_normalization,
     checkpoint_policy_arch,
     checkpoint_recurrent_hidden_dim,
     normalize_action_lowpass_alpha,
@@ -225,6 +226,7 @@ class PPOLevel2Inference(Controller):
         self.policy_arch = checkpoint_policy_arch(checkpoint, model_state_dict)
         self.action_rp_limit_deg = checkpoint_action_rp_limit_deg(checkpoint)
         self.action_lowpass_alpha = checkpoint_action_lowpass_alpha(checkpoint)
+        self.obs_normalization = checkpoint_obs_normalization(checkpoint)
         self._apply_action_rp_limit()
         self.action_scale = (self.action_high - self.action_low) / 2.0
         self.action_mean = (self.action_high + self.action_low) / 2.0
@@ -332,6 +334,7 @@ class PPOLevel2Inference(Controller):
             self._finished = True
 
         obs_rl = self._obs_rl(obs)
+        obs_rl = self._normalize_obs(obs_rl)
         obs_tensor = torch.tensor(obs_rl, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.no_grad():
             if self.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
@@ -356,6 +359,23 @@ class PPOLevel2Inference(Controller):
         filtered_action_norm = self._filter_action(action_norm_np)
         self._last_action_norm = filtered_action_norm
         return self._scale_action(filtered_action_norm).astype(np.float32)
+
+    def _normalize_obs(self, obs_rl: NDArray[np.float32]) -> NDArray[np.float32]:
+        """Apply frozen actor observation normalization from checkpoint metadata."""
+        stats = self.obs_normalization
+        if not stats:
+            return obs_rl.astype(np.float32)
+        mean = np.asarray(stats.get("mean"), dtype=np.float32)
+        var = np.asarray(stats.get("var"), dtype=np.float32)
+        clip = float(stats.get("clip", 10.0))
+        eps = float(stats.get("epsilon", 1e-8))
+        if mean.shape != obs_rl.shape or var.shape != obs_rl.shape:
+            raise ValueError(
+                f"Checkpoint obs normalization shape {mean.shape}/{var.shape} "
+                f"does not match observation shape {obs_rl.shape}."
+            )
+        normalized = (obs_rl - mean) / np.sqrt(np.maximum(var, eps))
+        return np.clip(normalized, -clip, clip).astype(np.float32)
 
     def _obs_rl(self, obs: dict[str, NDArray[np.floating]]) -> NDArray[np.float32]:
         """Build the same flat observation vector as RaceObservation in training."""

@@ -394,11 +394,24 @@ V30_CORRECTED_SEMANTICS_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-22_launch_v30_end_to_end_ppo_corrected_action_and_episode_semantics.md"
 )
+LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-22_level3_framework_structural_training_plan.md"
+)
+V31A_LONGER_ROLLOUT_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_launch_v31a_longer_rollout_clean_ppo.md"
+)
+V31B_OBS_RETURN_NORM_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_loop094_launch_v31b_obs_return_norm.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
     "teacher_retention_kl",
     "v30_episode_semantics",
+    "observation_return_normalization_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -478,6 +491,18 @@ DEFAULT_AUTONOMY_POLICY: dict[str, Any] = {
         "Codex main agent owns subagent analysis, research synthesis, and the "
         "next structural or reward decision between script invocations."
     ),
+    "framework_structural_plan_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+    "framework_stage_priority": [
+        "ppo_correctness_and_semantics",
+        "clean_feedforward_baseline_with_longer_rollout",
+        "observation_return_normalization_support",
+        "asymmetric_privileged_critic",
+        "gate_phase_reset_curriculum",
+        "prioritized_level_replay",
+        "recurrent_actor_gru256_after_reset_semantics",
+        "reward_numbers",
+        "speed_optimization_after_success_near_50_percent",
+    ],
     "reward_scope": (
         "structural search is allowed; do not change level3 track geometry "
         f"or accept any metric outside hard eval on config/{TARGET_EVAL_CONFIG}"
@@ -507,6 +532,10 @@ BASE_PARAMS: dict[str, Any] = {
     "action_lowpass_alpha": 1.0,
     "reward_structure": "legacy_staged",
     "track_generator_profile": "default",
+    "obs_norm_enabled": False,
+    "obs_norm_clip": 10.0,
+    "return_norm_enabled": False,
+    "return_norm_clip": 10.0,
     "progress_coef": 0.0,
     "gate_stage_coef": 10.0,
     "gate_axis_coef": 20.0,
@@ -614,7 +643,7 @@ PARAM_BOUNDS: dict[str, tuple[float, float]] = {
     "max_grad_norm": (0.30, 3.00),
 }
 
-BOOL_PARAM_KEYS = {"anneal_lr", "clip_vloss"}
+BOOL_PARAM_KEYS = {"anneal_lr", "clip_vloss", "obs_norm_enabled", "return_norm_enabled"}
 REWARD_STRUCTURE_CHOICES = {
     "legacy_staged",
     "gate_potential",
@@ -4638,6 +4667,182 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "any training is launched."
         ),
     },
+    "v31a_longer_rollout_clean_ppo_5m": {
+        "name": "v31a_longer_rollout_clean_ppo_5m",
+        "proposal_name": "structural_v31a_longer_rollout_clean_ppo_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 5,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP052_BEST_CHECKPOINT,
+        "requires_training_support": "v30_episode_semantics",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V31A_LONGER_ROLLOUT_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "comparison_baseline": "v30-A used 1024 envs x 32 steps",
+            },
+            "semantic_repairs": [
+                "same_step_finish_termination",
+                "finish_bonus_once",
+                "no_terminal_to_reset_dummy_transition",
+                "per_slot_wrapper_reset",
+                "true_observation_delay_reset",
+                "termination_reason_logging",
+            ],
+            "not_yet_implemented_support": [
+                "actor_observation_running_normalization",
+                "return_or_value_running_scale",
+                "asymmetric_privileged_critic",
+                "gate_phase_reset_buffer",
+                "prioritized_level_replay",
+                "tanh_squashed_gaussian_logprob",
+            ],
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 1 partial clean PPO baseline",
+            "baseline": "loop052 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "domain_randomized_config_role": (
+                f"{DOMAIN_RANDOMIZED_TRAIN_CONFIG} remains optional training-only "
+                "robustness evidence, not final acceptance."
+            ),
+            "primary_question": (
+                "Does reducing vector parallelism and extending per-env rollout "
+                "from 0.64s to 2.56s improve credit assignment and hard-eval "
+                "gate progress under the corrected v30 episode semantics?"
+            ),
+            "success_screen": {
+                "beats_loop093_success_rate": "> 0.17",
+                "beats_loop093_mean_gates": "> 1.55",
+                "promising_for_maturation": (
+                    "non-zero success with mean_gates >= 1.60 or success >= 0.20"
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 43,
+        },
+        "rationale": (
+            "The framework packet argues that 1024x32 rollouts may be too short "
+            "for gate approach, crossing, and recovery credit assignment at 50 Hz. "
+            "This lane keeps loop052 reward/PPO numbers, v5 deployment observation, "
+            "and the corrected v30 episode/reset semantics fixed, but changes the "
+            "rollout geometry to 256 envs x 128 steps with the same 32768 samples "
+            "per PPO update. It is an executable first step toward the clean PPO "
+            "baseline before implementing normalization, privileged critic, "
+            "gate-phase reset curriculum, PLR, or GRU."
+        ),
+    },
+    "v31b_obs_return_norm_clean_ppo_5m": {
+        "name": "v31b_obs_return_norm_clean_ppo_5m",
+        "proposal_name": "structural_v31b_obs_return_norm_clean_ppo_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 5,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "from_scratch": True,
+        "requires_training_support": "observation_return_normalization_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V31B_OBS_RETURN_NORM_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": {
+                "actor_observation_running_mean_std": True,
+                "frozen_eval_time_actor_stats_from_checkpoint": True,
+                "critic_return_running_mean_std": True,
+                "gae_scale": "raw_reward_scale",
+                "critic_loss_scale": "normalized_return_scale",
+                "warm_start": "from_scratch_to_avoid_raw_checkpoint_input_distribution_shift",
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+            },
+            "semantic_repairs": [
+                "same_step_finish_termination",
+                "finish_bonus_once",
+                "no_terminal_to_reset_dummy_transition",
+                "per_slot_wrapper_reset",
+                "true_observation_delay_reset",
+                "termination_reason_logging",
+            ],
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 2 observation and return normalization",
+            "baseline": "v31a longer-rollout clean PPO",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Does normalizing actor observations and critic return targets "
+                "make the clean PPO baseline train with stronger update signal "
+                "and more stable value learning on Level3?"
+            ),
+            "success_screen": {
+                "mechanics": "checkpoint contains obs_normalization and return_normalization",
+                "beats_or_explains_v31a": (
+                    "success >= 0.19 or W&B/evaluator evidence shows healthier "
+                    "value/update dynamics worth maturing beyond 5M"
+                ),
+                "promising_for_maturation": (
+                    "non-zero success with mean_gates >= 1.60, or clear W&B "
+                    "conversion with lower value loss and no collapse"
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 44,
+            "obs_norm_enabled": True,
+            "obs_norm_clip": 10.0,
+            "return_norm_enabled": True,
+            "return_norm_clip": 10.0,
+        },
+        "rationale": (
+            "loop094/v31a showed only a weak hard-eval gain and W&B still had "
+            "low PPO update pressure with large raw value targets. The current "
+            "framework packet ranks observation/return normalization as the next "
+            "implementation step before privileged critic, curriculum, PLR, GRU, "
+            "or further reward-number search. This screen starts from scratch "
+            "so the Actor never has to reinterpret a raw-observation checkpoint "
+            "through newly normalized inputs."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -4669,6 +4874,10 @@ FIRE_PARAM_KEYS = [
     "v27_retention_dataset_path",
     "v27_retention_batch_size",
     "v27_lane_name",
+    "obs_norm_enabled",
+    "obs_norm_clip",
+    "return_norm_enabled",
+    "return_norm_clip",
     "progress_coef",
     "gate_stage_coef",
     "gate_axis_coef",
@@ -5222,6 +5431,10 @@ def apply_structural_hypothesis_args(
         args.train_timesteps = int(hypothesis["train_timesteps"])
     if args.checkpoint_interval == args.default_checkpoint_interval:
         args.checkpoint_interval = int(hypothesis["checkpoint_interval"])
+    if hypothesis.get("num_envs"):
+        args.num_envs = int(hypothesis["num_envs"])
+    if hypothesis.get("num_steps"):
+        args.num_steps = int(hypothesis["num_steps"])
     if hypothesis.get("max_eval_checkpoints"):
         args.max_eval_checkpoints = int(hypothesis["max_eval_checkpoints"])
     if hypothesis.get("eval_seed_split"):
@@ -6877,6 +7090,11 @@ def run_one_iteration(args: argparse.Namespace, state: dict[str, Any]) -> str:
                 else "default"
             ),
             "checkpoint_selection": "observation_layout_and_hidden_dim",
+        },
+        "rollout_structure": {
+            "num_envs": args.num_envs,
+            "num_steps": args.num_steps,
+            "batch_size": args.num_envs * args.num_steps,
         },
         "keep_latest_params": args.keep_latest_params,
         "params": params,

@@ -32,18 +32,28 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
 - Each structural lane must have a clear hypothesis, source or local evidence,
   a unique proposal/run name, W&B logging, checkpoint milestone evaluation, and
   a post-run analysis packet before the next training chunk.
-- Observation-layout experiments are open. The first supported structural lane
-  is the remote-inspired local-obstacle v5 layout
+- Observation-layout experiments are open. The active deployed observation
+  baseline is the remote-inspired local-obstacle v5 layout
   `level3_target_gate_nearest_gate_2obs_local_history_v5`; do not restore the
   rejected all-gates/v4 lane unless the user explicitly asks.
+- The current structural roadmap is
+  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
+  Its priority order is PPO correctness, clean longer-rollout baseline,
+  observation/return normalization, asymmetric privileged critic, gate-phase
+  reset curriculum, prioritized level replay, GRU, reward numbers, then speed.
+- The immediate executable structural lane is
+  `v31b_obs_return_norm_clean_ppo_5m`: it keeps v5 observations, loop052
+  reward/PPO numbers, corrected v30 semantics, and hard eval on
+  `config/level3.toml`, while adding actor observation RunningMeanStd and
+  critic return/value normalization on the longer `256 envs x 128 steps`
+  rollout geometry. This lane starts from scratch to avoid feeding a
+  raw-observation checkpoint through newly normalized actor inputs.
 - The stateirving reference packet
   `experiments/level3_ppo_loop/research/2026-06-19_stateirving_level3_remote_reference.md`
   is the current source-backed packet for v5 and remote reward-scale evidence.
-- The orchestrator has a built-in structural hypothesis
-  `v5_localobs_remote_reward`. Use
-  `--structural-hypothesis v5_localobs_remote_reward` for the first v5 30M
-  screen; it injects the v5 observation layout, remote reward scale, source
-  packet, approval packet, from-scratch start, and 5M checkpoint interval.
+- The orchestrator still retains historical structural hypotheses such as
+  `v5_localobs_remote_reward`, but prefer the current framework/decision packet
+  unless the user explicitly asks to revisit an older lane.
 - Plateau guard is active by default. If consecutive evaluated trials do not
   improve success rate or mean gates, the loop should hold unless the user
   explicitly provides a new hypothesis or enables automatic hypothesis search.

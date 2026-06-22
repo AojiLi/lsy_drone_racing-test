@@ -45,8 +45,10 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     checkpoint_action_lowpass_alpha,
     checkpoint_action_rp_limit_deg,
     checkpoint_hidden_dim,
+    checkpoint_obs_normalization,
     checkpoint_policy_arch,
     checkpoint_recurrent_hidden_dim,
+    checkpoint_return_normalization,
     make_checkpoint,
     normalize_action_lowpass_alpha,
     normalize_action_rp_limit_deg,
@@ -237,6 +239,14 @@ class Args:
     """number of retained teacher states sampled per PPO minibatch"""
     v27_lane_name: str | None = None
     """v27 lane label logged to W&B/checkpoints"""
+    obs_norm_enabled: bool = False
+    """normalize actor/critic observations with running statistics"""
+    obs_norm_clip: float = 10.0
+    """absolute clip applied after observation normalization"""
+    return_norm_enabled: bool = False
+    """train critic on normalized returns while GAE uses denormalized values"""
+    return_norm_clip: float = 10.0
+    """absolute clip applied to normalized return targets"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -315,6 +325,10 @@ class Args:
                 )
             if args.v27_retention_batch_size <= 0:
                 raise ValueError("v27_retention_batch_size must be positive.")
+        if args.obs_norm_clip <= 0.0:
+            raise ValueError("obs_norm_clip must be positive.")
+        if args.return_norm_clip <= 0.0:
+            raise ValueError("return_norm_clip must be positive.")
         args.batch_size = int(args.num_envs * args.num_steps)
         args.minibatch_size = int(args.batch_size // args.num_minibatches)
         args.num_iterations = args.total_timesteps // args.batch_size
@@ -1906,6 +1920,80 @@ def mean_scalar(value: Any) -> float:
     return float(np.asarray(value).mean())
 
 
+class RunningMeanStd:
+    """Torch running mean/variance with checkpoint-friendly metadata."""
+
+    def __init__(
+        self,
+        shape: tuple[int, ...] | torch.Size,
+        *,
+        device: torch.device,
+        epsilon: float = 1e-4,
+        state: dict[str, Any] | None = None,
+    ):
+        self.device = device
+        self.epsilon = float(epsilon)
+        if state is None:
+            self.mean = torch.zeros(shape, dtype=torch.float32, device=device)
+            self.var = torch.ones(shape, dtype=torch.float32, device=device)
+            self.count = torch.tensor(self.epsilon, dtype=torch.float32, device=device)
+            return
+        self.mean = torch.as_tensor(state["mean"], dtype=torch.float32, device=device)
+        self.var = torch.as_tensor(state["var"], dtype=torch.float32, device=device)
+        self.count = torch.tensor(
+            float(state.get("count", self.epsilon)),
+            dtype=torch.float32,
+            device=device,
+        )
+        self.epsilon = float(state.get("epsilon", self.epsilon))
+
+    def update(self, batch: Tensor) -> None:
+        """Update statistics from a batch whose first dimension is batch."""
+        batch = batch.detach().float()
+        if batch.numel() == 0:
+            return
+        batch_mean = batch.mean(dim=0)
+        batch_var = batch.var(dim=0, unbiased=False)
+        batch_count = torch.tensor(batch.shape[0], dtype=torch.float32, device=self.device)
+        self._update_from_moments(batch_mean, batch_var, batch_count)
+
+    def _update_from_moments(
+        self,
+        batch_mean: Tensor,
+        batch_var: Tensor,
+        batch_count: Tensor,
+    ) -> None:
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
+        new_mean = self.mean + delta * batch_count / total_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m_2 = m_a + m_b + delta.square() * self.count * batch_count / total_count
+        self.mean = new_mean
+        self.var = torch.clamp(m_2 / total_count, min=self.epsilon)
+        self.count = total_count
+
+    def normalize(self, value: Tensor, *, clip: float) -> Tensor:
+        """Normalize a tensor using current frozen statistics."""
+        normalized = (value - self.mean) / torch.sqrt(self.var + self.epsilon)
+        return torch.clamp(normalized, -float(clip), float(clip))
+
+    def denormalize(self, value: Tensor) -> Tensor:
+        """Map normalized value predictions back to raw return scale."""
+        return value * torch.sqrt(self.var + self.epsilon) + self.mean
+
+    def metadata(self, *, enabled: bool, clip: float) -> dict[str, Any]:
+        """Return JSON/torch-save friendly checkpoint metadata."""
+        return {
+            "enabled": bool(enabled),
+            "mean": self.mean.detach().cpu().tolist(),
+            "var": self.var.detach().cpu().tolist(),
+            "count": float(self.count.detach().cpu().item()),
+            "clip": float(clip),
+            "epsilon": self.epsilon,
+        }
+
+
 def setup_wandb(args: Args) -> None:
     """Start or configure a W&B run with explicit metric names."""
     if wandb.run is None:
@@ -2534,10 +2622,11 @@ def train_ppo(
         envs.single_action_space.shape,
         args,
     ).to(device)
+    initial_checkpoint: dict[str, Any] | None = None
     if initial_model_path is not None:
-        checkpoint = torch.load(initial_model_path, map_location=device)
-        model_state_dict, observation_layout = unpack_checkpoint(checkpoint)
-        initial_policy_arch = checkpoint_policy_arch(checkpoint, model_state_dict)
+        initial_checkpoint = torch.load(initial_model_path, map_location=device)
+        model_state_dict, observation_layout = unpack_checkpoint(initial_checkpoint)
+        initial_policy_arch = checkpoint_policy_arch(initial_checkpoint, model_state_dict)
         if initial_policy_arch != args.policy_arch:
             raise ValueError(
                 f"Cannot initialize policy_arch={args.policy_arch} training from a "
@@ -2549,14 +2638,14 @@ def train_ppo(
                     f"Cannot initialize {args.observation_layout} recurrent training "
                     f"from checkpoint layout {observation_layout}."
                 )
-            initial_hidden_dim = checkpoint_hidden_dim(checkpoint, model_state_dict)
+            initial_hidden_dim = checkpoint_hidden_dim(initial_checkpoint, model_state_dict)
             if initial_hidden_dim != args.hidden_dim:
                 raise ValueError(
                     f"Cannot initialize hidden_dim={args.hidden_dim} recurrent training "
                     f"from hidden_dim={initial_hidden_dim} checkpoint."
                 )
             initial_recurrent_hidden_dim = checkpoint_recurrent_hidden_dim(
-                checkpoint, model_state_dict
+                initial_checkpoint, model_state_dict
             )
             if initial_recurrent_hidden_dim != args.recurrent_hidden_dim:
                 raise ValueError(
@@ -2613,7 +2702,7 @@ def train_ppo(
                     "initialized appended local observation from local-obstacle weights; "
                     "appended input weights are zero-padded and optimizer starts fresh"
                 )
-            initial_hidden_dim = checkpoint_hidden_dim(checkpoint, model_state_dict)
+            initial_hidden_dim = checkpoint_hidden_dim(initial_checkpoint, model_state_dict)
             if initial_hidden_dim != args.hidden_dim and args.allow_hidden_dim_warmstart:
                 model_state_dict = expand_checkpoint_hidden_dim(model_state_dict, agent)
                 print(
@@ -2627,14 +2716,14 @@ def train_ppo(
                     f"hidden_dim={initial_hidden_dim} checkpoint. Use a matching hidden_dim "
                     "or pass allow_hidden_dim_warmstart=True for an explicit capacity lane."
                 )
-            initial_action_rp_limit_deg = checkpoint_action_rp_limit_deg(checkpoint)
+            initial_action_rp_limit_deg = checkpoint_action_rp_limit_deg(initial_checkpoint)
             if round(initial_action_rp_limit_deg, 6) != round(args.action_rp_limit_deg, 6):
                 print(
                     "initialized checkpoint action_rp_limit_deg="
                     f"{initial_action_rp_limit_deg}; training with "
                     f"action_rp_limit_deg={args.action_rp_limit_deg}"
                 )
-            initial_action_lowpass_alpha = checkpoint_action_lowpass_alpha(checkpoint)
+            initial_action_lowpass_alpha = checkpoint_action_lowpass_alpha(initial_checkpoint)
             if round(initial_action_lowpass_alpha, 6) != round(args.action_lowpass_alpha, 6):
                 print(
                     "initialized checkpoint action_lowpass_alpha="
@@ -2643,6 +2732,76 @@ def train_ppo(
                 )
             agent.load_state_dict(model_state_dict)
             print(f"initialized agent weights from {initial_model_path}; optimizer starts fresh")
+    obs_rms = None
+    if args.obs_norm_enabled:
+        obs_norm_state = (
+            checkpoint_obs_normalization(initial_checkpoint)
+            if initial_checkpoint is not None
+            else None
+        )
+        if obs_norm_state:
+            obs_rms = RunningMeanStd(
+                envs.single_observation_space.shape,
+                device=device,
+                state=obs_norm_state,
+            )
+            print(f"initialized observation normalization from {initial_model_path}")
+        else:
+            obs_rms = RunningMeanStd(envs.single_observation_space.shape, device=device)
+            if initial_model_path is not None:
+                print(
+                    "initialized fresh observation normalization while warm-starting "
+                    f"weights from {initial_model_path}"
+                )
+    return_rms = None
+    if args.return_norm_enabled:
+        return_norm_state = (
+            checkpoint_return_normalization(initial_checkpoint)
+            if initial_checkpoint is not None
+            else None
+        )
+        if return_norm_state:
+            return_rms = RunningMeanStd((), device=device, state=return_norm_state)
+            print(f"initialized return normalization from {initial_model_path}")
+        else:
+            return_rms = RunningMeanStd((), device=device)
+            if initial_model_path is not None:
+                print(
+                    "initialized fresh return normalization while warm-starting "
+                    f"weights from {initial_model_path}"
+                )
+
+    def policy_obs(raw_obs: Tensor, *, update_stats: bool) -> Tensor:
+        """Return the observation tensor fed to Actor/Critic."""
+        raw_obs = raw_obs.float()
+        if obs_rms is None:
+            return raw_obs
+        if update_stats:
+            obs_rms.update(raw_obs)
+        return obs_rms.normalize(raw_obs, clip=args.obs_norm_clip)
+
+    def raw_value(value_prediction: Tensor) -> Tensor:
+        """Map Critic output to the raw reward scale used for GAE."""
+        if return_rms is None:
+            return value_prediction
+        return return_rms.denormalize(value_prediction)
+
+    def normalized_return(value: Tensor) -> Tensor:
+        """Map raw return/value targets to the Critic training scale."""
+        if return_rms is None:
+            return value
+        return return_rms.normalize(value, clip=args.return_norm_clip)
+
+    def checkpoint_obs_norm_metadata() -> dict[str, Any] | None:
+        if obs_rms is None:
+            return None
+        return obs_rms.metadata(enabled=True, clip=args.obs_norm_clip)
+
+    def checkpoint_return_norm_metadata() -> dict[str, Any] | None:
+        if return_rms is None:
+            return None
+        return return_rms.metadata(enabled=True, clip=args.return_norm_clip)
+
     retention_dataset = load_v27_retention_dataset(
         args,
         envs.single_observation_space.shape,
@@ -2662,6 +2821,7 @@ def train_ppo(
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    raw_values = torch.zeros((args.num_steps, args.num_envs)).to(device)
     recurrent_enabled = args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
     next_recurrent_state = (
         agent.get_initial_state(args.num_envs, device)
@@ -2695,20 +2855,22 @@ def train_ppo(
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
-            obs[step] = next_obs
+            current_policy_obs = policy_obs(next_obs, update_stats=True)
+            obs[step] = current_policy_obs
             dones[step] = next_done
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
                 if recurrent_enabled:
                     action, logprob, _, value, next_recurrent_state = agent.get_action_and_value(
-                        next_obs,
+                        current_policy_obs,
                         next_recurrent_state,
                         next_done,
                     )
                 else:
-                    action, logprob, _, value = agent.get_action_and_value(next_obs)
+                    action, logprob, _, value = agent.get_action_and_value(current_policy_obs)
                 values[step] = value.flatten()
+                raw_values[step] = raw_value(value).flatten()
             actions[step] = action
             logprobs[step] = logprob
 
@@ -2739,7 +2901,8 @@ def train_ppo(
 
         # bootstrap value if not done
         with torch.no_grad():
-            next_value = agent.get_value(next_obs).reshape(1, -1)
+            bootstrap_obs = policy_obs(next_obs, update_stats=False)
+            next_value = raw_value(agent.get_value(bootstrap_obs)).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
             for t in reversed(range(args.num_steps)):
@@ -2748,12 +2911,21 @@ def train_ppo(
                     nextvalues = next_value
                 else:
                     nextnonterminal = 1.0 - dones[t + 1]
-                    nextvalues = values[t + 1]
-                delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+                    nextvalues = raw_values[t + 1]
+                delta = (
+                    rewards[t]
+                    + args.gamma * nextvalues * nextnonterminal
+                    - raw_values[t]
+                )
                 advantages[t] = lastgaelam = (
                     delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
                 )
-            returns = advantages + values
+            returns = advantages + raw_values
+
+        if return_rms is not None:
+            return_rms.update(returns.reshape(-1))
+        value_targets = normalized_return(returns)
+        old_values_for_loss = normalized_return(raw_values)
 
         # Optimizing the policy and value network
         clipfracs = []
@@ -2764,7 +2936,7 @@ def train_ppo(
         if recurrent_enabled:
             if retention_dataset is not None:
                 raise NotImplementedError("v27 retention KL is not wired for recurrent PPO.")
-            b_values = values.reshape(-1)
+            b_values_raw = raw_values.reshape(-1)
             b_returns = returns.reshape(-1)
             env_inds = np.arange(args.num_envs)
             env_minibatch_size = max(1, args.num_envs // args.num_minibatches)
@@ -2804,8 +2976,8 @@ def train_ppo(
                     pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                     newvalue = newvalue.view(-1)
-                    mb_returns = returns[:, mb_env_inds].reshape(-1)
-                    mb_values = values[:, mb_env_inds].reshape(-1)
+                    mb_returns = value_targets[:, mb_env_inds].reshape(-1)
+                    mb_values = old_values_for_loss[:, mb_env_inds].reshape(-1)
                     if args.clip_vloss:
                         v_loss_unclipped = (newvalue - mb_returns) ** 2
                         v_clipped = mb_values + torch.clamp(
@@ -2834,7 +3006,9 @@ def train_ppo(
             b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
-            b_values = values.reshape(-1)
+            b_value_targets = value_targets.reshape(-1)
+            b_values = old_values_for_loss.reshape(-1)
+            b_values_raw = raw_values.reshape(-1)
 
             b_inds = np.arange(args.batch_size)
             for epoch in range(args.update_epochs):
@@ -2873,15 +3047,17 @@ def train_ppo(
                     # Value loss
                     newvalue = newvalue.view(-1)
                     if args.clip_vloss:
-                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
+                        v_loss_unclipped = (newvalue - b_value_targets[mb_inds]) ** 2
                         v_clipped = b_values[mb_inds] + torch.clamp(
                             newvalue - b_values[mb_inds], -args.clip_coef, args.clip_coef
                         )
-                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
+                        v_loss_clipped = (v_clipped - b_value_targets[mb_inds]) ** 2
                         v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                         v_loss = 0.5 * v_loss_max.mean()
                     else:
-                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                        v_loss = 0.5 * (
+                            (newvalue - b_value_targets[mb_inds]) ** 2
+                        ).mean()
 
                     entropy_loss = entropy.mean()
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
@@ -2914,7 +3090,7 @@ def train_ppo(
                 if args.target_kl is not None and approx_kl > args.target_kl:
                     break
 
-        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
+        y_pred, y_true = b_values_raw.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
@@ -2956,6 +3132,28 @@ def train_ppo(
                     reward_component_logs["reward_components/gate_bonus_rate"] = (
                         reward_component_logs["reward_components/gate_bonus"] / args.gate_bonus
                     )
+            normalization_logs = {}
+            if obs_rms is not None:
+                normalization_logs.update(
+                    {
+                        "normalization/obs_count": float(obs_rms.count.detach().cpu().item()),
+                        "normalization/obs_var_mean": float(
+                            obs_rms.var.detach().float().mean().cpu().item()
+                        ),
+                    }
+                )
+            if return_rms is not None:
+                normalization_logs.update(
+                    {
+                        "normalization/return_count": float(
+                            return_rms.count.detach().cpu().item()
+                        ),
+                        "normalization/return_mean": float(
+                            return_rms.mean.detach().cpu().item()
+                        ),
+                        "normalization/return_var": float(return_rms.var.detach().cpu().item()),
+                    }
+                )
             wandb.log(
                 {
                     "global_step": global_step,
@@ -2975,6 +3173,7 @@ def train_ppo(
                     "charts/SPS": int(global_step / (time.time() - start_time)),
                     **reward_component_logs,
                     **race_metric_logs,
+                    **normalization_logs,
                 },
                 step=global_step,
             )
@@ -2997,6 +3196,8 @@ def train_ppo(
                     recurrent_sequence_len=(
                         args.recurrent_sequence_len if recurrent_enabled else None
                     ),
+                    obs_normalization=checkpoint_obs_norm_metadata(),
+                    return_normalization=checkpoint_return_norm_metadata(),
                 ),
                 checkpoint_path,
             )
@@ -3016,6 +3217,8 @@ def train_ppo(
                 policy_arch=args.policy_arch,
                 recurrent_hidden_dim=args.recurrent_hidden_dim if recurrent_enabled else None,
                 recurrent_sequence_len=args.recurrent_sequence_len if recurrent_enabled else None,
+                obs_normalization=checkpoint_obs_norm_metadata(),
+                return_normalization=checkpoint_return_norm_metadata(),
             ),
             model_path,
         )
@@ -3068,6 +3271,19 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
     eval_env = make_envs(config=args.config, num_envs=1, coefs=r_coefs)
     checkpoint = torch.load(model_path, map_location=device)
     model_state_dict, observation_layout = unpack_checkpoint(checkpoint)
+    obs_norm_state = checkpoint_obs_normalization(checkpoint)
+    obs_rms = (
+        RunningMeanStd(eval_env.single_observation_space.shape, device=device, state=obs_norm_state)
+        if obs_norm_state
+        else None
+    )
+
+    def eval_policy_obs(raw_obs: Tensor) -> Tensor:
+        raw_obs = raw_obs.float()
+        if obs_rms is None:
+            return raw_obs
+        return obs_rms.normalize(raw_obs, clip=float(obs_norm_state.get("clip", 10.0)))
+
     if observation_layout != args.observation_layout:
         raise ValueError(
             f"Cannot evaluate checkpoint layout {observation_layout} "
@@ -3109,15 +3325,16 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
             episode_reward = 0
             steps = 0
             while not done.any():
+                policy_input = eval_policy_obs(obs)
                 if policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
                     act, _, _, _, recurrent_state = agent.get_action_and_value(
-                        obs,
+                        policy_input,
                         recurrent_state,
                         done.float(),
                         deterministic=True,
                     )
                 else:
-                    act, _, _, _ = agent.get_action_and_value(obs, deterministic=True)
+                    act, _, _, _ = agent.get_action_and_value(policy_input, deterministic=True)
                 obs, reward, terminated, truncated, info = eval_env.step(act)
                 eval_env.render()
                 done = terminated | truncated
@@ -3244,6 +3461,10 @@ def main(
     v27_retention_dataset_path: str | None = None,
     v27_retention_batch_size: int = 512,
     v27_lane_name: str | None = None,
+    obs_norm_enabled: bool = False,
+    obs_norm_clip: float = 10.0,
+    return_norm_enabled: bool = False,
+    return_norm_clip: float = 10.0,
     cuda: bool = True,
     jax_device: str = "gpu",
     model_name: str = "ppo_level2_racing.ckpt",
@@ -3321,6 +3542,10 @@ def main(
         v27_retention_dataset_path=v27_retention_dataset_path,
         v27_retention_batch_size=v27_retention_batch_size,
         v27_lane_name=v27_lane_name,
+        obs_norm_enabled=obs_norm_enabled,
+        obs_norm_clip=obs_norm_clip,
+        return_norm_enabled=return_norm_enabled,
+        return_norm_clip=return_norm_clip,
         cuda=cuda,
         jax_device=jax_device,
         n_obs=n_obs,
