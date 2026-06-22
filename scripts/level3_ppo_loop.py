@@ -420,6 +420,10 @@ V31C_IDENTITY_NORM_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-22_loop095_reject_v31b_launch_v31c_identity_norm_warmstart.md"
 )
+V31D_V31A_MATURATION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_loop096_reject_v31c_continue_v31a_maturation.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -4950,6 +4954,103 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "lane materializes an identity-normalized copy of loop094 4M, requires "
             "zero-update hard-eval parity before training, then screens whether "
             "normalization can improve value scale without erasing the frontier."
+        ),
+    },
+    "v31d_v31a_longer_rollout_maturation_15m": {
+        "name": "v31d_v31a_longer_rollout_maturation_15m",
+        "proposal_name": "structural_v31d_v31a_longer_rollout_maturation_15m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 15_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 9,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5,8,10,12,15",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP094_BEST_CHECKPOINT,
+        "allow_step_curve_maturation": True,
+        "allow_repeat_params": True,
+        "requires_training_support": "v30_episode_semantics",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V31D_V31A_MATURATION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP094_BEST_CHECKPOINT,
+            },
+            "semantic_repairs": [
+                "same_step_finish_termination",
+                "finish_bonus_once",
+                "no_terminal_to_reset_dummy_transition",
+                "per_slot_wrapper_reset",
+                "true_observation_delay_reset",
+                "termination_reason_logging",
+            ],
+            "deferred_support": [
+                "asymmetric_privileged_critic",
+                "gate_phase_reset_buffer",
+                "prioritized_level_replay",
+                "recurrent_actor_gru256",
+            ],
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 1b clean PPO longer-rollout maturation",
+            "baseline": "loop094/v31a 4M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Does the only currently promising clean-PPO branch improve if "
+                "continued from its best 4M checkpoint with normalization disabled?"
+            ),
+            "evidence": {
+                "loop094_best": "19/100 success, mean_gates 1.55, mean success time 6.876s",
+                "loop095_v31b": "0/100 success from scratch with normalization",
+                "loop096_v31c": (
+                    "zero-update identity-normalization parity passed, but training "
+                    "regressed to 0/100 success and 0.0 mean gates"
+                ),
+            },
+            "success_screen": {
+                "promising_for_more_maturation": (
+                    "success > 0.19, or mean_gates materially above 1.55 with "
+                    "nonzero success and lower crash rate"
+                ),
+                "reject_condition": (
+                    "all milestones stay at or below loop094 best without new "
+                    "success seeds or gate-progress expansion"
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 46,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+        },
+        "rationale": (
+            "loop094/v31a is the only recent framework lane with nonzero Level3 "
+            "hard-eval success after v30 semantics, reaching 19% at the 4M "
+            "milestone. Both normalization lanes failed to preserve or improve "
+            "that frontier, with v31c proving the identity warm-start itself is "
+            "not destructive but normalization-enabled training is. Before "
+            "implementing asymmetric privileged critic support, this lane gives "
+            "the clean longer-rollout branch a bounded 15M maturation chunk with "
+            "frequent milestone hard evals, while keeping the track, observation, "
+            "reward numbers, PPO numbers, and deployed actor path fixed."
         ),
     },
 }
