@@ -150,6 +150,11 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
 - Use W&B for live train curves and post-train evaluator metrics. If W&B auth is
   missing, ask the user to run `pixi run -e gpu wandb login` or set
   `WANDB_API_KEY`.
+- After completing code, loop-state, analysis, decision, or loop-instruction
+  changes, commit them and push to `aojili-test/main` by default. Before
+  committing, inspect `git status` and avoid adding checkpoints, W&B run
+  directories, CSV/NPZ datasets, logs, caches, or other bulky generated training
+  artifacts unless the user explicitly asks.
 - External evidence should influence the next experiment through a written
   synthesis packet. Do not let papers or GitHub examples override local metrics;
   use them to choose structural or reward hypotheses, then let hard eval on

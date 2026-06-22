@@ -76,6 +76,11 @@
 - Generated loop logs and CSVs belong under `experiments/level3_ppo_loop/`.
   Keep final summaries concise and include the best checkpoint path, success
   rate, mean successful time, crash rate, and next action.
+- After completing code, loop-state, analysis, decision, or loop-instruction
+  changes for this project, commit them and push to `aojili-test/main` by
+  default. Before committing, always inspect `git status` and avoid adding
+  checkpoints, W&B runs, CSV/NPZ datasets, logs, caches, or other bulky
+  generated training artifacts unless the user explicitly asks.
 - After each completed train/evaluate iteration, run
   `scripts/analyze_level3_ppo_trial.py` before launching another training
   iteration. The analysis packet must combine evaluator CSV metrics, W&B curves,
