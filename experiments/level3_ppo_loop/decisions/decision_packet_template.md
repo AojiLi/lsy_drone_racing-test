@@ -56,7 +56,7 @@ pixi run -e gpu python scripts/level3_ppo_loop.py \
 ## Boundaries
 
 - Do not modify Level3 track geometry or randomization.
-- Final acceptance must be hard eval on `config/level3_dr.toml`.
+- Final acceptance must be hard eval on `config/level3.toml`.
 - If launching a structural lane, name it explicitly and record observation,
   controller, reward structure, PPO/training, and checkpoint-horizon changes.
 - If continuing the same hypothesis, state why the latest checkpoint is

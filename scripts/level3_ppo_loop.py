@@ -443,6 +443,15 @@ V32_PRIVILEGED_CRITIC_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-22_loop098_reject_v31d_launch_v32_privileged_critic_support.md"
 )
+LOOP099_V32_BEST_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_099_structural_v32_asymmetric_privileged_critic_clean_ppo_5m/"
+    "level3_loop_099_structural_v32_asymmetric_privileged_critic_clean_ppo_5m_step_003000000.ckpt"
+)
+V32_MATURATION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop099_continue_v32_privileged_critic_maturation.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -5265,6 +5274,105 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "and final hard eval fixed, but lets the training Critic consume "
             "full-track state. It is runnable only after the zero-update Actor "
             "parity check passes."
+        ),
+    },
+    "v32_asymmetric_privileged_critic_maturation_from_loop099_3m_to_18m": {
+        "name": "v32_asymmetric_privileged_critic_maturation_from_loop099_3m_to_18m",
+        "proposal_name": "structural_v32_privileged_critic_mature_loop099_3m_to_18m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 15_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "3,6,9,12,15",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP099_V32_BEST_CHECKPOINT,
+        "allow_step_curve_maturation": True,
+        "allow_repeat_params": True,
+        "requires_training_support": "asymmetric_privileged_critic_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V32_MATURATION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "critic_observation_mode": CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP099_V32_BEST_CHECKPOINT,
+                "additional_train_steps": 15_000_000,
+                "approx_cumulative_v32_steps": 18_000_000,
+            },
+            "changed_reward_numbers": [],
+            "changed_training_numbers": ["train_timesteps", "initial_checkpoint"],
+            "deferred_support": [
+                "gate_phase_reset_buffer",
+                "prioritized_level_replay",
+                "recurrent_actor_gru256",
+                "reward_number_search",
+            ],
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 4b asymmetric privileged Critic maturation",
+            "baseline": "loop099/v32 3M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Was the first v32 privileged-Critic screen too short, or does "
+                "the lane plateau around the loop097 frontier even after a "
+                "bounded continuation from its best 3M checkpoint?"
+            ),
+            "evidence": {
+                "loop097_global_best": "20/100 success, mean_gates 1.66, crash 80%, mean success time 7.055s",
+                "loop099_v32_best": "19/100 success, mean_gates 1.66, crash 81%, mean success time 7.208s",
+                "reviewer_split": (
+                    "Structure reviewer favored bounded same-hypothesis "
+                    "maturation; evaluator and W&B reviewers warned that v32 "
+                    "did not yet expand the hard-eval frontier."
+                ),
+            },
+            "promotion_gate": {
+                "continue_toward_60m": (
+                    "success > 0.20, or mean_gates materially above 1.66 with "
+                    "new success seeds or lower crash rate"
+                ),
+                "fallback_if_plateau": (
+                    "reject v32 maturation and write a named v33 support packet "
+                    "for gate-phase reset curriculum or another source-backed "
+                    "training-distribution change"
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 49,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
+        },
+        "rationale": (
+            "loop099/v32 did not beat the loop097 global best, but its 3M "
+            "checkpoint matched the frontier mean-gate depth and remained close "
+            "to the success frontier after only a short privileged-Critic screen. "
+            "This continuation is a bounded test of the user's step-count concern: "
+            "it starts from the loop099 3M best checkpoint, keeps v5 Actor "
+            "observation, reward numbers, PPO numbers, rollout geometry, "
+            "corrected v30 semantics, and unchanged config/level3.toml hard eval "
+            "fixed, and changes only the training horizon. If it still fails to "
+            "beat 20% success or expand mean gates, the next decision should stop "
+            "v32 and move to a named gate-phase reset/curriculum support lane."
         ),
     },
 }

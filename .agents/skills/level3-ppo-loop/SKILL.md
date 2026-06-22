@@ -43,13 +43,18 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   Its priority order is PPO correctness, clean longer-rollout baseline,
   observation/return normalization, asymmetric privileged critic, gate-phase
   reset curriculum, prioritized level replay, GRU, reward numbers, then speed.
+- v32 asymmetric privileged-Critic support and zero-update Actor parity have
+  passed. The first v32 training screen, `loop099`, reached 19% success /
+  1.66 mean gates / 81% crash at its 3M checkpoint on `config/level3.toml`,
+  close to but not better than the loop097 global best of 20% / 1.66 / 80%.
 - The immediate next lane is
-  `v32_asymmetric_privileged_critic_support_parity`: implement trainer,
-  checkpoint metadata, and deterministic validation support for a Critic that
-  can use training-only privileged/full-track state while the deployed Actor
-  stays on the existing v5 observation/history path. This is not a training
-  launch. Do not start v32 training until zero-update actor parity against the
-  loop097/v31d 12M best checkpoint passes on `validation_unseen_101_200`.
+  `v32_asymmetric_privileged_critic_maturation_from_loop099_3m_to_18m`: a
+  bounded same-hypothesis continuation from the loop099 3M best checkpoint.
+  It keeps the deployed v5 Actor path, reward numbers, PPO numbers, rollout
+  geometry, disabled normalization, privileged Critic mode, and unchanged
+  `config/level3.toml` hard eval fixed. If it does not beat 20% success or
+  materially expand mean gates beyond 1.66, stop v32 and move to a named
+  v33 gate-phase reset/curriculum or other training-distribution support lane.
 - The rejected previous lane was
   `v31d_longer_rollout_maturation_from_loop097_12m_to_30m`. It reached only
   19% success / 1.63 mean gates / 81% crash at its best loop098 checkpoint,

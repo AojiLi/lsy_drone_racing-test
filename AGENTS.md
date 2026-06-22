@@ -35,22 +35,31 @@
 - Each structural lane must have a clear hypothesis, source or local evidence,
   a unique proposal/run name, W&B logging, checkpoint milestone evaluation, and
   a post-run analysis packet before the next training chunk.
-- The remote stateirving reference packet
-  `experiments/level3_ppo_loop/research/2026-06-19_stateirving_level3_remote_reference.md`
-  supports trying the local-obstacle v5 observation lane
-  `level3_target_gate_nearest_gate_2obs_local_history_v5`. Do not restore the
+- Observation-layout experiments are open. The active deployed observation
+  baseline is the remote-inspired local-obstacle v5 layout
+  `level3_target_gate_nearest_gate_2obs_local_history_v5`; do not restore the
   rejected all-gates/v4 lane unless the user explicitly asks.
-- The orchestrator now has a built-in structural hypothesis
-  `v5_localobs_remote_reward`. To launch or dry-run the remote-inspired v5 lane,
-  prefer `--structural-hypothesis v5_localobs_remote_reward` instead of manually
-  spelling out every reward parameter and packet.
-- `--codex-autonomous-loop` enables automatic structural search. If no v5 trial
-  has been recorded yet, the first automatic structural choice is the v5
-  local-obstacle 30M screening run with the stateirving reward scale.
+- The current structural roadmap is
+  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
+  The latest pasted-framework synthesis is
+  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_pasted_structural_update.md`.
+  Its priority order is PPO correctness, clean longer-rollout baseline,
+  observation/return normalization, asymmetric privileged critic, gate-phase
+  reset curriculum, prioritized level replay, GRU, reward numbers, then speed.
+- v32 asymmetric privileged-Critic support and zero-update Actor parity have
+  passed. The first v32 training screen, `loop099`, reached 19% success /
+  1.66 mean gates / 81% crash at its 3M checkpoint on `config/level3.toml`,
+  close to but not better than the loop097 global best of 20% / 1.66 / 80%.
+- The immediate next lane is
+  `v32_asymmetric_privileged_critic_maturation_from_loop099_3m_to_18m`: a
+  bounded same-hypothesis continuation from the loop099 3M best checkpoint.
+  It keeps the deployed v5 Actor path, reward numbers, PPO numbers, rollout
+  geometry, disabled normalization, privileged Critic mode, and unchanged
+  `config/level3.toml` hard eval fixed. If it does not beat 20% success or
+  materially expand mean gates beyond 1.66, stop v32 and move to a named
+  v33 gate-phase reset/curriculum or other training-distribution support lane.
 - For full training, run through the GPU pixi environment:
   `pixi run -e gpu python scripts/level3_ppo_loop.py --max-iterations 1 --wandb-enabled`.
-- For the first v5 structural screen, use:
-  `pixi run -e gpu python scripts/level3_ppo_loop.py --max-iterations 1 --wandb-enabled --structural-hypothesis v5_localobs_remote_reward`.
 - For the user's unattended Codex-supervised loop, use
   `--codex-autonomous-loop` so each run records that Codex may spawn analysis
   and research subagents and choose the next structural or reward hypothesis
@@ -64,18 +73,11 @@
   unless the command explicitly uses `--override-state-hold` together with a
   named structural command and/or explicit parameter values plus an
   `--approved-hypothesis-packet`.
-- Current next route is v30 end-to-end PPO semantics repair:
-  `v30_episode_semantics_only_2m` followed by
-  `v30_squashed_gaussian_episode_semantics_2m`. Do not launch either until the
-  v30 audit tests and deterministic loop052 parity on `validation_unseen`
-  seeds 101-200 pass. Keep deployment strictly
+- Keep deployment strictly
   observation/history -> PPO actor -> roll/pitch/yaw/thrust; do not add MPC,
-  waypoint planners, subgoal policies, rule controllers, teacher KL, static seed
-  replay, or inference-time safety shields for v30.
-- v30 uses loop052 final as the baseline checkpoint, the loop052 v5 observation
-  layout, the 2x256 MLP, loop052 reward/PPO numbers, 2M steps, 0.5M checkpoint
-  interval, `level3.toml` validation_unseen hard eval, and three independent
-  training seeds before promotion.
+  waypoint planners, subgoal policies, rule controllers, static seed replay, or
+  inference-time safety shields unless a later explicit structural packet
+  approves them.
 - For live W&B tracking, log in first with `pixi run -e gpu wandb login` or set
   `WANDB_API_KEY` in the shell before starting the loop.
 - Default W&B project for Level3 loop runs is `ADR-PPO-Racing-Level3`.
