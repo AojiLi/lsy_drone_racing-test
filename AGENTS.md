@@ -2,7 +2,8 @@
 
 ## Level3 PPO Loop
 
-- Primary objective: train a PPO controller for `config/level3_dr.toml` with
+- Primary objective: train a PPO controller for final evaluation on
+  `config/level3.toml` with
   mean successful race time `<= 7.0s` and success rate `>= 0.60`.
 - Treat `experiments/level3_ppo_loop/state.json` as the resumable experiment
   state. Read it before launching new training and update it after each
@@ -25,11 +26,12 @@
   structure, PPO/training structure, and hyperparameter changes.
 - Hard boundary: do not edit Level3 track geometry/randomization to make the
   task easier, and do not accept any result unless it is hard-evaluated on
-  `config/level3_dr.toml`. The competition target remains the real Level3
-  track.
+  `config/level3.toml`. The final target is the real Level3 track in
+  `level3.toml`; `level3_dr.toml` is only a domain-randomized sim-to-real
+  robustness/training config.
 - Training curricula or alternate train configs may be explored only as named
   structural lanes. Final acceptance and state `best` must always come from
-  hard eval on `config/level3_dr.toml`.
+  hard eval on `config/level3.toml`.
 - Each structural lane must have a clear hypothesis, source or local evidence,
   a unique proposal/run name, W&B logging, checkpoint milestone evaluation, and
   a post-run analysis packet before the next training chunk.
@@ -72,8 +74,8 @@
   replay, or inference-time safety shields for v30.
 - v30 uses loop052 final as the baseline checkpoint, the loop052 v5 observation
   layout, the 2x256 MLP, loop052 reward/PPO numbers, 2M steps, 0.5M checkpoint
-  interval, validation_unseen hard eval, and three independent training seeds
-  before promotion.
+  interval, `level3.toml` validation_unseen hard eval, and three independent
+  training seeds before promotion.
 - For live W&B tracking, log in first with `pixi run -e gpu wandb login` or set
   `WANDB_API_KEY` in the shell before starting the loop.
 - Default W&B project for Level3 loop runs is `ADR-PPO-Racing-Level3`.
@@ -109,7 +111,7 @@
 - For substantive post-run analysis, use exactly three separate subagents:
   evaluator metrics, W&B/PPO diagnostics, and structure/research synthesis. The
   main agent owns the final decision and must enforce the immutable
-  `level3_dr.toml` hard eval.
+  `level3.toml` hard eval.
 - The main-agent decision packet must choose exactly one next action:
   `stop_target_met`, `hold_for_more_analysis`, `continue_same_hypothesis`,
   `change_reward_or_training_numbers`, or `launch_named_structural_lane`.
@@ -122,4 +124,4 @@
   references; synthesize their source-backed findings into a markdown packet
   under `experiments/level3_ppo_loop/research/`; attach it to the next run with
   `--research-packet`. External evidence may guide structural hypotheses, but
-  local hard eval on `config/level3_dr.toml` decides.
+  local hard eval on `config/level3.toml` decides.

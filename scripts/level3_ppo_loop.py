@@ -26,6 +26,8 @@ DEFAULT_VALIDATION_SEED_FILE = SEED_MANIFEST_DIR / "validation_unseen_101_200.tx
 DEFAULT_FINAL_SEED_FILE = SEED_MANIFEST_DIR / "final_locked_1001_1200.txt"
 DEFAULT_INITIAL_DIR = CHECKPOINT_ROOT / "level3_DR_initial"
 MAX_RESEARCH_CHARS = 12_000
+TARGET_EVAL_CONFIG = "level3.toml"
+DOMAIN_RANDOMIZED_TRAIN_CONFIG = "level3_dr.toml"
 WORLD_HISTORY_OBSERVATION_LAYOUT = "obstacle_heading_xy_v1"
 LOCAL_OBSTACLE_OBSERVATION_LAYOUT = "level3_target_gate_nearest_gate_2obs_local_history_v5"
 LOCAL_NEXT_GATE_OBSERVATION_LAYOUT = "level3_target_next_gate_2obs_local_history_v6"
@@ -426,7 +428,7 @@ POST_RUN_DECISION_PROTOCOL: dict[str, Any] = {
     "allowed_decisions": POST_RUN_DECISION_OPTIONS,
     "decision_packet_dir": "experiments/level3_ppo_loop/decisions",
     "requires_main_agent_packet_before_next_training": True,
-    "hard_eval_config": "config/level3_dr.toml",
+    "hard_eval_config": f"config/{TARGET_EVAL_CONFIG}",
     "do_not_modify_level3_track": True,
 }
 DEFAULT_AUTONOMY_POLICY: dict[str, Any] = {
@@ -440,11 +442,12 @@ DEFAULT_AUTONOMY_POLICY: dict[str, Any] = {
     "reward_only_first": False,
     "structural_changes_stage": "active_structural_search",
     "structural_changes_require_detailed_escalation_packet": False,
-    "immutable_target_eval_config": "config/level3_dr.toml",
+    "immutable_target_eval_config": f"config/{TARGET_EVAL_CONFIG}",
+    "domain_randomized_train_config": f"config/{DOMAIN_RANDOMIZED_TRAIN_CONFIG}",
     "do_not_modify_level3_track": True,
     "approved_structural_observation_screen": (
         "Observation-layout experiments are open. Keep each structural lane "
-        "named, source-backed, and hard-evaluated on config/level3_dr.toml."
+        f"named, source-backed, and hard-evaluated on config/{TARGET_EVAL_CONFIG}."
     ),
     "must_run_post_iteration_analysis": True,
     "post_run_multi_agent_decision_required": True,
@@ -475,8 +478,8 @@ DEFAULT_AUTONOMY_POLICY: dict[str, Any] = {
         "next structural or reward decision between script invocations."
     ),
     "reward_scope": (
-        "structural search is allowed; do not change level3_dr track geometry "
-        "or accept any metric outside hard eval on config/level3_dr.toml"
+        "structural search is allowed; do not change level3 track geometry "
+        f"or accept any metric outside hard eval on config/{TARGET_EVAL_CONFIG}"
     ),
 }
 
@@ -4513,6 +4516,8 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
     "v30_episode_semantics_only_2m": {
         "name": "v30_episode_semantics_only_2m",
         "proposal_name": "structural_v30_episode_semantics_only_2m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
         "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
         "train_timesteps": 2_000_000,
         "checkpoint_interval": 500_000,
@@ -4541,6 +4546,12 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
         },
         "hypothesis": {
             "baseline": "loop052 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "domain_randomized_config_role": (
+                f"{DOMAIN_RANDOMIZED_TRAIN_CONFIG} is optional sim-to-real robustness training, "
+                "not the final acceptance target."
+            ),
             "teacher_kl": "disabled",
             "static_seed_replay": "disabled",
             "final_locked": "forbidden",
@@ -4564,6 +4575,8 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
     "v30_squashed_gaussian_episode_semantics_2m": {
         "name": "v30_squashed_gaussian_episode_semantics_2m",
         "proposal_name": "structural_v30_squashed_gaussian_episode_semantics_2m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
         "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
         "train_timesteps": 2_000_000,
         "checkpoint_interval": 500_000,
@@ -4598,6 +4611,12 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
         },
         "hypothesis": {
             "baseline": "loop052 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "domain_randomized_config_role": (
+                f"{DOMAIN_RANDOMIZED_TRAIN_CONFIG} is optional sim-to-real robustness training, "
+                "not the final acceptance target."
+            ),
             "teacher_kl": "disabled",
             "static_seed_replay": "disabled",
             "final_locked": "forbidden",
@@ -4796,7 +4815,7 @@ def load_state(path: Path) -> dict[str, Any]:
                 "may_choose_structural_next_run_without_per_run_user_confirmation": True,
                 "reward_scope": (
                     "open structural search; hard eval target remains "
-                    "config/level3_dr.toml"
+                    f"config/{TARGET_EVAL_CONFIG}"
                 ),
             }
         )
@@ -5634,8 +5653,8 @@ def build_hold_decision(
 
     if initial_audit_required(args, state, initial_checkpoint):
         reasons.append(
-            "initial checkpoint has not been audited on level3_dr.toml; run "
-            "--audit-initial-checkpoint first or pass --skip-initial-audit explicitly"
+            f"initial checkpoint has not been audited on {TARGET_EVAL_CONFIG}; "
+            "run --audit-initial-checkpoint first or pass --skip-initial-audit explicitly"
         )
 
     if not reasons:
@@ -5851,7 +5870,7 @@ def build_post_run_decision_hold(
             "Create a markdown decision packet under "
             "experiments/level3_ppo_loop/decisions/ and pass it with "
             "--approved-hypothesis-packet. Structural lanes must be named and "
-            "must keep hard eval on config/level3_dr.toml."
+            f"must keep hard eval on config/{TARGET_EVAL_CONFIG}."
         ),
         "codex_autonomous_loop": args.codex_autonomous_loop,
         "train_timesteps": args.train_timesteps,
@@ -6885,7 +6904,7 @@ def run_one_iteration(args: argparse.Namespace, state: dict[str, Any]) -> str:
         if selected_structural_hypothesis
         else None,
         "track_boundary": {
-            "target_eval_config": "level3_dr.toml",
+            "target_eval_config": TARGET_EVAL_CONFIG,
             "do_not_modify_level3_track": True,
         },
         "codex_autonomous_loop": args.codex_autonomous_loop,
@@ -7078,8 +7097,8 @@ def parse_args() -> argparse.Namespace:
             '--python-command "pixi run -e gpu python"'
         ),
     )
-    parser.add_argument("--config", default="level3_dr.toml")
-    parser.add_argument("--eval-config", default="level3_dr.toml")
+    parser.add_argument("--config", default=TARGET_EVAL_CONFIG)
+    parser.add_argument("--eval-config", default=TARGET_EVAL_CONFIG)
     parser.add_argument(
         "--eval-inference-module",
         choices=["ppo_level2_inference", "ppo_level3_inference"],
@@ -7405,9 +7424,10 @@ def main() -> None:
     args = parse_args()
     args.default_train_timesteps = DEFAULT_TRAIN_TIMESTEPS
     args.default_checkpoint_interval = DEFAULT_CHECKPOINT_INTERVAL
-    if args.eval_config != "level3_dr.toml":
+    if args.eval_config != TARGET_EVAL_CONFIG:
         raise SystemExit(
-            "error: Level3 target evaluation is immutable; --eval-config must be level3_dr.toml."
+            f"error: Level3 target evaluation is immutable; "
+            f"--eval-config must be {TARGET_EVAL_CONFIG}."
         )
     if args.eval_seed_split == "final_locked" and not args.final_eval_explicit_unlock:
         raise SystemExit(

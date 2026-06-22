@@ -9,7 +9,8 @@ training.
 
 Create a v30 semantics-audit lane before launching any new Level3 training. The
 next train/evaluate chunk remains blocked until deterministic loop052 checkpoint
-parity passes on `validation_unseen` seeds 101-200.
+parity passes on final-target `level3.toml` with `validation_unseen` seeds
+101-200.
 
 This packet is intentionally not a reward, observation, controller, replay, or
 network hypothesis. Its purpose is to prove that the training and evaluation
@@ -82,7 +83,7 @@ the validation split:
 
 ```bash
 pixi run -e gpu python scripts/evaluate_level2_selected_ppo.py \
-  --config level3_dr.toml \
+  --config level3.toml \
   --seed-file experiments/level3_ppo_loop/seed_manifests/validation_unseen_101_200.txt \
   --seed-split-name validation_unseen \
   --inference-module ppo_level3_inference \
@@ -91,15 +92,18 @@ pixi run -e gpu python scripts/evaluate_level2_selected_ppo.py \
   lsy_drone_racing/control/checkpoints/level3_loop_052_v5_remote_safer_anchor_nominal_reward_dr_30m/level3_loop_052_v5_remote_safer_anchor_nominal_reward_dr_30m_final.ckpt
 ```
 
-The parity result must reproduce the recorded loop052 validation anchor within
-the declared deterministic tolerance before training can be approved:
+The first old-inference run on `level3.toml` establishes the final-target
+loop052 baseline. Any repaired inference path or squashed-Gaussian zero-update
+path must then reproduce that `level3.toml` baseline within the declared
+deterministic tolerance:
 
-- success rate: `0.20`;
-- success seeds:
-  `[106, 112, 120, 123, 132, 134, 145, 152, 155, 160, 161, 163, 166, 167, 175, 182, 184, 185, 187, 199]`;
-- crash rate: `0.80`;
-- mean gates: `1.47`;
-- mean successful time: `6.858s`.
+- success count and success seed set exactly match;
+- max per-step deterministic action difference `< 1e-6`;
+- crash rate, mean gates, and mean successful time match within CSV precision.
+
+Do not compare this `level3.toml` parity baseline to the older `level3_dr.toml`
+0.20 validation anchor; `level3_dr.toml` is now treated as a domain-randomized
+sim-to-real robustness config, not the final acceptance target.
 
 If parity fails, stop and diagnose inference/evaluation semantics. Do not launch
 training to "average it out."
@@ -109,7 +113,7 @@ training to "average it out."
 - Launch loop091 or any other new training chunk from this packet.
 - Continue reward tuning while the audit gates are unresolved.
 - Use `final_locked` seeds.
-- Modify `config/level3_dr.toml` geometry or randomization.
+- Modify `config/level3.toml` geometry or randomization.
 - Treat geometry-only `bounds_or_ground` as a real termination reason.
 - Accept W&B reward curves as a substitute for hard-eval parity.
 

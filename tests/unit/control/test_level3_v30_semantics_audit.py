@@ -37,7 +37,8 @@ def test_v30_packet_is_audit_only_and_requires_loop052_parity() -> None:
 
     assert "approved for code audit and tests only" in packet
     assert "does not authorize\ntraining" in packet
-    assert "validation_unseen` seeds 101-200" in packet
+    assert "final-target `level3.toml`" in packet
+    assert "`validation_unseen` seeds" in packet
     assert "level3_loop_052_v5_remote_safer_anchor_nominal_reward_dr_30m_final.ckpt" in packet
     assert "Launch loop091 or any other new training chunk" in packet
 

@@ -34,7 +34,9 @@ fixed:
 - network: 2x256 MLP;
 - reward structure and reward numbers: loop052 values;
 - PPO learning rate, gamma, GAE, clip, epochs, minibatches: loop052 values;
-- hard eval: unchanged `config/level3_dr.toml`;
+- hard eval: unchanged final target `config/level3.toml`;
+- `config/level3_dr.toml` may be used later as a named sim-to-real robustness
+  training config, but it is not the final acceptance target;
 - teacher KL: disabled;
 - static success/failure seed replay: disabled;
 - final_locked seeds: not used.
@@ -50,12 +52,16 @@ Before training, implement and test:
 - observation delay buffers reset from true post-reset observations for done
   slots;
 - real termination reason logging;
-- deterministic loop052 old-vs-new inference parity on
-  `validation_unseen` seeds 101-200.
+- deterministic loop052 old-vs-new inference parity on final-target
+  `level3.toml` with `validation_unseen` seeds 101-200.
 
 The existing v30 audit gate remains authoritative:
 
 `experiments/level3_ppo_loop/decisions/2026-06-22_v30_semantics_audit_approved.md`
+
+The final-target correction packet is also authoritative:
+
+`experiments/level3_ppo_loop/decisions/2026-06-22_correct_final_target_to_level3_toml.md`
 
 ## v30-A
 

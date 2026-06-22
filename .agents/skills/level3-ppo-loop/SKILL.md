@@ -1,6 +1,6 @@
 ---
 name: level3-ppo-loop
-description: Use when training, evaluating, or tuning the Level3 PPO drone-racing loop for config/level3_dr.toml with the target of <=7.0s mean successful time and >=60% success.
+description: Use when training, evaluating, or tuning the Level3 PPO drone-racing loop for final evaluation on config/level3.toml with the target of <=7.0s mean successful time and >=60% success.
 ---
 
 # Level3 PPO Loop
@@ -9,7 +9,7 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
 
 ## Contract
 
-- Target config: `config/level3_dr.toml`.
+- Target config: `config/level3.toml`.
 - Target gate: success rate `>= 0.60` and mean successful time `<= 7.0s`.
 - State file: `experiments/level3_ppo_loop/state.json`.
 - Orchestrator: `scripts/level3_ppo_loop.py`.
@@ -23,11 +23,12 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   structure, PPO/training structure, and hyperparameter changes.
 - Hard boundary: do not edit Level3 track geometry/randomization to make the
   task easier, and do not accept any result unless it is hard-evaluated on
-  `config/level3_dr.toml`. The competition target remains the real Level3
-  track.
+  `config/level3.toml`. The final target is the real Level3 track in
+  `level3.toml`; `level3_dr.toml` is only a domain-randomized sim-to-real
+  robustness/training config.
 - Training curricula or alternate train configs may be explored only as named
   structural lanes. Final acceptance and state `best` must always come from
-  hard eval on `config/level3_dr.toml`.
+  hard eval on `config/level3.toml`.
 - Each structural lane must have a clear hypothesis, source or local evidence,
   a unique proposal/run name, W&B logging, checkpoint milestone evaluation, and
   a post-run analysis packet before the next training chunk.
@@ -118,9 +119,10 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
 14. Keep structural lanes explicit: proposal name, observation layout,
     controller/reward/training changes, source packet, and hard-eval summary
     must be recorded in state or a markdown packet.
-15. Never modify `config/level3_dr.toml` track geometry/randomization as a way
-    to improve the metric. Any easier training config must be clearly labeled
-    as training-only and still evaluated on `config/level3_dr.toml`.
+15. Never modify `config/level3.toml` track geometry/randomization as a way
+    to improve the metric. Any alternate training config, including
+    `level3_dr.toml`, must be clearly labeled as training-only and still
+    evaluated on `config/level3.toml`.
 
 ## Tuning Rules
 
@@ -158,7 +160,7 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
 - External evidence should influence the next experiment through a written
   synthesis packet. Do not let papers or GitHub examples override local metrics;
   use them to choose structural or reward hypotheses, then let hard eval on
-  `config/level3_dr.toml` decide.
+  `config/level3.toml` decide.
 - Do not edit notebooks unless the user asks. Keep loop changes in scripts,
   state, and small docs.
 
