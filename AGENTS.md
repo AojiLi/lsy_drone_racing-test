@@ -62,6 +62,18 @@
   unless the command explicitly uses `--override-state-hold` together with a
   named structural command and/or explicit parameter values plus an
   `--approved-hypothesis-packet`.
+- Current next route is v30 end-to-end PPO semantics repair:
+  `v30_episode_semantics_only_2m` followed by
+  `v30_squashed_gaussian_episode_semantics_2m`. Do not launch either until the
+  v30 audit tests and deterministic loop052 parity on `validation_unseen`
+  seeds 101-200 pass. Keep deployment strictly
+  observation/history -> PPO actor -> roll/pitch/yaw/thrust; do not add MPC,
+  waypoint planners, subgoal policies, rule controllers, teacher KL, static seed
+  replay, or inference-time safety shields for v30.
+- v30 uses loop052 final as the baseline checkpoint, the loop052 v5 observation
+  layout, the 2x256 MLP, loop052 reward/PPO numbers, 2M steps, 0.5M checkpoint
+  interval, validation_unseen hard eval, and three independent training seeds
+  before promotion.
 - For live W&B tracking, log in first with `pixi run -e gpu wandb login` or set
   `WANDB_API_KEY` in the shell before starting the loop.
 - Default W&B project for Level3 loop runs is `ADR-PPO-Racing-Level3`.

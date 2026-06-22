@@ -384,6 +384,14 @@ V29_REVERT_REWARD_SUCCESS_CHURN_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-22_launch_v29_revert_reward_success_churn_replay_5m.md"
 )
+V30_SEMANTICS_AUDIT_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_v30_semantics_audit_approved.md"
+)
+V30_CORRECTED_SEMANTICS_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_launch_v30_end_to_end_ppo_corrected_action_and_episode_semantics.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -473,6 +481,7 @@ DEFAULT_AUTONOMY_POLICY: dict[str, Any] = {
 }
 
 BASE_PARAMS: dict[str, Any] = {
+    "seed": 42,
     "learning_rate": 3e-4,
     "anneal_lr": True,
     "gamma": 0.99,
@@ -519,6 +528,58 @@ BASE_PARAMS: dict[str, Any] = {
     "rpy_coef": 0.7,
     "tilt_limit_deg": 40.0,
     "tilt_excess_coef": 12.0,
+}
+
+LOOP052_REMOTE_NOMINAL_PARAMS: dict[str, Any] = {
+    **BASE_PARAMS,
+    "seed": 42,
+    "learning_rate": 5e-5,
+    "anneal_lr": True,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "update_epochs": 5,
+    "num_minibatches": 8,
+    "clip_coef": 0.26,
+    "clip_vloss": True,
+    "ent_coef": 0.02,
+    "vf_coef": 0.7,
+    "max_grad_norm": 1.5,
+    "target_kl": 0.03,
+    "hidden_dim": 256,
+    "policy_arch": "mlp_2x_tanh",
+    "recurrent_hidden_dim": 256,
+    "recurrent_sequence_len": 32,
+    "n_obs": 2,
+    "action_rp_limit_deg": 90.0,
+    "action_lowpass_alpha": 1.0,
+    "reward_structure": "legacy_staged",
+    "track_generator_profile": "default",
+    "v27_teacher_kl_beta": 0.0,
+    "progress_coef": 0.0,
+    "gate_stage_coef": 10.0,
+    "gate_axis_coef": 12.0,
+    "near_gate_coef": 0.0,
+    "gate_bonus": 90.0,
+    "gate_front_bonus": 0.0,
+    "gate_plane_bonus": 0.0,
+    "gate_back_bonus": 12.0,
+    "finish_bonus": 160.0,
+    "missed_gate_penalty": 0.0,
+    "gate_frame_pressure_coef": 0.0,
+    "wrong_side_penalty": 8.0,
+    "crash_penalty": 100.0,
+    "obstacle_coef": 8.0,
+    "obstacle_margin": 0.4,
+    "obstacle_clearance_coef": 6.0,
+    "timeout_penalty": 80.0,
+    "time_penalty": 0.03,
+    "act_coef": 0.03,
+    "d_act_th_coef": 0.10,
+    "d_act_xy_coef": 0.10,
+    "cmd_tilt_coef": 1.0,
+    "rpy_coef": 1.0,
+    "tilt_limit_deg": 40.0,
+    "tilt_excess_coef": 15.0,
 }
 
 PARAM_BOUNDS: dict[str, tuple[float, float]] = {
@@ -4449,9 +4510,118 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "without another reward-number escalation."
         ),
     },
+    "v30_episode_semantics_only_2m": {
+        "name": "v30_episode_semantics_only_2m",
+        "proposal_name": "structural_v30_episode_semantics_only_2m",
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 2_000_000,
+        "checkpoint_interval": 500_000,
+        "max_eval_checkpoints": 4,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "0.5,1,1.5,2",
+        "initial_checkpoint": LOOP052_BEST_CHECKPOINT,
+        "requires_training_support": "v30_episode_semantics",
+        "research_packet": V30_SEMANTICS_AUDIT_PACKET,
+        "approved_hypothesis_packet": V30_CORRECTED_SEMANTICS_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "semantic_repairs": [
+                "same_step_finish_termination",
+                "finish_bonus_once",
+                "no_terminal_to_reset_dummy_transition",
+                "per_slot_wrapper_reset",
+                "true_observation_delay_reset",
+                "termination_reason_logging",
+            ],
+        },
+        "hypothesis": {
+            "baseline": "loop052 final",
+            "teacher_kl": "disabled",
+            "static_seed_replay": "disabled",
+            "final_locked": "forbidden",
+            "training_seeds_required": 3,
+            "promotion_gate": {
+                "median_success_rate": 0.25,
+                "any_checkpoint_success_rate": 0.30,
+                "max_crash_rate": 0.70,
+                "min_mean_gates": 1.60,
+            },
+        },
+        "params": LOOP052_REMOTE_NOMINAL_PARAMS,
+        "rationale": (
+            "Loop090 did not disprove end-to-end PPO; it showed that reward "
+            "tuning, static replay, teacher KL, and short continuation did not "
+            "convert. v30-A isolates episode/reset/finish semantics while "
+            "keeping loop052 observation, network, reward, PPO numbers, and "
+            "hard-eval track fixed."
+        ),
+    },
+    "v30_squashed_gaussian_episode_semantics_2m": {
+        "name": "v30_squashed_gaussian_episode_semantics_2m",
+        "proposal_name": "structural_v30_squashed_gaussian_episode_semantics_2m",
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 2_000_000,
+        "checkpoint_interval": 500_000,
+        "max_eval_checkpoints": 4,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "0.5,1,1.5,2",
+        "initial_checkpoint": LOOP052_BEST_CHECKPOINT,
+        "requires_training_support": "v30_squashed_gaussian_episode_semantics",
+        "research_packet": V30_SEMANTICS_AUDIT_PACKET,
+        "approved_hypothesis_packet": V30_CORRECTED_SEMANTICS_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "tanh_squashed_gaussian",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "required_zero_update_parity": {
+                "anchor_checkpoint": LOOP052_BEST_CHECKPOINT,
+                "split": "validation_unseen_101_200",
+                "max_step_action_abs_error": 1e-6,
+            },
+            "semantic_repairs": [
+                "same_step_finish_termination",
+                "finish_bonus_once",
+                "no_terminal_to_reset_dummy_transition",
+                "per_slot_wrapper_reset",
+                "true_observation_delay_reset",
+                "termination_reason_logging",
+                "squashed_gaussian_logprob_jacobian",
+            ],
+        },
+        "hypothesis": {
+            "baseline": "loop052 final",
+            "teacher_kl": "disabled",
+            "static_seed_replay": "disabled",
+            "final_locked": "forbidden",
+            "training_seeds_required": 3,
+            "promotion_gate": {
+                "median_success_rate": 0.25,
+                "any_checkpoint_success_rate": 0.30,
+                "max_crash_rate": 0.70,
+                "min_mean_gates": 1.60,
+            },
+        },
+        "params": LOOP052_REMOTE_NOMINAL_PARAMS,
+        "rationale": (
+            "v30-B tests whether matching PPO log-probability to the executed "
+            "bounded action fixes a training/simulation mismatch, after the "
+            "episode/reset semantics from v30-A are also repaired. The "
+            "zero-update deterministic action path must match loop052 before "
+            "any training is launched."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
+    "seed",
     "learning_rate",
     "anneal_lr",
     "gamma",
@@ -4810,6 +4980,7 @@ def clamp_params(
         "hidden_dim",
         "recurrent_hidden_dim",
         "recurrent_sequence_len",
+        "seed",
         "n_obs",
         "v27_retention_batch_size",
     ):
@@ -5033,6 +5204,8 @@ def apply_structural_hypothesis_args(
         args.checkpoint_interval = int(hypothesis["checkpoint_interval"])
     if hypothesis.get("max_eval_checkpoints"):
         args.max_eval_checkpoints = int(hypothesis["max_eval_checkpoints"])
+    if hypothesis.get("eval_seed_split"):
+        args.eval_seed_split = str(hypothesis["eval_seed_split"])
     if hypothesis.get("eval_checkpoint_strategy"):
         args.eval_checkpoint_strategy = str(hypothesis["eval_checkpoint_strategy"])
     if hypothesis.get("eval_milestones_m"):
@@ -5507,6 +5680,21 @@ def build_training_structure_hold(
     if missing_support is None:
         return None
     architecture = hypothesis.get("architecture", {}) if isinstance(hypothesis, dict) else {}
+    if str(missing_support).startswith("v30_"):
+        support_steps = (
+            "implement the v30 semantic repair gates first: deterministic "
+            "loop052 parity, same-step finish termination, exactly-once finish "
+            "bonus, no terminal-to-reset dummy transition, per-slot wrapper "
+            "resets, true observation-delay reset, termination reason logging, "
+            "and squashed-Gaussian logprob support when requested"
+        )
+    else:
+        support_steps = (
+            "implement recurrent PPO rollout storage, sequence minibatching, "
+            "GRU hidden-state reset on episode boundaries, checkpoint metadata, "
+            "and ppo_level3_inference hidden-state handling before launching "
+            "this lane"
+        )
     return {
         "created_at": utc_now(),
         "status": "held_before_training",
@@ -5518,12 +5706,7 @@ def build_training_structure_hold(
                 f"{missing_support!r}, but the current loop only supports "
                 f"{sorted(SUPPORTED_TRAINING_STRUCTURES)}"
             ),
-            (
-                "implement recurrent PPO rollout storage, sequence minibatching, "
-                "GRU hidden-state reset on episode boundaries, checkpoint metadata, "
-                "and ppo_level3_inference hidden-state handling before launching "
-                "this lane"
-            ),
+            support_steps,
         ],
         "required_training_support": missing_support,
         "supported_training_structures": sorted(SUPPORTED_TRAINING_STRUCTURES),
