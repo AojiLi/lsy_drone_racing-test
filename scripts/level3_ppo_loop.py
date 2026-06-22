@@ -20,6 +20,10 @@ CONTROL_DIR = ROOT / "lsy_drone_racing" / "control"
 CHECKPOINT_ROOT = CONTROL_DIR / "checkpoints"
 LOOP_DIR = ROOT / "experiments" / "level3_ppo_loop"
 DEFAULT_STATE_PATH = LOOP_DIR / "state.json"
+SEED_MANIFEST_DIR = LOOP_DIR / "seed_manifests"
+DEFAULT_DEV_SEED_FILE = SEED_MANIFEST_DIR / "dev_seen_1_20.txt"
+DEFAULT_VALIDATION_SEED_FILE = SEED_MANIFEST_DIR / "validation_unseen_101_200.txt"
+DEFAULT_FINAL_SEED_FILE = SEED_MANIFEST_DIR / "final_locked_1001_1200.txt"
 DEFAULT_INITIAL_DIR = CHECKPOINT_ROOT / "level3_DR_initial"
 MAX_RESEARCH_CHARS = 12_000
 WORLD_HISTORY_OBSERVATION_LAYOUT = "obstacle_heading_xy_v1"
@@ -60,6 +64,9 @@ CONFIRMATION_TIMESTEPS = 90_000_000
 PROMISING_SUCCESS_RATE = 0.01
 PROMISING_MEAN_GATES = 0.75
 DEFAULT_EVAL_MILESTONES_M = "30,60,90,120,150"
+DEFAULT_VALIDATION_PROMOTION_THRESHOLD = 0.20
+DEFAULT_VALIDATION_PROMOTION_SECONDARY_SUCCESS = 0.15
+DEFAULT_VALIDATION_PROMOTION_MEAN_GATES = 1.70
 LEVEL2_STEP_CURVE_PACKET = (
     "experiments/level3_ppo_loop/analysis/2026-06-18_level2_checkpoint_step_curve.md"
 )
@@ -308,6 +315,21 @@ LOOP078_FINAL_CHECKPOINT = (
     "level3_loop_078_structural_v22_loop071_gate_corridor_obstacle_obs_default_20m/"
     "level3_loop_078_structural_v22_loop071_gate_corridor_obstacle_obs_default_20m_final.ckpt"
 )
+LOOP087_FINAL_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_087_structural_v27_teacher_retention_beta010_5m/"
+    "level3_loop_087_structural_v27_teacher_retention_beta010_5m_final.ckpt"
+)
+LOOP088_4M_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_088_structural_v28_success24_retention_bounds_replay_5m/"
+    "level3_loop_088_structural_v28_success24_retention_bounds_replay_5m_step_004000000.ckpt"
+)
+LOOP089_2M_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_089_structural_v28_gate_conversion_reward_adjust_from_loop088_4m_5m/"
+    "level3_loop_089_structural_v28_gate_conversion_reward_adjust_from_loop088_4m_5m_step_002000000.ckpt"
+)
 LOOP080_V23_10M_CHECKPOINT = (
     "lsy_drone_racing/control/checkpoints/"
     "level3_loop_080_structural_v23_v22_frame_obstacle_retention_from_loop078_final_20m/"
@@ -318,7 +340,55 @@ LOOP083_V26_15M_CHECKPOINT = (
     "level3_loop_083_structural_v26_v23_10m_success_replay_retention_20m/"
     "level3_loop_083_structural_v26_v23_10m_success_replay_retention_20m_step_015000000.ckpt"
 )
-SUPPORTED_TRAINING_STRUCTURES = {"mlp_2x_tanh", "recurrent_actor_gru256"}
+V27_TEACHER_RETENTION_SPEC_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-22_v27_teacher_anchored_failure_correction_spec.md"
+)
+V27_EVAL_PROTOCOL_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_eval_protocol_closed_next_v27_implementation.md"
+)
+V27_BETA0_CONTROL_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_launch_v27_beta0_control_5m.md"
+)
+V27_BETA003_TEACHER_KL_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_launch_v27_beta003_teacher_kl_5m.md"
+)
+V27_RETENTION_DATASET_PATH = (
+    "experiments/level3_ppo_loop/retention_datasets/"
+    "v27_loop052_train_pool_success_v5_teacher_v8_student.npz"
+)
+V28_SUCCESS24_RETENTION_DATASET_PATH = (
+    "experiments/level3_ppo_loop/retention_datasets/"
+    "v27_loop052_train_pool_success24_v5_teacher_v8_student.npz"
+)
+V28_FAILURE_TRAJECTORY_DATASET_PATH = (
+    "experiments/level3_ppo_loop/failure_datasets/"
+    "v28_loop087_train_pool_selected_bounds_failure_trajectories.npz"
+)
+V28_RETENTION_DATA_AUDIT_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-22_v27_retention_data_audit_success24.md"
+)
+V28_SUCCESS24_BOUNDS_REPLAY_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_launch_v28_success24_retention_bounds_replay_5m.md"
+)
+V29_TRAIN_POOL_SUCCESS_CHURN_PACKET = (
+    "experiments/level3_ppo_loop/diagnostics/"
+    "2026-06-22_v29_train_pool_success_churn_probe.md"
+)
+V29_REVERT_REWARD_SUCCESS_CHURN_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_launch_v29_revert_reward_success_churn_replay_5m.md"
+)
+SUPPORTED_TRAINING_STRUCTURES = {
+    "mlp_2x_tanh",
+    "recurrent_actor_gru256",
+    "teacher_retention_kl",
+}
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
 DEFAULT_ESCALATION_MIN_EVALUATED_TRIALS = 6
@@ -491,9 +561,12 @@ REWARD_STRUCTURE_CHOICES = {
 TRACK_GENERATOR_PROFILE_CHOICES = {
     "default",
     "first_gate_hard_corridor",
+    "loop078_v23_success_replay_lowprob",
     "trace_seed_replay_default_retention",
     "trace_seed_replay_lowprob_success_retention",
     "trace_mixed_corridor",
+    "v28_train_pool_bounds_failure_replay",
+    "v29_train_pool_success_churn_replay",
 }
 STRING_PARAM_CHOICES = {
     "reward_structure": REWARD_STRUCTURE_CHOICES,
@@ -3817,6 +3890,565 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "not exceed loop078 on hard eval, reject v26."
         ),
     },
+    "v27_teacher_retention_beta0_5m": {
+        "name": "v27_teacher_retention_beta0_5m",
+        "proposal_name": "structural_v27_teacher_retention_beta0_control_5m",
+        "config": "level3_dr.toml",
+        "eval_config": "level3_dr.toml",
+        "observation_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "from_scratch": False,
+        "initial_checkpoint": LOOP078_FINAL_CHECKPOINT,
+        "research_packet": V27_TEACHER_RETENTION_SPEC_PACKET,
+        "approved_hypothesis_packet": V27_BETA0_CONTROL_DECISION_PACKET,
+        "allow_repeat_params": True,
+        "architecture": {
+            "policy_arch": "mlp_2x_tanh",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor": [256, 256],
+            "critic": [256, 256],
+            "changed_training_numbers": [
+                "train_timesteps",
+                "checkpoint_interval",
+                "v27_teacher_kl_beta",
+            ],
+            "changed_reward_numbers": [],
+            "track_generator_profile": "default",
+            "reward_structure": "legacy_staged",
+            "train_config": "level3_dr.toml",
+            "hard_eval_config": "level3_dr.toml",
+            "teacher_checkpoint": "loop052:final",
+            "student_initial_checkpoint": "loop078:final",
+            "v27_beta": 0.0,
+            "retention_dataset": "disabled_control_arm",
+        },
+        "params": {
+            "learning_rate": 5e-5,
+            "anneal_lr": False,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "update_epochs": 5,
+            "num_minibatches": 8,
+            "clip_coef": 0.26,
+            "clip_vloss": True,
+            "ent_coef": 0.02,
+            "vf_coef": 0.7,
+            "max_grad_norm": 1.5,
+            "target_kl": 0.03,
+            "hidden_dim": 256,
+            "policy_arch": "mlp_2x_tanh",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 32,
+            "n_obs": 2,
+            "action_rp_limit_deg": 90.0,
+            "action_lowpass_alpha": 1.0,
+            "reward_structure": "legacy_staged",
+            "track_generator_profile": "default",
+            "v27_teacher_kl_beta": 0.0,
+            "v27_teacher_model_name": LOOP052_BEST_CHECKPOINT,
+            "v27_teacher_observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "v27_retention_dataset_path": "disabled_control_arm",
+            "v27_lane_name": "v27_teacher_retention_beta0_5m",
+            "progress_coef": 0.0,
+            "gate_stage_coef": 10.0,
+            "gate_axis_coef": 12.0,
+            "near_gate_coef": 0.0,
+            "gate_bonus": 90.0,
+            "gate_front_bonus": 0.0,
+            "gate_plane_bonus": 0.0,
+            "gate_back_bonus": 12.0,
+            "finish_bonus": 160.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "crash_penalty": 100.0,
+            "obstacle_coef": 8.0,
+            "obstacle_margin": 0.4,
+            "obstacle_clearance_coef": 6.0,
+            "timeout_penalty": 80.0,
+            "time_penalty": 0.03,
+            "act_coef": 0.03,
+            "d_act_th_coef": 0.1,
+            "d_act_xy_coef": 0.1,
+            "cmd_tilt_coef": 1.0,
+            "rpy_coef": 1.0,
+            "tilt_limit_deg": 40.0,
+            "tilt_excess_coef": 15.0,
+        },
+        "rationale": (
+            "After the unseen-validation audit selected loop052 final as the "
+            "teacher/reliability anchor, v27 needs a no-teacher-KL control arm "
+            "before beta=0.03 or beta=0.10 can be interpreted. This lane starts "
+            "from the observation-compatible loop078 v8 student checkpoint, "
+            "keeps the v8 gate-corridor observation, 2x256 MLP, loop078/v22 "
+            "reward and PPO settings, and default Level3 training distribution, "
+            "but shortens the screen to 5M with 1M checkpoint evaluation. Hard "
+            "eval remains on unchanged level3_dr.toml using the dev-to-validation "
+            "seed-manifest protocol."
+        ),
+    },
+    "v27_teacher_retention_beta003_5m": {
+        "name": "v27_teacher_retention_beta003_5m",
+        "proposal_name": "structural_v27_teacher_retention_beta003_5m",
+        "config": "level3_dr.toml",
+        "eval_config": "level3_dr.toml",
+        "observation_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "from_scratch": False,
+        "initial_checkpoint": LOOP078_FINAL_CHECKPOINT,
+        "research_packet": V27_TEACHER_RETENTION_SPEC_PACKET,
+        "approved_hypothesis_packet": V27_BETA003_TEACHER_KL_DECISION_PACKET,
+        "allow_repeat_params": True,
+        "architecture": {
+            "policy_arch": "mlp_2x_tanh",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor": [256, 256],
+            "critic": [256, 256],
+            "changed_training_numbers": [
+                "train_timesteps",
+                "checkpoint_interval",
+                "v27_teacher_kl_beta",
+                "v27_retention_batch_size",
+            ],
+            "changed_reward_numbers": [],
+            "track_generator_profile": "default",
+            "reward_structure": "legacy_staged",
+            "train_config": "level3_dr.toml",
+            "hard_eval_config": "level3_dr.toml",
+            "teacher_checkpoint": "loop052:final",
+            "student_initial_checkpoint": "loop078:final",
+            "v27_beta": 0.03,
+            "retention_dataset": V27_RETENTION_DATASET_PATH,
+        },
+        "params": {
+            "learning_rate": 5e-5,
+            "anneal_lr": False,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "update_epochs": 5,
+            "num_minibatches": 8,
+            "clip_coef": 0.26,
+            "clip_vloss": True,
+            "ent_coef": 0.02,
+            "vf_coef": 0.7,
+            "max_grad_norm": 1.5,
+            "target_kl": 0.03,
+            "hidden_dim": 256,
+            "policy_arch": "mlp_2x_tanh",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 32,
+            "n_obs": 2,
+            "action_rp_limit_deg": 90.0,
+            "action_lowpass_alpha": 1.0,
+            "reward_structure": "legacy_staged",
+            "track_generator_profile": "default",
+            "v27_teacher_kl_beta": 0.03,
+            "v27_teacher_model_name": LOOP052_BEST_CHECKPOINT,
+            "v27_teacher_observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "v27_retention_dataset_path": V27_RETENTION_DATASET_PATH,
+            "v27_retention_batch_size": 512,
+            "v27_lane_name": "v27_teacher_retention_beta003_5m",
+            "progress_coef": 0.0,
+            "gate_stage_coef": 10.0,
+            "gate_axis_coef": 12.0,
+            "near_gate_coef": 0.0,
+            "gate_bonus": 90.0,
+            "gate_front_bonus": 0.0,
+            "gate_plane_bonus": 0.0,
+            "gate_back_bonus": 12.0,
+            "finish_bonus": 160.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "crash_penalty": 100.0,
+            "obstacle_coef": 8.0,
+            "obstacle_margin": 0.4,
+            "obstacle_clearance_coef": 6.0,
+            "timeout_penalty": 80.0,
+            "time_penalty": 0.03,
+            "act_coef": 0.03,
+            "d_act_th_coef": 0.1,
+            "d_act_xy_coef": 0.1,
+            "cmd_tilt_coef": 1.0,
+            "rpy_coef": 1.0,
+            "tilt_limit_deg": 40.0,
+            "tilt_excess_coef": 15.0,
+        },
+        "rationale": (
+            "Light v27 teacher-retention arm. It keeps the loop085 beta=0 "
+            "control setup fixed but enables beta=0.03 KL(pi_teacher || "
+            "pi_student) on a train_pool retention dataset from successful "
+            "loop052 teacher states. The lane is a 5M screen with 1M "
+            "checkpoints, hard-evaluated on unchanged level3_dr.toml through "
+            "the dev-to-validation seed-manifest protocol."
+        ),
+    },
+    "v27_teacher_retention_beta010_5m": {
+        "name": "v27_teacher_retention_beta010_5m",
+        "proposal_name": "structural_v27_teacher_retention_beta010_5m",
+        "config": "level3_dr.toml",
+        "eval_config": "level3_dr.toml",
+        "observation_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "from_scratch": False,
+        "initial_checkpoint": LOOP078_FINAL_CHECKPOINT,
+        "research_packet": V27_TEACHER_RETENTION_SPEC_PACKET,
+        "approved_hypothesis_packet": V27_EVAL_PROTOCOL_DECISION_PACKET,
+        "allow_repeat_params": True,
+        "architecture": {
+            "policy_arch": "mlp_2x_tanh",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor": [256, 256],
+            "critic": [256, 256],
+            "changed_training_numbers": [
+                "train_timesteps",
+                "checkpoint_interval",
+                "v27_teacher_kl_beta",
+                "v27_retention_batch_size",
+            ],
+            "changed_reward_numbers": [],
+            "track_generator_profile": "default",
+            "reward_structure": "legacy_staged",
+            "train_config": "level3_dr.toml",
+            "hard_eval_config": "level3_dr.toml",
+            "teacher_checkpoint": "loop052:final",
+            "student_initial_checkpoint": "loop078:final",
+            "v27_beta": 0.10,
+            "retention_dataset": V27_RETENTION_DATASET_PATH,
+        },
+        "params": {
+            "learning_rate": 5e-5,
+            "anneal_lr": False,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "update_epochs": 5,
+            "num_minibatches": 8,
+            "clip_coef": 0.26,
+            "clip_vloss": True,
+            "ent_coef": 0.02,
+            "vf_coef": 0.7,
+            "max_grad_norm": 1.5,
+            "target_kl": 0.03,
+            "hidden_dim": 256,
+            "policy_arch": "mlp_2x_tanh",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 32,
+            "n_obs": 2,
+            "action_rp_limit_deg": 90.0,
+            "action_lowpass_alpha": 1.0,
+            "reward_structure": "legacy_staged",
+            "track_generator_profile": "default",
+            "v27_teacher_kl_beta": 0.10,
+            "v27_teacher_model_name": LOOP052_BEST_CHECKPOINT,
+            "v27_teacher_observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "v27_retention_dataset_path": V27_RETENTION_DATASET_PATH,
+            "v27_retention_batch_size": 512,
+            "v27_lane_name": "v27_teacher_retention_beta010_5m",
+            "progress_coef": 0.0,
+            "gate_stage_coef": 10.0,
+            "gate_axis_coef": 12.0,
+            "near_gate_coef": 0.0,
+            "gate_bonus": 90.0,
+            "gate_front_bonus": 0.0,
+            "gate_plane_bonus": 0.0,
+            "gate_back_bonus": 12.0,
+            "finish_bonus": 160.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "crash_penalty": 100.0,
+            "obstacle_coef": 8.0,
+            "obstacle_margin": 0.4,
+            "obstacle_clearance_coef": 6.0,
+            "timeout_penalty": 80.0,
+            "time_penalty": 0.03,
+            "act_coef": 0.03,
+            "d_act_th_coef": 0.1,
+            "d_act_xy_coef": 0.1,
+            "cmd_tilt_coef": 1.0,
+            "rpy_coef": 1.0,
+            "tilt_limit_deg": 40.0,
+            "tilt_excess_coef": 15.0,
+        },
+        "rationale": (
+            "Medium v27 teacher-retention arm. This should only be launched "
+            "after beta=0.03 has a post-run decision saying retention metrics "
+            "are healthy but validation reliability still falls below the "
+            "loop052 anchor. It keeps the unchanged level3_dr.toml hard eval "
+            "and the same train_pool retention dataset."
+        ),
+    },
+    "v28_success24_retention_bounds_replay_5m": {
+        "name": "v28_success24_retention_bounds_replay_5m",
+        "proposal_name": "structural_v28_success24_retention_bounds_replay_5m",
+        "config": "level3_dr.toml",
+        "eval_config": "level3_dr.toml",
+        "observation_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "from_scratch": False,
+        "initial_checkpoint": LOOP087_FINAL_CHECKPOINT,
+        "research_packet": V28_RETENTION_DATA_AUDIT_PACKET,
+        "approved_hypothesis_packet": V28_SUCCESS24_BOUNDS_REPLAY_DECISION_PACKET,
+        "allow_repeat_params": True,
+        "architecture": {
+            "policy_arch": "mlp_2x_tanh",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor": [256, 256],
+            "critic": [256, 256],
+            "changed_training_numbers": [
+                "train_timesteps",
+                "checkpoint_interval",
+                "track_generator_profile",
+                "v27_retention_dataset_path",
+                "v27_retention_batch_size",
+            ],
+            "changed_reward_numbers": [],
+            "track_generator_profile": "v28_train_pool_bounds_failure_replay",
+            "reward_structure": "legacy_staged",
+            "train_config": "level3_dr.toml",
+            "hard_eval_config": "level3_dr.toml",
+            "teacher_checkpoint": "loop052:final",
+            "student_initial_checkpoint": "loop087:final",
+            "v27_beta": 0.10,
+            "retention_dataset": V28_SUCCESS24_RETENTION_DATASET_PATH,
+            "failure_dataset": V28_FAILURE_TRAJECTORY_DATASET_PATH,
+            "failure_replay_seed_probability": 0.20,
+            "failure_replay_seeds": [
+                2114,
+                2115,
+                2120,
+                2121,
+                2126,
+                2128,
+                2131,
+                2135,
+                2142,
+                2143,
+                2146,
+                2149,
+                2151,
+                2153,
+                2161,
+                2162,
+                2167,
+                2168,
+                2172,
+                2179,
+                2181,
+                2189,
+                2193,
+                2195,
+                2200,
+                2202,
+                2203,
+                2207,
+                2211,
+            ],
+        },
+        "params": {
+            "learning_rate": 5e-5,
+            "anneal_lr": False,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "update_epochs": 5,
+            "num_minibatches": 8,
+            "clip_coef": 0.26,
+            "clip_vloss": True,
+            "ent_coef": 0.02,
+            "vf_coef": 0.7,
+            "max_grad_norm": 1.5,
+            "target_kl": 0.03,
+            "hidden_dim": 256,
+            "policy_arch": "mlp_2x_tanh",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 32,
+            "n_obs": 2,
+            "action_rp_limit_deg": 90.0,
+            "action_lowpass_alpha": 1.0,
+            "reward_structure": "legacy_staged",
+            "track_generator_profile": "v28_train_pool_bounds_failure_replay",
+            "v27_teacher_kl_beta": 0.10,
+            "v27_teacher_model_name": LOOP052_BEST_CHECKPOINT,
+            "v27_teacher_observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "v27_retention_dataset_path": V28_SUCCESS24_RETENTION_DATASET_PATH,
+            "v27_retention_batch_size": 512,
+            "v27_lane_name": "v28_success24_retention_bounds_replay_5m",
+            "progress_coef": 0.0,
+            "gate_stage_coef": 10.0,
+            "gate_axis_coef": 12.0,
+            "near_gate_coef": 0.0,
+            "gate_bonus": 90.0,
+            "gate_front_bonus": 0.0,
+            "gate_plane_bonus": 0.0,
+            "gate_back_bonus": 12.0,
+            "finish_bonus": 160.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "crash_penalty": 100.0,
+            "obstacle_coef": 8.0,
+            "obstacle_margin": 0.4,
+            "obstacle_clearance_coef": 6.0,
+            "timeout_penalty": 80.0,
+            "time_penalty": 0.03,
+            "act_coef": 0.03,
+            "d_act_th_coef": 0.1,
+            "d_act_xy_coef": 0.1,
+            "cmd_tilt_coef": 1.0,
+            "rpy_coef": 1.0,
+            "tilt_limit_deg": 40.0,
+            "tilt_excess_coef": 15.0,
+        },
+        "rationale": (
+            "Loop087 showed that beta=0.10 teacher retention is numerically "
+            "healthy but too narrow to beat the loop052 hard-eval anchor. The "
+            "v28 lane keeps the same v8 observation, 2x256 MLP, legacy reward "
+            "scale, and unchanged level3_dr hard eval, but expands retention "
+            "from 8 to 24 train_pool teacher-success episodes and mixes a 20% "
+            "training-only replay of audited train_pool bounds-or-ground "
+            "failure seeds. This tests whether success preservation plus "
+            "failure-geometry correction converts into validation progress "
+            "without using dev, validation, or final_locked seeds for training."
+        ),
+    },
+    "v29_revert_reward_success_churn_replay_5m": {
+        "name": "v29_revert_reward_success_churn_replay_5m",
+        "proposal_name": "structural_v29_revert_reward_success_churn_replay_5m",
+        "config": "level3_dr.toml",
+        "eval_config": "level3_dr.toml",
+        "observation_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "from_scratch": False,
+        "initial_checkpoint": LOOP088_4M_CHECKPOINT,
+        "research_packet": V29_TRAIN_POOL_SUCCESS_CHURN_PACKET,
+        "approved_hypothesis_packet": V29_REVERT_REWARD_SUCCESS_CHURN_DECISION_PACKET,
+        "allow_repeat_params": True,
+        "architecture": {
+            "policy_arch": "mlp_2x_tanh",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor": [256, 256],
+            "critic": [256, 256],
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "track_generator_profile",
+            ],
+            "changed_reward_numbers": [],
+            "track_generator_profile": "v29_train_pool_success_churn_replay",
+            "reward_structure": "legacy_staged",
+            "train_config": "level3_dr.toml",
+            "hard_eval_config": "level3_dr.toml",
+            "teacher_checkpoint": "loop052:final",
+            "student_initial_checkpoint": "loop088:4M",
+            "v27_beta": 0.10,
+            "retention_dataset": V28_SUCCESS24_RETENTION_DATASET_PATH,
+            "train_pool_success_churn_probe": V29_TRAIN_POOL_SUCCESS_CHURN_PACKET,
+            "replay_seed_probability": 0.16,
+            "replay_seeds": [
+                2301,
+                2321,
+                2330,
+                2331,
+                2335,
+                2343,
+                2352,
+                2353,
+                2355,
+                2361,
+                2364,
+                2370,
+                2374,
+                2381,
+                2383,
+                2384,
+            ],
+            "reference_rejected_checkpoint": LOOP089_2M_CHECKPOINT,
+        },
+        "params": {
+            "learning_rate": 5e-5,
+            "anneal_lr": False,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "update_epochs": 5,
+            "num_minibatches": 8,
+            "clip_coef": 0.26,
+            "clip_vloss": True,
+            "ent_coef": 0.02,
+            "vf_coef": 0.7,
+            "max_grad_norm": 1.5,
+            "target_kl": 0.03,
+            "hidden_dim": 256,
+            "policy_arch": "mlp_2x_tanh",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 32,
+            "n_obs": 2,
+            "action_rp_limit_deg": 90.0,
+            "action_lowpass_alpha": 1.0,
+            "reward_structure": "legacy_staged",
+            "track_generator_profile": "v29_train_pool_success_churn_replay",
+            "v27_teacher_kl_beta": 0.10,
+            "v27_teacher_model_name": LOOP052_BEST_CHECKPOINT,
+            "v27_teacher_observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "v27_retention_dataset_path": V28_SUCCESS24_RETENTION_DATASET_PATH,
+            "v27_retention_batch_size": 512,
+            "v27_lane_name": "v29_revert_reward_success_churn_replay_5m",
+            "progress_coef": 0.0,
+            "gate_stage_coef": 10.0,
+            "gate_axis_coef": 12.0,
+            "near_gate_coef": 0.0,
+            "gate_bonus": 90.0,
+            "gate_front_bonus": 0.0,
+            "gate_plane_bonus": 0.0,
+            "gate_back_bonus": 12.0,
+            "finish_bonus": 160.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "crash_penalty": 100.0,
+            "obstacle_coef": 8.0,
+            "obstacle_margin": 0.4,
+            "obstacle_clearance_coef": 6.0,
+            "timeout_penalty": 80.0,
+            "time_penalty": 0.03,
+            "act_coef": 0.03,
+            "d_act_th_coef": 0.1,
+            "d_act_xy_coef": 0.1,
+            "cmd_tilt_coef": 1.0,
+            "rpy_coef": 1.0,
+            "tilt_limit_deg": 40.0,
+            "tilt_excess_coef": 15.0,
+        },
+        "rationale": (
+            "Loop089's gate-conversion reward escalation improved some W&B "
+            "signals but worsened validation success, mean gates, and crash "
+            "rate relative to loop088 4M. The v29 lane reverts to the loop088 "
+            "reward scale and tests a narrower training-data hypothesis: keep "
+            "success24 teacher retention, start from loop088 4M, and mix a "
+            "low-probability train_pool-only replay of seeds where loop088 and "
+            "loop089 disagree about success. This avoids validation/final seed "
+            "leakage while probing whether success behavior can be preserved "
+            "without another reward-number escalation."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -3841,6 +4473,12 @@ FIRE_PARAM_KEYS = [
     "action_lowpass_alpha",
     "reward_structure",
     "track_generator_profile",
+    "v27_teacher_kl_beta",
+    "v27_teacher_model_name",
+    "v27_teacher_observation_layout",
+    "v27_retention_dataset_path",
+    "v27_retention_batch_size",
+    "v27_lane_name",
     "progress_coef",
     "gate_stage_coef",
     "gate_axis_coef",
@@ -3892,10 +4530,14 @@ TUNABLE_REWARD_PARAM_KEYS = [
 
 FLOAT_SUMMARY_FIELDS = {
     "success_rate",
+    "success_ci95_low",
+    "success_ci95_high",
     "crash_rate",
     "timeout_rate",
     "mean_gates",
     "mean_time_s_success",
+    "median_time_s_success",
+    "p90_time_s_success",
     "mean_smooth_penalty_per_step",
     "mean_action_delta_l2",
     "mean_max_tilt_deg",
@@ -3905,7 +4547,7 @@ FLOAT_SUMMARY_FIELDS = {
     "worst_cmd_tilt_deg",
     "cmd_tilt_over_limit_frac",
 }
-INT_SUMMARY_FIELDS = {"episodes"}
+INT_SUMMARY_FIELDS = {"episodes", "success_count"}
 
 
 def utc_now() -> str:
@@ -3915,10 +4557,10 @@ def utc_now() -> str:
 
 def load_state(path: Path) -> dict[str, Any]:
     """Load loop state, creating the default shape when it is absent."""
+    now = utc_now()
     if not path.exists():
-        now = utc_now()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "created_at": now,
             "updated_at": now,
             "target": {
@@ -3926,18 +4568,50 @@ def load_state(path: Path) -> dict[str, Any]:
                 "mean_time_s_success": TARGET_TIME_S,
             },
             "best": None,
+            "best_dev": None,
+            "best_validation": None,
+            "final_candidate": None,
+            "final_certified": None,
+            "pending_post_run_decision": None,
             "research_packets": [],
             "autonomy_policy": deepcopy(DEFAULT_AUTONOMY_POLICY),
             "trials": [],
         }
-    with path.open() as handle:
-        state = json.load(handle)
+    try:
+        with path.open() as handle:
+            state = json.load(handle)
+    except json.JSONDecodeError as exc:
+        if path.read_text().strip():
+            raise SystemExit(f"error: state file is not valid JSON: {path}") from exc
+        state = {
+            "schema_version": 2,
+            "created_at": now,
+            "updated_at": now,
+            "target": {
+                "success_rate": TARGET_SUCCESS_RATE,
+                "mean_time_s_success": TARGET_TIME_S,
+            },
+            "best": None,
+            "best_dev": None,
+            "best_validation": None,
+            "final_candidate": None,
+            "final_certified": None,
+            "pending_post_run_decision": None,
+            "research_packets": [],
+            "autonomy_policy": deepcopy(DEFAULT_AUTONOMY_POLICY),
+            "trials": [],
+        }
     state.setdefault("schema_version", 1)
     state.setdefault("created_at", utc_now())
     state.setdefault(
         "target", {"success_rate": TARGET_SUCCESS_RATE, "mean_time_s_success": TARGET_TIME_S}
     )
     state.setdefault("best", None)
+    state.setdefault("best_dev", None)
+    state.setdefault("best_validation", None)
+    state.setdefault("final_candidate", None)
+    state.setdefault("final_certified", None)
+    state.setdefault("pending_post_run_decision", None)
     state.setdefault("research_packets", [])
     autonomy_policy = deepcopy(DEFAULT_AUTONOMY_POLICY)
     if isinstance(state.get("autonomy_policy"), dict):
@@ -4039,7 +4713,7 @@ def best_checkpoint_for_observation_layout(
     hidden_dim: int | None = None,
 ) -> Path | None:
     """Return the best evaluated checkpoint recorded for an observation layout/width."""
-    candidates: list[tuple[float, Path]] = []
+    candidates: list[tuple[tuple[float, float, float, float, float, float], Path]] = []
     for trial in evaluated_trials(state):
         trial_layout = trial.get("observation_layout") or WORLD_HISTORY_OBSERVATION_LAYOUT
         if trial_layout != observation_layout:
@@ -4061,7 +4735,7 @@ def best_checkpoint_for_observation_layout(
             continue
         path = ROOT / str(checkpoint_file)
         if path.exists():
-            candidates.append((float(summary.get("score", -1e9)), path.resolve()))
+            candidates.append((evaluation_rank_key(summary), path.resolve()))
     if not candidates:
         return None
     return max(candidates, key=lambda item: item[0])[1]
@@ -4137,6 +4811,7 @@ def clamp_params(
         "recurrent_hidden_dim",
         "recurrent_sequence_len",
         "n_obs",
+        "v27_retention_batch_size",
     ):
         if key in clamped:
             clamped[key] = int(clamped[key])
@@ -4356,6 +5031,12 @@ def apply_structural_hypothesis_args(
         args.train_timesteps = int(hypothesis["train_timesteps"])
     if args.checkpoint_interval == args.default_checkpoint_interval:
         args.checkpoint_interval = int(hypothesis["checkpoint_interval"])
+    if hypothesis.get("max_eval_checkpoints"):
+        args.max_eval_checkpoints = int(hypothesis["max_eval_checkpoints"])
+    if hypothesis.get("eval_checkpoint_strategy"):
+        args.eval_checkpoint_strategy = str(hypothesis["eval_checkpoint_strategy"])
+    if hypothesis.get("eval_milestones_m"):
+        args.eval_milestones_m = str(hypothesis["eval_milestones_m"])
     if hypothesis.get("allow_hidden_dim_warmstart"):
         args.allow_hidden_dim_warmstart = True
     if hypothesis.get("allow_step_curve_maturation"):
@@ -5031,6 +5712,9 @@ def active_state_training_hold(state: dict[str, Any]) -> dict[str, Any] | None:
         "stage2_after_loop014_escalation_audit",
         "level3_loop_014_taxonomy_reward_code_hold",
         "level3_after_loop084_eval_protocol_hold",
+        "level3_after_loop087_v27_teacher_kl_hold",
+        "level3_after_loop089_gate_conversion_hold",
+        "level3_after_loop090_v29_rejection_hold",
     ):
         value = state.get(key)
         if not isinstance(value, dict):
@@ -5315,7 +5999,8 @@ def build_train_command(
     if args.allow_hidden_dim_warmstart:
         command.append("--allow_hidden_dim_warmstart=True")
     for key in FIRE_PARAM_KEYS:
-        command.append(f"--{key}={format_fire_value(params[key])}")
+        if key in params:
+            command.append(f"--{key}={format_fire_value(params[key])}")
     return command
 
 
@@ -5384,24 +6069,82 @@ def trial_checkpoints(
 
 
 def build_eval_command(
-    args: argparse.Namespace, out_prefix: Path, checkpoints: list[Path]
+    args: argparse.Namespace,
+    out_prefix: Path,
+    checkpoints: list[Path],
+    *,
+    seed_file: Path | None = None,
+    seed_split_name: str | None = None,
 ) -> list[str]:
     """Build the checkpoint evaluation command."""
-    return [
+    command = [
         *args.python_command,
         str(ROOT / "scripts" / "evaluate_level2_selected_ppo.py"),
         "--config",
         args.eval_config,
-        "--seed-start",
-        str(args.seed_start),
-        "--num-seeds",
-        str(args.eval_seeds),
         "--inference-module",
         args.eval_inference_module,
+        "--confidence-interval",
+        args.confidence_interval,
         "--out-prefix",
         str(out_prefix),
-        *[str(path) for path in checkpoints],
     ]
+    if seed_file is not None:
+        command.extend(["--seed-file", str(seed_file)])
+        if seed_split_name:
+            command.extend(["--seed-split-name", seed_split_name])
+    else:
+        command.extend(["--seed-start", str(args.seed_start), "--num-seeds", str(args.eval_seeds)])
+        if seed_split_name:
+            command.extend(["--seed-split-name", seed_split_name])
+    if args.enable_failure_taxonomy:
+        command.append("--failure-taxonomy")
+    command.extend(str(path) for path in checkpoints)
+    return command
+
+
+def split_seed_file(args: argparse.Namespace, split: str) -> Path | None:
+    """Return the seed manifest for an evaluator split."""
+    if split == "dev_seen":
+        return args.dev_seed_file
+    if split == "validation_unseen":
+        return args.validation_seed_file
+    if split == "final_locked":
+        return args.final_seed_file
+    return None
+
+
+def eval_out_prefix(base: Path, split: str) -> Path:
+    """Return a split-specific evaluator output prefix."""
+    return base.with_name(f"{base.name}_{split}")
+
+
+def eval_log_path(base: Path, split: str) -> Path:
+    """Return a split-specific evaluator log path."""
+    return base.with_name(f"{base.stem}_{split}{base.suffix}")
+
+
+def promotion_gate_met(summary: dict[str, Any], args: argparse.Namespace) -> bool:
+    """Return whether a dev checkpoint should be promoted to validation eval."""
+    success = safe_float(summary.get("success_rate"), 0.0) or 0.0
+    gates = safe_float(summary.get("mean_gates"), 0.0) or 0.0
+    return success >= args.validation_promotion_threshold or (
+        success >= args.validation_promotion_secondary_success
+        and gates >= args.validation_promotion_mean_gates
+    )
+
+
+def checkpoint_paths_for_summaries(
+    checkpoints: list[Path], summaries: list[dict[str, Any]]
+) -> list[Path]:
+    """Map evaluator summary rows back to checkpoint paths."""
+    by_reference = {checkpoint_reference(path): path for path in checkpoints}
+    selected: list[Path] = []
+    for summary in summaries:
+        checkpoint = by_reference.get(str(summary.get("checkpoint_file")))
+        if checkpoint is not None:
+            selected.append(checkpoint)
+    return selected
 
 
 def run_logged(command: list[str], log_path: Path, dry_run: bool) -> int:
@@ -5425,7 +6168,7 @@ def normalise_summary_row(
     """Convert evaluator CSV strings into typed summary fields."""
     typed: dict[str, Any] = {}
     for key, value in row.items():
-        if key in FLOAT_SUMMARY_FIELDS:
+        if key in FLOAT_SUMMARY_FIELDS or key.startswith("failure_rate_gate_"):
             typed[key] = safe_float(value)
         elif key in INT_SUMMARY_FIELDS:
             typed[key] = int(float(value)) if value not in (None, "") else None
@@ -5471,9 +6214,22 @@ def target_met(summary: dict[str, Any], target_success: float, target_time: floa
     return time_s is not None and success >= target_success and time_s <= target_time
 
 
+def evaluation_rank_key(summary: dict[str, Any]) -> tuple[float, float, float, float, float, float]:
+    """Return the hard-eval ordering key for checkpoint selection."""
+    success = safe_float(summary.get("success_rate"), 0.0) or 0.0
+    ci_low = safe_float(summary.get("success_ci95_low"), success) or success
+    crash = safe_float(summary.get("crash_rate"), 1.0)
+    crash = 1.0 if crash is None else crash
+    gates = safe_float(summary.get("mean_gates"), 0.0) or 0.0
+    time_s = safe_float(summary.get("mean_time_s_success"))
+    time_key = -time_s if time_s is not None else -1e9
+    score = safe_float(summary.get("score"), -1e9) or -1e9
+    return (success, ci_low, -crash, gates, time_key, score)
+
+
 def best_of(summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Return the highest-scoring summary."""
-    return max(summaries, key=lambda item: float(item.get("score", -1e9)), default=None)
+    """Return the best checkpoint under the current hard-eval ordering."""
+    return max(summaries, key=evaluation_rank_key, default=None)
 
 
 def checkpoint_train_step(summary: dict[str, Any], default_step: int) -> int:
@@ -5508,8 +6264,12 @@ def log_eval_summaries_to_wandb(
         "mode": args.wandb_mode,
         "config": {
             "loop_eval_config": args.eval_config,
-            "loop_eval_seed_start": args.seed_start,
-            "loop_eval_seeds": args.eval_seeds,
+            "loop_eval_seed_split": args.eval_seed_split,
+            "loop_eval_dev_seed_file": checkpoint_reference(args.dev_seed_file),
+            "loop_eval_validation_seed_file": checkpoint_reference(args.validation_seed_file),
+            "loop_eval_final_seed_file": checkpoint_reference(args.final_seed_file),
+            "loop_eval_confidence_interval": args.confidence_interval,
+            "loop_eval_failure_taxonomy": args.enable_failure_taxonomy,
             "loop_target_success_rate": TARGET_SUCCESS_RATE,
             "loop_target_time_s": TARGET_TIME_S,
         },
@@ -5520,13 +6280,22 @@ def log_eval_summaries_to_wandb(
             columns=[
                 "checkpoint",
                 "checkpoint_file",
+                "seed_split",
+                "episodes",
+                "success_count",
                 "success_rate",
+                "success_ci95_low",
+                "success_ci95_high",
                 "mean_time_s_success",
+                "median_time_s_success",
+                "p90_time_s_success",
                 "crash_rate",
                 "timeout_rate",
                 "mean_gates",
                 "score",
                 "target_met",
+                "endpoint_classes",
+                "success_seeds",
             ]
         )
         for index, summary in enumerate(summaries):
@@ -5535,32 +6304,57 @@ def log_eval_summaries_to_wandb(
             metrics = {
                 "eval/checkpoint_train_step": train_step,
                 "eval/success_rate": safe_float(summary.get("success_rate"), 0.0),
+                "eval/success_ci95_low": safe_float(summary.get("success_ci95_low")),
+                "eval/success_ci95_high": safe_float(summary.get("success_ci95_high")),
+                "eval/success_count": safe_float(summary.get("success_count"), 0.0),
+                "eval/episodes": safe_float(summary.get("episodes"), 0.0),
                 "eval/mean_time_s_success": safe_float(summary.get("mean_time_s_success")),
+                "eval/median_time_s_success": safe_float(summary.get("median_time_s_success")),
+                "eval/p90_time_s_success": safe_float(summary.get("p90_time_s_success")),
                 "eval/crash_rate": safe_float(summary.get("crash_rate"), 0.0),
                 "eval/timeout_rate": safe_float(summary.get("timeout_rate"), 0.0),
                 "eval/mean_gates": safe_float(summary.get("mean_gates"), 0.0),
                 "eval/score": safe_float(summary.get("score"), 0.0),
                 "eval/target_met": float(bool(summary.get("target_met"))),
             }
+            for key, value in summary.items():
+                if key.startswith("failure_rate_gate_"):
+                    metrics[f"eval/{key}"] = safe_float(value)
             wandb.log(metrics, step=log_step)
             table.add_data(
                 summary.get("checkpoint"),
                 summary.get("checkpoint_file"),
+                summary.get("seed_split"),
+                summary.get("episodes"),
+                summary.get("success_count"),
                 safe_float(summary.get("success_rate")),
+                safe_float(summary.get("success_ci95_low")),
+                safe_float(summary.get("success_ci95_high")),
                 safe_float(summary.get("mean_time_s_success")),
+                safe_float(summary.get("median_time_s_success")),
+                safe_float(summary.get("p90_time_s_success")),
                 safe_float(summary.get("crash_rate")),
                 safe_float(summary.get("timeout_rate")),
                 safe_float(summary.get("mean_gates")),
                 safe_float(summary.get("score")),
                 bool(summary.get("target_met")),
+                summary.get("endpoint_classes"),
+                summary.get("success_seeds"),
             )
 
         wandb.log({"eval/summary_table": table}, step=args.train_timesteps + len(summaries) + 1)
         if trial_best is not None:
             for key in (
                 "checkpoint_file",
+                "seed_split",
+                "episodes",
+                "success_count",
                 "success_rate",
+                "success_ci95_low",
+                "success_ci95_high",
                 "mean_time_s_success",
+                "median_time_s_success",
+                "p90_time_s_success",
                 "crash_rate",
                 "timeout_rate",
                 "mean_gates",
@@ -5574,12 +6368,29 @@ def log_eval_summaries_to_wandb(
 
 
 def update_global_best(state: dict[str, Any], candidate: dict[str, Any] | None) -> None:
-    """Update state best if the candidate improves the score."""
+    """Update split-aware best records if the candidate improves hard-eval rank."""
     if candidate is None:
         return
+    seed_split = str(candidate.get("seed_split") or "")
+    if seed_split == "dev_seen":
+        current = state.get("best_dev")
+        if not isinstance(current, dict) or evaluation_rank_key(candidate) > evaluation_rank_key(current):
+            state["best_dev"] = deepcopy(candidate)
+        return
+    if seed_split == "validation_unseen":
+        current = state.get("best_validation")
+        if not isinstance(current, dict) or evaluation_rank_key(candidate) > evaluation_rank_key(current):
+            state["best_validation"] = deepcopy(candidate)
+            state["best"] = deepcopy(candidate)
+        return
+    if seed_split == "final_locked":
+        current = state.get("final_certified")
+        if not isinstance(current, dict) or evaluation_rank_key(candidate) > evaluation_rank_key(current):
+            state["final_certified"] = deepcopy(candidate)
+        return
+
     current = state.get("best")
-    current_score = float(current.get("score", -1e9)) if isinstance(current, dict) else -1e9
-    if float(candidate["score"]) > current_score:
+    if not isinstance(current, dict) or evaluation_rank_key(candidate) > evaluation_rank_key(current):
         state["best"] = deepcopy(candidate)
 
 
@@ -5612,7 +6423,14 @@ def run_initial_checkpoint_audit(args: argparse.Namespace, state: dict[str, Any]
     run_name = "level3_initial_checkpoint_audit"
     out_prefix = LOOP_DIR / run_name
     eval_log = out_prefix.with_name(f"{run_name}_eval.log")
-    eval_command = build_eval_command(args, out_prefix, [checkpoint])
+    audit_split = "dev_seen" if args.eval_seed_split == "dev_then_validation" else args.eval_seed_split
+    eval_command = build_eval_command(
+        args,
+        eval_out_prefix(out_prefix, audit_split),
+        [checkpoint],
+        seed_file=split_seed_file(args, audit_split),
+        seed_split_name=audit_split,
+    )
 
     audit: dict[str, Any] = {
         "created_at": utc_now(),
@@ -5620,6 +6438,8 @@ def run_initial_checkpoint_audit(args: argparse.Namespace, state: dict[str, Any]
         "checkpoint_file": checkpoint_file,
         "eval_command": command_text(eval_command),
         "eval_log": str(eval_log.relative_to(ROOT)),
+        "seed_split": audit_split,
+        "seed_file": checkpoint_reference(split_seed_file(args, audit_split)),
     }
     if args.dry_run:
         run_logged(eval_command, eval_log, dry_run=True)
@@ -5640,7 +6460,8 @@ def run_initial_checkpoint_audit(args: argparse.Namespace, state: dict[str, Any]
     target = state.get("target", {})
     target_success = float(target.get("success_rate", TARGET_SUCCESS_RATE))
     target_time = float(target.get("mean_time_s_success", TARGET_TIME_S))
-    summary_csv = out_prefix.with_name(out_prefix.name + "_summary.csv")
+    split_prefix = eval_out_prefix(out_prefix, audit_split)
+    summary_csv = split_prefix.with_name(split_prefix.name + "_summary.csv")
     summaries = read_summary_csv(summary_csv, target_success, target_time)
     audit["summary_csv"] = str(summary_csv.relative_to(ROOT))
     audit["summaries"] = summaries
@@ -5852,6 +6673,19 @@ def run_one_iteration(args: argparse.Namespace, state: dict[str, Any]) -> str:
         "train_command": command_text(train_command),
         "train_log": str(train_log.relative_to(ROOT)),
         "eval_log": str(eval_log.relative_to(ROOT)),
+        "eval_seed_protocol": {
+            "mode": args.eval_seed_split,
+            "dev_seed_file": checkpoint_reference(args.dev_seed_file),
+            "validation_seed_file": checkpoint_reference(args.validation_seed_file),
+            "final_seed_file": checkpoint_reference(args.final_seed_file),
+            "confidence_interval": args.confidence_interval,
+            "failure_taxonomy": args.enable_failure_taxonomy,
+            "validation_promotion": {
+                "success_rate": args.validation_promotion_threshold,
+                "secondary_success_rate": args.validation_promotion_secondary_success,
+                "secondary_mean_gates": args.validation_promotion_mean_gates,
+            },
+        },
         "summaries": [],
         "best_summary": None,
         "wandb_run_id": run_name if args.wandb_enabled else None,
@@ -5912,24 +6746,129 @@ def run_one_iteration(args: argparse.Namespace, state: dict[str, Any]) -> str:
         write_state(args.state_path, state)
         return "failed"
 
-    eval_command = build_eval_command(args, out_prefix, checkpoints)
-    trial["eval_command"] = command_text(eval_command)
-    trial["status"] = "evaluating"
-    write_state(args.state_path, state)
-
-    eval_code = run_logged(eval_command, eval_log, dry_run=False)
-    trial["eval_returncode"] = eval_code
-    if eval_code != 0:
-        trial["status"] = "eval_failed"
-        write_state(args.state_path, state)
-        return "failed"
-
     target = state.get("target", {})
     target_success = float(target.get("success_rate", TARGET_SUCCESS_RATE))
     target_time = float(target.get("mean_time_s_success", TARGET_TIME_S))
-    summary_csv = out_prefix.with_name(out_prefix.name + "_summary.csv")
-    summaries = read_summary_csv(summary_csv, target_success, target_time)
-    trial["summary_csv"] = str(summary_csv.relative_to(ROOT))
+
+    trial["eval_seed_protocol"] = {
+        "mode": args.eval_seed_split,
+        "dev_seed_file": checkpoint_reference(args.dev_seed_file),
+        "validation_seed_file": checkpoint_reference(args.validation_seed_file),
+        "final_seed_file": checkpoint_reference(args.final_seed_file),
+        "confidence_interval": args.confidence_interval,
+        "failure_taxonomy": args.enable_failure_taxonomy,
+        "validation_promotion": {
+            "success_rate": args.validation_promotion_threshold,
+            "secondary_success_rate": args.validation_promotion_secondary_success,
+            "secondary_mean_gates": args.validation_promotion_mean_gates,
+        },
+    }
+
+    if args.eval_seed_split == "dev_then_validation":
+        dev_prefix = eval_out_prefix(out_prefix, "dev_seen")
+        dev_log = eval_log_path(eval_log, "dev_seen")
+        dev_command = build_eval_command(
+            args,
+            dev_prefix,
+            checkpoints,
+            seed_file=args.dev_seed_file,
+            seed_split_name="dev_seen",
+        )
+        trial["eval_command"] = command_text(dev_command)
+        trial["eval_commands"] = {"dev_seen": command_text(dev_command)}
+        trial["eval_logs"] = {"dev_seen": str(dev_log.relative_to(ROOT))}
+        trial["status"] = "evaluating_dev_seen"
+        write_state(args.state_path, state)
+
+        dev_code = run_logged(dev_command, dev_log, dry_run=False)
+        trial["eval_returncode"] = dev_code
+        trial["eval_returncodes"] = {"dev_seen": dev_code}
+        if dev_code != 0:
+            trial["status"] = "eval_failed"
+            write_state(args.state_path, state)
+            return "failed"
+
+        dev_summary_csv = dev_prefix.with_name(dev_prefix.name + "_summary.csv")
+        dev_summaries = read_summary_csv(dev_summary_csv, target_success, target_time)
+        trial["dev_summary_csv"] = str(dev_summary_csv.relative_to(ROOT))
+        trial["dev_summaries"] = dev_summaries
+        update_global_best(state, best_of(dev_summaries))
+
+        promoted_summaries = [
+            summary for summary in dev_summaries if promotion_gate_met(summary, args)
+        ]
+        promoted_checkpoints = checkpoint_paths_for_summaries(checkpoints, promoted_summaries)
+        trial["validation_promoted_checkpoints"] = [
+            checkpoint_reference(path) for path in promoted_checkpoints
+        ]
+
+        if promoted_checkpoints:
+            validation_prefix = eval_out_prefix(out_prefix, "validation_unseen")
+            validation_log = eval_log_path(eval_log, "validation_unseen")
+            validation_command = build_eval_command(
+                args,
+                validation_prefix,
+                promoted_checkpoints,
+                seed_file=args.validation_seed_file,
+                seed_split_name="validation_unseen",
+            )
+            trial["eval_commands"]["validation_unseen"] = command_text(validation_command)
+            trial["eval_logs"]["validation_unseen"] = str(validation_log.relative_to(ROOT))
+            trial["status"] = "evaluating_validation_unseen"
+            write_state(args.state_path, state)
+
+            validation_code = run_logged(validation_command, validation_log, dry_run=False)
+            trial["eval_returncode"] = validation_code
+            trial["eval_returncodes"]["validation_unseen"] = validation_code
+            if validation_code != 0:
+                trial["status"] = "eval_failed"
+                write_state(args.state_path, state)
+                return "failed"
+
+            validation_summary_csv = validation_prefix.with_name(
+                validation_prefix.name + "_summary.csv"
+            )
+            summaries = read_summary_csv(validation_summary_csv, target_success, target_time)
+            trial["validation_summary_csv"] = str(validation_summary_csv.relative_to(ROOT))
+            trial["validation_summaries"] = summaries
+            trial["summary_csv"] = trial["validation_summary_csv"]
+            trial["best_eval_split"] = "validation_unseen"
+        else:
+            summaries = dev_summaries
+            trial["summary_csv"] = trial["dev_summary_csv"]
+            trial["best_eval_split"] = "dev_seen"
+    else:
+        eval_split = args.eval_seed_split
+        split_prefix = eval_out_prefix(out_prefix, eval_split)
+        split_log = eval_log_path(eval_log, eval_split)
+        eval_command = build_eval_command(
+            args,
+            split_prefix,
+            checkpoints,
+            seed_file=split_seed_file(args, eval_split),
+            seed_split_name=eval_split,
+        )
+        trial["eval_command"] = command_text(eval_command)
+        trial["eval_commands"] = {eval_split: command_text(eval_command)}
+        trial["eval_logs"] = {eval_split: str(split_log.relative_to(ROOT))}
+        trial["status"] = f"evaluating_{eval_split}"
+        write_state(args.state_path, state)
+
+        eval_code = run_logged(eval_command, split_log, dry_run=False)
+        trial["eval_returncode"] = eval_code
+        trial["eval_returncodes"] = {eval_split: eval_code}
+        if eval_code != 0:
+            trial["status"] = "eval_failed"
+            write_state(args.state_path, state)
+            return "failed"
+
+        summary_csv = split_prefix.with_name(split_prefix.name + "_summary.csv")
+        summaries = read_summary_csv(summary_csv, target_success, target_time)
+        trial["summary_csv"] = str(summary_csv.relative_to(ROOT))
+        trial[f"{eval_split}_summary_csv"] = trial["summary_csv"]
+        trial[f"{eval_split}_summaries"] = summaries
+        trial["best_eval_split"] = eval_split
+
     trial["summaries"] = summaries
     trial_best = best_of(summaries)
     if trial_best is not None:
@@ -6005,6 +6944,53 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed-start", type=int, default=1)
     parser.add_argument("--eval-seeds", type=int, default=20)
+    parser.add_argument(
+        "--eval-seed-split",
+        choices=["dev_then_validation", "dev_seen", "validation_unseen", "final_locked"],
+        default="dev_then_validation",
+        help=(
+            "Checkpoint evaluator seed protocol. The default screens on dev_seen "
+            "and promotes promising checkpoints to validation_unseen."
+        ),
+    )
+    parser.add_argument("--dev-seed-file", type=Path, default=DEFAULT_DEV_SEED_FILE)
+    parser.add_argument("--validation-seed-file", type=Path, default=DEFAULT_VALIDATION_SEED_FILE)
+    parser.add_argument("--final-seed-file", type=Path, default=DEFAULT_FINAL_SEED_FILE)
+    parser.add_argument(
+        "--validation-promotion-threshold",
+        type=float,
+        default=DEFAULT_VALIDATION_PROMOTION_THRESHOLD,
+        help="Promote a dev_seen checkpoint to validation when success_rate reaches this value.",
+    )
+    parser.add_argument(
+        "--validation-promotion-secondary-success",
+        type=float,
+        default=DEFAULT_VALIDATION_PROMOTION_SECONDARY_SUCCESS,
+        help="Secondary promotion success threshold used with --validation-promotion-mean-gates.",
+    )
+    parser.add_argument(
+        "--validation-promotion-mean-gates",
+        type=float,
+        default=DEFAULT_VALIDATION_PROMOTION_MEAN_GATES,
+        help="Secondary promotion mean-gates threshold.",
+    )
+    parser.add_argument(
+        "--confidence-interval",
+        choices=["none", "wilson"],
+        default="wilson",
+        help="Evaluator confidence interval method for success_rate.",
+    )
+    parser.add_argument(
+        "--enable-failure-taxonomy",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Record endpoint/failure taxonomy during hard checkpoint evaluation.",
+    )
+    parser.add_argument(
+        "--final-eval-explicit-unlock",
+        action="store_true",
+        help="Required before evaluating on final_locked seeds.",
+    )
     parser.add_argument("--max-eval-checkpoints", type=int, default=4)
     parser.add_argument(
         "--eval-checkpoint-strategy",
@@ -6239,6 +7225,11 @@ def main() -> None:
         raise SystemExit(
             "error: Level3 target evaluation is immutable; --eval-config must be level3_dr.toml."
         )
+    if args.eval_seed_split == "final_locked" and not args.final_eval_explicit_unlock:
+        raise SystemExit(
+            "error: final_locked seeds require --final-eval-explicit-unlock and "
+            "must not be used by the automatic training loop."
+        )
     if args.codex_autonomous_loop:
         args.auto_structural_search = True
         args.auto_hypothesis_search = True
@@ -6256,6 +7247,15 @@ def main() -> None:
             )
         args.allow_repeat_params = True
     args.state_path = args.state_path.resolve()
+    for attr in ("dev_seed_file", "validation_seed_file", "final_seed_file"):
+        path = getattr(args, attr)
+        if path is None:
+            continue
+        if not path.is_absolute():
+            path = ROOT / path
+        if not path.exists():
+            raise SystemExit(f"error: seed manifest not found for --{attr.replace('_', '-')}: {path}")
+        setattr(args, attr, path.resolve())
     args.python_command = shlex.split(args.python_command)
     try:
         parse_steps_m(args.eval_milestones_m)

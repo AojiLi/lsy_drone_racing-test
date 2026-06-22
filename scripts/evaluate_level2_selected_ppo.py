@@ -283,6 +283,7 @@ def run_checkpoint(
             last_target_before = target_gate
             last_target_after = target_gate
             last_pos = np.asarray(obs["pos"], dtype=np.float64).copy()
+            endpoint_pos = last_pos.copy()
             gates_pos = np.asarray(obs["gates_pos"], dtype=np.float64).copy()
             gates_quat = np.asarray(obs["gates_quat"], dtype=np.float64).copy()
             obstacles_pos = np.asarray(obs["obstacles_pos"], dtype=np.float64).copy()
@@ -306,6 +307,7 @@ def run_checkpoint(
                 action_delta_l2.append(float(np.linalg.norm(delta)))
                 obs, reward, terminated, truncated, info = env.step(action)
                 steps += 1
+                endpoint_pos = np.asarray(obs["pos"], dtype=np.float64).copy()
                 rot = controller.quat_to_rotmat(np.asarray(obs["quat"], dtype=np.float32))
                 body_z_world_z = np.clip(float(rot[2, 2]), -1.0, 1.0)
                 tilt_values.append(float(np.rad2deg(np.arccos(body_z_world_z))))
@@ -351,7 +353,7 @@ def run_checkpoint(
             if failure_taxonomy:
                 row.update(
                     classify_geometry(
-                        last_pos,
+                        endpoint_pos,
                         gates_pos,
                         gates_quat,
                         obstacles_pos,

@@ -12,7 +12,9 @@ saves
 **/*.json
 !devcontainer.json
 !experiments/level3_ppo_loop/state.json
+!experiments/level3_ppo_loop/checkpoint_manifest.json
 **/*.csv
+*.npz
 *.ckpt
 lsy_drone_racing/control/checkpoints/
 plots/

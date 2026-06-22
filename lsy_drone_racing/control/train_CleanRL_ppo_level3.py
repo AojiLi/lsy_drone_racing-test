@@ -86,6 +86,63 @@ TRACK_GENERATOR_PROFILES: dict[str, dict[str, Any]] = {
         "replay_seeds": [4, 5, 9, 12, 18, 19],
         "hard_case_probability": 0.0,
     },
+    "v28_train_pool_bounds_failure_replay": {
+        "replay_seed_probability": 0.20,
+        "replay_seeds": [
+            2114,
+            2115,
+            2120,
+            2121,
+            2126,
+            2128,
+            2131,
+            2135,
+            2142,
+            2143,
+            2146,
+            2149,
+            2151,
+            2153,
+            2161,
+            2162,
+            2167,
+            2168,
+            2172,
+            2179,
+            2181,
+            2189,
+            2193,
+            2195,
+            2200,
+            2202,
+            2203,
+            2207,
+            2211,
+        ],
+        "hard_case_probability": 0.0,
+    },
+    "v29_train_pool_success_churn_replay": {
+        "replay_seed_probability": 0.16,
+        "replay_seeds": [
+            2301,
+            2321,
+            2330,
+            2331,
+            2335,
+            2343,
+            2352,
+            2353,
+            2355,
+            2361,
+            2364,
+            2370,
+            2374,
+            2381,
+            2383,
+            2384,
+        ],
+        "hard_case_probability": 0.0,
+    },
 }
 
 
@@ -168,6 +225,18 @@ class Args:
     """reward structure used by the training wrapper"""
     track_generator_profile: str = "default"
     """training-only random-track generator profile"""
+    v27_teacher_kl_beta: float = 0.0
+    """v27 teacher-retention KL coefficient; beta=0 is the control arm."""
+    v27_teacher_model_name: str | None = None
+    """teacher checkpoint path for future nonzero-beta v27 retention runs"""
+    v27_teacher_observation_layout: str | None = None
+    """teacher observation layout for future dual-encoder v27 retention runs"""
+    v27_retention_dataset_path: str | None = None
+    """retention dataset path for future nonzero-beta v27 retention runs"""
+    v27_retention_batch_size: int = 512
+    """number of retained teacher states sampled per PPO minibatch"""
+    v27_lane_name: str | None = None
+    """v27 lane label logged to W&B/checkpoints"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -229,6 +298,23 @@ class Args:
                 "recurrent_sequence_len must equal num_steps for the first "
                 "Level3 recurrent PPO implementation."
             )
+        if args.v27_teacher_kl_beta < 0.0:
+            raise ValueError("v27_teacher_kl_beta must be non-negative.")
+        if args.v27_teacher_kl_beta > 0.0:
+            if args.policy_arch != POLICY_ARCH_MLP:
+                raise NotImplementedError(
+                    "v27 teacher-retention KL currently supports only the "
+                    "feed-forward 2xTanh MLP policy."
+                )
+            if not args.v27_retention_dataset_path or (
+                str(args.v27_retention_dataset_path) == "disabled_control_arm"
+            ):
+                raise ValueError(
+                    "v27_teacher_kl_beta > 0 requires a real "
+                    "v27_retention_dataset_path."
+                )
+            if args.v27_retention_batch_size <= 0:
+                raise ValueError("v27_retention_batch_size must be positive.")
         args.batch_size = int(args.num_envs * args.num_steps)
         args.minibatch_size = int(args.batch_size // args.num_minibatches)
         args.num_iterations = args.total_timesteps // args.batch_size
@@ -1788,6 +1874,7 @@ def setup_wandb(args: Args) -> None:
     for metric_pattern in (
         "charts/*",
         "losses/*",
+        "retention/*",
         "reward_components/*",
         "race/*",
         "train/*",
@@ -2184,6 +2271,126 @@ def expand_checkpoint_hidden_dim(
     return expanded
 
 
+@dataclass
+class V27RetentionDataset:
+    """Teacher-success states used to constrain a v27 student policy."""
+
+    student_obs: Tensor
+    teacher_action_mean: Tensor
+    teacher_action_logstd: Tensor
+
+    @property
+    def num_samples(self) -> int:
+        """Return the number of retained states."""
+        return int(self.student_obs.shape[0])
+
+
+def load_v27_retention_dataset(
+    args: Args,
+    obs_shape: tuple[int, ...],
+    action_shape: tuple[int, ...],
+    device: torch.device,
+) -> V27RetentionDataset | None:
+    """Load teacher-retention data for nonzero-beta v27 runs."""
+    if args.v27_teacher_kl_beta <= 0.0:
+        return None
+    if args.policy_arch != POLICY_ARCH_MLP:
+        raise NotImplementedError("v27 retention KL currently supports only MLP policies.")
+    if args.v27_retention_dataset_path is None:
+        raise ValueError("v27_retention_dataset_path is required for nonzero-beta v27 runs.")
+
+    dataset_path = Path(args.v27_retention_dataset_path)
+    if not dataset_path.is_absolute():
+        dataset_path = Path(__file__).parents[2] / dataset_path
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"v27 retention dataset not found: {dataset_path}")
+
+    data = np.load(dataset_path, allow_pickle=False)
+    required = ("student_obs", "teacher_action_mean", "teacher_action_logstd")
+    missing = [key for key in required if key not in data.files]
+    if missing:
+        raise ValueError(f"v27 retention dataset is missing arrays: {missing}")
+
+    student_obs_np = np.asarray(data["student_obs"], dtype=np.float32)
+    teacher_mean_np = np.asarray(data["teacher_action_mean"], dtype=np.float32)
+    teacher_logstd_np = np.asarray(data["teacher_action_logstd"], dtype=np.float32)
+    expected_obs_dim = int(np.prod(obs_shape))
+    expected_action_dim = int(np.prod(action_shape))
+    if student_obs_np.ndim != 2 or student_obs_np.shape[1] != expected_obs_dim:
+        raise ValueError(
+            "v27 retention dataset student_obs shape mismatch: "
+            f"got {student_obs_np.shape}, expected (*, {expected_obs_dim})."
+        )
+    if teacher_mean_np.shape != (student_obs_np.shape[0], expected_action_dim):
+        raise ValueError(
+            "v27 retention dataset teacher_action_mean shape mismatch: "
+            f"got {teacher_mean_np.shape}, expected "
+            f"({student_obs_np.shape[0]}, {expected_action_dim})."
+        )
+    if teacher_logstd_np.shape != teacher_mean_np.shape:
+        raise ValueError(
+            "v27 retention dataset teacher_action_logstd shape mismatch: "
+            f"got {teacher_logstd_np.shape}, expected {teacher_mean_np.shape}."
+        )
+    if student_obs_np.shape[0] <= 0:
+        raise ValueError("v27 retention dataset has no samples.")
+    for name, array in (
+        ("student_obs", student_obs_np),
+        ("teacher_action_mean", teacher_mean_np),
+        ("teacher_action_logstd", teacher_logstd_np),
+    ):
+        if not np.isfinite(array).all():
+            raise ValueError(f"v27 retention dataset contains non-finite {name} values.")
+
+    dataset = V27RetentionDataset(
+        student_obs=torch.as_tensor(student_obs_np, dtype=torch.float32, device=device),
+        teacher_action_mean=torch.as_tensor(teacher_mean_np, dtype=torch.float32, device=device),
+        teacher_action_logstd=torch.as_tensor(
+            teacher_logstd_np,
+            dtype=torch.float32,
+            device=device,
+        ),
+    )
+    print(f"loaded v27 retention dataset: {dataset_path} ({dataset.num_samples} samples)")
+    if wandb.run is not None:
+        wandb.config.update(
+            {
+                "v27_retention_dataset_resolved": str(dataset_path),
+                "v27_retention_dataset_samples": dataset.num_samples,
+            },
+            allow_val_change=True,
+        )
+    return dataset
+
+
+def v27_teacher_retention_loss(
+    agent: Agent,
+    dataset: V27RetentionDataset,
+    batch_size: int,
+) -> tuple[Tensor, Tensor, Tensor, int]:
+    """Return KL(pi_teacher || pi_student) and simple agreement diagnostics."""
+    sample_size = min(int(batch_size), dataset.num_samples)
+    indices = torch.randint(dataset.num_samples, (sample_size,), device=dataset.student_obs.device)
+    student_obs = dataset.student_obs[indices]
+    teacher_mean = dataset.teacher_action_mean[indices]
+    teacher_logstd = dataset.teacher_action_logstd[indices]
+
+    student_mean = agent.actor_mean(student_obs)
+    student_logstd = agent.actor_logstd.expand_as(student_mean)
+    teacher_var = torch.exp(2.0 * teacher_logstd)
+    student_var = torch.exp(2.0 * student_logstd)
+    kl_per_action = (
+        student_logstd
+        - teacher_logstd
+        + (teacher_var + (teacher_mean - student_mean).pow(2)) / (2.0 * student_var)
+        - 0.5
+    )
+    teacher_kl = kl_per_action.sum(dim=-1).mean()
+    teacher_action_mse = (student_mean - teacher_mean).pow(2).mean()
+    teacher_agreement = (torch.abs(student_mean - teacher_mean) <= 0.15).float().mean()
+    return teacher_kl, teacher_action_mse, teacher_agreement, sample_size
+
+
 # region Train
 def train_ppo(
     args: Args,
@@ -2382,6 +2589,12 @@ def train_ppo(
                 )
             agent.load_state_dict(model_state_dict)
             print(f"initialized agent weights from {initial_model_path}; optimizer starts fresh")
+    retention_dataset = load_v27_retention_dataset(
+        args,
+        envs.single_observation_space.shape,
+        envs.single_action_space.shape,
+        device,
+    )
     optimizer = optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -2490,7 +2703,13 @@ def train_ppo(
 
         # Optimizing the policy and value network
         clipfracs = []
+        teacher_kl_values: list[float] = []
+        teacher_action_mse_values: list[float] = []
+        teacher_agreement_values: list[float] = []
+        retention_batch_sizes: list[float] = []
         if recurrent_enabled:
+            if retention_dataset is not None:
+                raise NotImplementedError("v27 retention KL is not wired for recurrent PPO.")
             b_values = values.reshape(-1)
             b_returns = returns.reshape(-1)
             env_inds = np.arange(args.num_envs)
@@ -2612,6 +2831,26 @@ def train_ppo(
 
                     entropy_loss = entropy.mean()
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                    if retention_dataset is not None:
+                        (
+                            teacher_kl_loss,
+                            teacher_action_mse,
+                            teacher_agreement,
+                            retention_batch_size,
+                        ) = v27_teacher_retention_loss(
+                            agent,
+                            retention_dataset,
+                            args.v27_retention_batch_size,
+                        )
+                        loss = loss + args.v27_teacher_kl_beta * teacher_kl_loss
+                        teacher_kl_values.append(float(teacher_kl_loss.detach().cpu().item()))
+                        teacher_action_mse_values.append(
+                            float(teacher_action_mse.detach().cpu().item())
+                        )
+                        teacher_agreement_values.append(
+                            float(teacher_agreement.detach().cpu().item())
+                        )
+                        retention_batch_sizes.append(float(retention_batch_size))
 
                     optimizer.zero_grad()
                     loss.backward()
@@ -2626,6 +2865,26 @@ def train_ppo(
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
+        teacher_kl_log = float(np.mean(teacher_kl_values)) if teacher_kl_values else 0.0
+        teacher_action_mse_log = (
+            float(np.mean(teacher_action_mse_values)) if teacher_action_mse_values else 0.0
+        )
+        teacher_agreement_log = (
+            float(np.mean(teacher_agreement_values))
+            if teacher_agreement_values
+            else float("nan")
+        )
+        retention_batch_size_log = (
+            float(np.mean(retention_batch_sizes)) if retention_batch_sizes else 0.0
+        )
+        if retention_dataset is not None:
+            print(
+                "v27 retention "
+                f"teacher_kl={teacher_kl_log:.6f} "
+                f"teacher_action_mse={teacher_action_mse_log:.6f} "
+                f"teacher_agreement={teacher_agreement_log:.4f} "
+                f"sampled_batch_size={retention_batch_size_log:.1f}"
+            )
         if wandb_enabled:
             total_reward = rewards.float().sum().item()
             reward_component_logs = {}
@@ -2652,6 +2911,10 @@ def train_ppo(
                     "losses/entropy": entropy_loss.item(),
                     "losses/old_approx_kl": old_approx_kl.item(),
                     "losses/approx_kl": approx_kl.item(),
+                    "losses/teacher_kl": teacher_kl_log,
+                    "losses/teacher_action_mse": teacher_action_mse_log,
+                    "retention/teacher_agreement": teacher_agreement_log,
+                    "retention/sampled_batch_size": retention_batch_size_log,
                     "losses/clipfrac": np.mean(clipfracs),
                     "losses/explained_variance": explained_var,
                     "train/total_reward": total_reward,
@@ -2920,6 +3183,12 @@ def main(
     action_lowpass_alpha: float = 1.0,
     reward_structure: str = "legacy_staged",
     track_generator_profile: str = "default",
+    v27_teacher_kl_beta: float = 0.0,
+    v27_teacher_model_name: str | None = None,
+    v27_teacher_observation_layout: str | None = None,
+    v27_retention_dataset_path: str | None = None,
+    v27_retention_batch_size: int = 512,
+    v27_lane_name: str | None = None,
     cuda: bool = True,
     jax_device: str = "gpu",
     model_name: str = "ppo_level2_racing.ckpt",
@@ -2990,6 +3259,12 @@ def main(
         action_lowpass_alpha=action_lowpass_alpha,
         reward_structure=reward_structure,
         track_generator_profile=track_generator_profile,
+        v27_teacher_kl_beta=v27_teacher_kl_beta,
+        v27_teacher_model_name=v27_teacher_model_name,
+        v27_teacher_observation_layout=v27_teacher_observation_layout,
+        v27_retention_dataset_path=v27_retention_dataset_path,
+        v27_retention_batch_size=v27_retention_batch_size,
+        v27_lane_name=v27_lane_name,
         cuda=cuda,
         jax_device=jax_device,
         n_obs=n_obs,

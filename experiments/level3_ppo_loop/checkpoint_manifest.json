@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-06-22T10:09:00+00:00",
+  "purpose": "Registry for key Level3 checkpoints after .ckpt files were removed from Git tracking.",
+  "artifact_status": "local_manifest_only",
+  "notes": [
+    "Checkpoint files are intentionally ignored by Git.",
+    "Upload these entries to W&B Artifacts or another external model store before relying on a fresh clone.",
+    "Hard acceptance still requires evaluation on config/level3_dr.toml."
+  ],
+  "checkpoints": {
+    "loop052_final": {
+      "path": "lsy_drone_racing/control/checkpoints/level3_loop_052_v5_remote_safer_anchor_nominal_reward_dr_30m/level3_loop_052_v5_remote_safer_anchor_nominal_reward_dr_30m_final.ckpt",
+      "sha256": "6cf0f3693b8de8f53e32e2c347df0e920ff8275057cfd8c05e66137674ef973d",
+      "size_human": "664K",
+      "artifact": "pending",
+      "observation_layout": "level3_target_gate_nearest_gate_2obs_local_history_v5",
+      "role": "current_validation_anchor_and_v27_teacher_candidate",
+      "validation_unseen": {
+        "seed_manifest": "experiments/level3_ppo_loop/seed_manifests/validation_unseen_101_200.txt",
+        "success_rate": 0.2,
+        "success_ci95_low": 0.1333669333310325,
+        "success_ci95_high": 0.2888291655931589,
+        "crash_rate": 0.8,
+        "mean_gates": 1.47,
+        "mean_time_s_success": 6.858,
+        "p90_time_s_success": 8.258
+      }
+    },
+    "loop071_20m": {
+      "path": "lsy_drone_racing/control/checkpoints/level3_loop_071_structural_v17_trace_mixed_corridor_from_loop069_25m_30m/level3_loop_071_structural_v17_trace_mixed_corridor_from_loop069_25m_30m_step_020000000.ckpt",
+      "sha256": "c5848eadeff8874844b7f37378c895d595fa8e621aedeb6f0b92d0d8a0cfdfb2",
+      "size_human": "668K",
+      "artifact": "pending",
+      "observation_layout": "level3_target_gate_nearest_gate_2obs_local_history_v5",
+      "role": "dev-frontier comparison checkpoint",
+      "validation_unseen": {
+        "seed_manifest": "experiments/level3_ppo_loop/seed_manifests/validation_unseen_101_200.txt",
+        "success_rate": 0.16,
+        "crash_rate": 0.84,
+        "mean_gates": 1.65,
+        "mean_time_s_success": 7.87
+      }
+    },
+    "loop078_final": {
+      "path": "lsy_drone_racing/control/checkpoints/level3_loop_078_structural_v22_loop071_gate_corridor_obstacle_obs_default_20m/level3_loop_078_structural_v22_loop071_gate_corridor_obstacle_obs_default_20m_final.ckpt",
+      "sha256": "765072731adb50e41b8aecdebfa2044ffdc6c48a7e016ecabcd8f65659227da2",
+      "size_human": "696K",
+      "artifact": "pending",
+      "observation_layout": "level3_gate_corridor_obstacle_relative_2obs_local_history_v8",
+      "role": "v8 student/warm-start comparison checkpoint",
+      "validation_unseen": {
+        "seed_manifest": "experiments/level3_ppo_loop/seed_manifests/validation_unseen_101_200.txt",
+        "success_rate": 0.13,
+        "crash_rate": 0.87,
+        "mean_gates": 1.49,
+        "mean_time_s_success": 6.85
+      }
+    }
+  }
+}

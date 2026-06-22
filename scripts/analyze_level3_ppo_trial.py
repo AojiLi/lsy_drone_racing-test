@@ -34,10 +34,10 @@ POST_RUN_REVIEW_ROLES = [
         "role": "wandb_ppo_diagnostics",
         "suffix": "wandb_ppo",
         "task": (
-            "Audit W&B curves. Focus on train reward, reward components, race "
-            "metrics, value scale, value loss, KL, clip fraction, entropy, "
-            "explained variance, SPS, and whether training signals convert into "
-            "evaluator progress."
+        "Audit W&B curves. Focus on train reward, reward components, race "
+            "metrics, teacher-retention KL/agreement when present, value scale, "
+            "value loss, KL, clip fraction, entropy, explained variance, SPS, "
+            "and whether training signals convert into evaluator progress."
         ),
     },
     {
@@ -102,6 +102,13 @@ CORE_WANDB_METRICS = [
     "charts/SPS",
 ]
 
+RETENTION_WANDB_METRICS = [
+    "losses/teacher_kl",
+    "losses/teacher_action_mse",
+    "retention/teacher_agreement",
+    "retention/sampled_batch_size",
+]
+
 RACE_WANDB_METRICS = [
     "race/passed_gate_rate",
     "race/finished_rate",
@@ -148,7 +155,12 @@ REWARD_WANDB_METRICS = [
     "reward_components/time",
 ]
 
-WANDB_METRICS = CORE_WANDB_METRICS + RACE_WANDB_METRICS + REWARD_WANDB_METRICS
+WANDB_METRICS = (
+    CORE_WANDB_METRICS
+    + RETENTION_WANDB_METRICS
+    + RACE_WANDB_METRICS
+    + REWARD_WANDB_METRICS
+)
 
 
 def utc_now() -> str:
@@ -189,8 +201,28 @@ def relative_to_root(path: Path) -> str:
 
 def load_state(path: Path) -> dict[str, Any]:
     """Load loop state."""
-    with path.open() as handle:
-        return json.load(handle)
+    try:
+        with path.open() as handle:
+            return json.load(handle)
+    except json.JSONDecodeError as exc:
+        if path.read_text().strip():
+            raise SystemExit(f"error: state file is not valid JSON: {path}") from exc
+        return {
+            "schema_version": 2,
+            "created_at": utc_now(),
+            "updated_at": utc_now(),
+            "target": {
+                "success_rate": TARGET_SUCCESS_RATE,
+                "mean_time_s_success": TARGET_TIME_S,
+            },
+            "best": None,
+            "best_dev": None,
+            "best_validation": None,
+            "final_candidate": None,
+            "final_certified": None,
+            "pending_post_run_decision": None,
+            "trials": [],
+        }
 
 
 def write_state(path: Path, state: dict[str, Any]) -> None:
@@ -553,6 +585,31 @@ def render_param_block(params: dict[str, Any]) -> str:
     return "\n".join(f"- `--param {key}={value:g}`" for key, value in params.items()) + "\n"
 
 
+def retention_metric_summaries(
+    metrics: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Return v27 teacher-retention metric summaries when present."""
+    return {metric: metrics[metric] for metric in RETENTION_WANDB_METRICS if metric in metrics}
+
+
+def render_retention_section(metrics: dict[str, dict[str, Any]]) -> str:
+    """Render v27 retention diagnostics from W&B summaries."""
+    retention = retention_metric_summaries(metrics)
+    if not retention:
+        return "- No v27 teacher-retention metrics found in W&B history.\n"
+    lines = ["| Metric | First | Last | Tail mean | Trend |", "| --- | ---: | ---: | ---: | --- |"]
+    for metric in RETENTION_WANDB_METRICS:
+        summary = retention.get(metric)
+        if summary is None:
+            continue
+        lines.append(
+            "| "
+            f"{metric} | {summary.get('first')} | {summary.get('last')} | "
+            f"{summary.get('tail_mean')} | {summary.get('trend')} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def write_subagent_briefs(
     analysis_dir: Path,
     trial_id: str,
@@ -660,6 +717,9 @@ def render_report(
             f"- Reason if unavailable: {wandb_summary.get('reason')}",
             "",
             render_metric_table(wandb_metrics),
+            "## V27 Retention Evidence",
+            "",
+            render_retention_section(wandb_metrics),
             "## Diagnosis",
             "",
             f"- Branch: `{recommendation.get('branch')}`",
@@ -790,6 +850,7 @@ def main() -> None:
         "previous_delta": previous_delta,
         "wandb": wandb_summary,
         "wandb_metric_summaries": wandb_metrics,
+        "retention_metric_summaries": retention_metric_summaries(wandb_metrics),
         "recommendation": recommendation,
         "next_command": command,
     }
