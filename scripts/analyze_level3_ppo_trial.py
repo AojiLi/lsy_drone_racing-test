@@ -102,6 +102,19 @@ CORE_WANDB_METRICS = [
     "charts/SPS",
 ]
 
+NORMALIZATION_WANDB_METRICS = [
+    "normalization/obs_count",
+    "normalization/obs_var_mean",
+    "normalization/obs_mean_abs",
+    "normalization/obs_abs_mean",
+    "normalization/obs_clipfrac",
+    "normalization/return_count",
+    "normalization/return_mean",
+    "normalization/return_var",
+    "normalization/value_target_abs_mean",
+    "normalization/value_target_clipfrac",
+]
+
 RETENTION_WANDB_METRICS = [
     "losses/teacher_kl",
     "losses/teacher_action_mse",
@@ -157,6 +170,7 @@ REWARD_WANDB_METRICS = [
 
 WANDB_METRICS = (
     CORE_WANDB_METRICS
+    + NORMALIZATION_WANDB_METRICS
     + RETENTION_WANDB_METRICS
     + RACE_WANDB_METRICS
     + REWARD_WANDB_METRICS

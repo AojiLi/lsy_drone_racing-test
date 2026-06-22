@@ -406,6 +406,20 @@ V31B_OBS_RETURN_NORM_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-22_loop094_launch_v31b_obs_return_norm.md"
 )
+LOOP094_BEST_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_094_structural_v31a_longer_rollout_clean_ppo_5m/"
+    "level3_loop_094_structural_v31a_longer_rollout_clean_ppo_5m_step_004000000.ckpt"
+)
+V31C_IDENTITY_NORM_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_094_v31a_4m_identity_norm_warmstart/"
+    "level3_loop_094_v31a_4m_identity_norm_warmstart.ckpt"
+)
+V31C_IDENTITY_NORM_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_loop095_reject_v31b_launch_v31c_identity_norm_warmstart.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -4843,6 +4857,101 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "through newly normalized inputs."
         ),
     },
+    "v31c_warmstart_identity_norm_clean_ppo_5m": {
+        "name": "v31c_warmstart_identity_norm_clean_ppo_5m",
+        "proposal_name": "structural_v31c_warmstart_identity_norm_clean_ppo_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 5,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": V31C_IDENTITY_NORM_CHECKPOINT,
+        "identity_norm_warmstart": {
+            "source_checkpoint": LOOP094_BEST_CHECKPOINT,
+            "target_checkpoint": V31C_IDENTITY_NORM_CHECKPOINT,
+            "obs_count": 1_000_000.0,
+            "return_count": 1_000_000.0,
+            "requires_zero_update_parity": True,
+        },
+        "requires_training_support": "observation_return_normalization_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V31C_IDENTITY_NORM_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": {
+                "actor_observation_running_mean_std": True,
+                "actor_observation_init": "identity_mean0_var1_from_loop094_4m",
+                "frozen_eval_time_actor_stats_from_checkpoint": True,
+                "critic_return_running_mean_std": True,
+                "critic_return_init": "identity_mean0_var1_from_loop094_4m",
+                "gae_scale": "raw_reward_scale",
+                "critic_loss_scale": "normalized_return_scale",
+                "warm_start": "loop094_4m_identity_normalized_checkpoint",
+                "parity_gate": "validation_unseen_101_200_zero_update_before_training",
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+            },
+            "semantic_repairs": [
+                "same_step_finish_termination",
+                "finish_bonus_once",
+                "no_terminal_to_reset_dummy_transition",
+                "per_slot_wrapper_reset",
+                "true_observation_delay_reset",
+                "termination_reason_logging",
+            ],
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 2b warm-start-compatible normalization",
+            "baseline": "loop094/v31a 4M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can observation/return normalization be introduced without "
+                "destroying the working loop094 behavioral prior?"
+            ),
+            "success_screen": {
+                "parity_required_before_training": (
+                    "identity-normalized checkpoint hard-eval matches loop094 4M "
+                    "within one success-count episode and no material mean-gates drop"
+                ),
+                "after_training": (
+                    "beats loop094 success >= 0.19 or improves mean_gates/crash "
+                    "without losing success frontier"
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 45,
+            "obs_norm_enabled": True,
+            "obs_norm_clip": 10.0,
+            "return_norm_enabled": True,
+            "return_norm_clip": 10.0,
+        },
+        "rationale": (
+            "loop095 showed that from-scratch normalization never acquired gate 0, "
+            "while loop094 already has a weak but real Level3 behavior prior. This "
+            "lane materializes an identity-normalized copy of loop094 4M, requires "
+            "zero-update hard-eval parity before training, then screens whether "
+            "normalization can improve value scale without erasing the frontier."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -5104,6 +5213,101 @@ def existing_path(value: str | None) -> Path | None:
     if not path.exists():
         raise FileNotFoundError(path)
     return path.resolve()
+
+
+def _checkpoint_input_dim(model_state_dict: dict[str, Any]) -> int:
+    """Return the actor observation dimension for a Level3 PPO checkpoint."""
+    if "actor_mean.0.weight" in model_state_dict:
+        return int(model_state_dict["actor_mean.0.weight"].shape[1])
+    if "actor_pre.0.weight" in model_state_dict:
+        return int(model_state_dict["actor_pre.0.weight"].shape[1])
+    raise ValueError("Cannot infer checkpoint actor observation dimension.")
+
+
+def materialize_identity_norm_warmstart(
+    hypothesis: dict[str, Any] | None,
+    params: dict[str, Any],
+) -> Path | None:
+    """Create a checkpoint that preserves raw Actor behavior under identity normalization."""
+    if hypothesis is None:
+        return None
+    spec = hypothesis.get("identity_norm_warmstart")
+    if not isinstance(spec, dict):
+        return None
+    source = existing_path(str(spec["source_checkpoint"]))
+    target = Path(str(spec["target_checkpoint"])).expanduser()
+    if not target.is_absolute():
+        target = ROOT / target
+    if target.exists():
+        return target.resolve()
+
+    import torch
+
+    from lsy_drone_racing.control.ppo_level3_observation import (
+        checkpoint_action_lowpass_alpha,
+        checkpoint_action_rp_limit_deg,
+        checkpoint_hidden_dim,
+        checkpoint_policy_arch,
+        checkpoint_recurrent_hidden_dim,
+        make_checkpoint,
+        unpack_checkpoint,
+    )
+
+    checkpoint = torch.load(source, map_location="cpu")
+    model_state_dict, observation_layout = unpack_checkpoint(checkpoint)
+    policy_arch = checkpoint_policy_arch(checkpoint, model_state_dict)
+    obs_dim = _checkpoint_input_dim(model_state_dict)
+    obs_clip = float(params.get("obs_norm_clip", 10.0))
+    return_clip = float(params.get("return_norm_clip", 10.0))
+    obs_count = float(spec.get("obs_count", 1_000_000.0))
+    return_count = float(spec.get("return_count", 1_000_000.0))
+    obs_normalization = {
+        "enabled": True,
+        "mean": [0.0] * obs_dim,
+        "var": [1.0] * obs_dim,
+        "count": obs_count,
+        "clip": obs_clip,
+        "epsilon": 1e-4,
+        "init_mode": "identity_warmstart",
+        "source_checkpoint": checkpoint_reference(source),
+    }
+    return_normalization = (
+        {
+            "enabled": True,
+            "mean": 0.0,
+            "var": 1.0,
+            "count": return_count,
+            "clip": return_clip,
+            "epsilon": 1e-4,
+            "init_mode": "identity_warmstart",
+            "source_checkpoint": checkpoint_reference(source),
+        }
+        if params.get("return_norm_enabled")
+        else None
+    )
+    wrapped = make_checkpoint(
+        model_state_dict,
+        hidden_dim=checkpoint_hidden_dim(checkpoint, model_state_dict),
+        observation_layout=observation_layout,
+        action_rp_limit_deg=checkpoint_action_rp_limit_deg(checkpoint),
+        action_lowpass_alpha=checkpoint_action_lowpass_alpha(checkpoint),
+        policy_arch=policy_arch,
+        recurrent_hidden_dim=checkpoint_recurrent_hidden_dim(checkpoint, model_state_dict),
+        recurrent_sequence_len=(
+            int(checkpoint["recurrent_sequence_len"])
+            if isinstance(checkpoint, dict) and checkpoint.get("recurrent_sequence_len")
+            else None
+        ),
+        obs_normalization=obs_normalization,
+        return_normalization=return_normalization,
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(wrapped, target)
+    print(
+        "materialized identity-normalized warm-start checkpoint "
+        f"{checkpoint_reference(target)} from {checkpoint_reference(source)}"
+    )
+    return target.resolve()
 
 
 def best_checkpoint_for_observation_layout(
@@ -7003,6 +7207,12 @@ def run_one_iteration(args: argparse.Namespace, state: dict[str, Any]) -> str:
             dry_run=args.dry_run,
         )
         return "held"
+    materialized_checkpoint = materialize_identity_norm_warmstart(
+        selected_structural_hypothesis,
+        params,
+    )
+    if materialized_checkpoint is not None and args.initial_checkpoint is None:
+        args.initial_checkpoint = checkpoint_reference(materialized_checkpoint)
     initial_checkpoint = choose_initial_checkpoint(args, state, params)
     state_hold_decision = build_state_hold_decision(
         args,

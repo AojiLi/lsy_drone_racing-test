@@ -42,12 +42,12 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   observation/return normalization, asymmetric privileged critic, gate-phase
   reset curriculum, prioritized level replay, GRU, reward numbers, then speed.
 - The immediate executable structural lane is
-  `v31b_obs_return_norm_clean_ppo_5m`: it keeps v5 observations, loop052
-  reward/PPO numbers, corrected v30 semantics, and hard eval on
+  `v31c_warmstart_identity_norm_clean_ppo_5m`: it keeps v5 observations,
+  loop052 reward/PPO numbers, corrected v30 semantics, and hard eval on
   `config/level3.toml`, while adding actor observation RunningMeanStd and
   critic return/value normalization on the longer `256 envs x 128 steps`
-  rollout geometry. This lane starts from scratch to avoid feeding a
-  raw-observation checkpoint through newly normalized actor inputs.
+  rollout geometry. It starts from an identity-normalized copy of loop094 4M
+  and must pass zero-update hard-eval parity before training.
 - The stateirving reference packet
   `experiments/level3_ppo_loop/research/2026-06-19_stateirving_level3_remote_reference.md`
   is the current source-backed packet for v5 and remote reward-scale evidence.

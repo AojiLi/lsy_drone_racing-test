@@ -3134,15 +3134,28 @@ def train_ppo(
                     )
             normalization_logs = {}
             if obs_rms is not None:
+                obs_abs = obs.detach().float().abs()
                 normalization_logs.update(
                     {
                         "normalization/obs_count": float(obs_rms.count.detach().cpu().item()),
                         "normalization/obs_var_mean": float(
                             obs_rms.var.detach().float().mean().cpu().item()
                         ),
+                        "normalization/obs_mean_abs": float(
+                            obs_rms.mean.detach().float().abs().mean().cpu().item()
+                        ),
+                        "normalization/obs_abs_mean": float(obs_abs.mean().cpu().item()),
+                        "normalization/obs_clipfrac": float(
+                            (obs_abs >= (args.obs_norm_clip - 1e-6))
+                            .float()
+                            .mean()
+                            .cpu()
+                            .item()
+                        ),
                     }
                 )
             if return_rms is not None:
+                value_target_abs = value_targets.detach().float().abs()
                 normalization_logs.update(
                     {
                         "normalization/return_count": float(
@@ -3152,6 +3165,16 @@ def train_ppo(
                             return_rms.mean.detach().cpu().item()
                         ),
                         "normalization/return_var": float(return_rms.var.detach().cpu().item()),
+                        "normalization/value_target_abs_mean": float(
+                            value_target_abs.mean().cpu().item()
+                        ),
+                        "normalization/value_target_clipfrac": float(
+                            (value_target_abs >= (args.return_norm_clip - 1e-6))
+                            .float()
+                            .mean()
+                            .cpu()
+                            .item()
+                        ),
                     }
                 )
             wandb.log(
