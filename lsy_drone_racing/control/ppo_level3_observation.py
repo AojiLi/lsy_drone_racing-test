@@ -27,6 +27,12 @@ DEFAULT_ACTION_LOWPASS_ALPHA = 1.0
 POLICY_ARCH_MLP = "mlp_2x_tanh"
 POLICY_ARCH_RECURRENT_ACTOR_GRU256 = "recurrent_actor_gru256"
 SUPPORTED_POLICY_ARCHS = (POLICY_ARCH_MLP, POLICY_ARCH_RECURRENT_ACTOR_GRU256)
+CRITIC_OBSERVATION_SAME_AS_ACTOR = "same_as_actor"
+CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1 = "level3_full_state_v1"
+SUPPORTED_CRITIC_OBSERVATION_MODES = (
+    CRITIC_OBSERVATION_SAME_AS_ACTOR,
+    CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
+)
 
 SUPPORTED_OBSERVATION_LAYOUTS = (
     WORLD_HISTORY_OBSERVATION_LAYOUT,
@@ -84,6 +90,14 @@ def normalize_policy_arch(value: Any = POLICY_ARCH_MLP) -> str:
     if policy_arch not in SUPPORTED_POLICY_ARCHS:
         raise ValueError(f"Unsupported PPO policy_arch: {policy_arch}.")
     return policy_arch
+
+
+def normalize_critic_observation_mode(value: Any = CRITIC_OBSERVATION_SAME_AS_ACTOR) -> str:
+    """Return a validated critic observation mode name."""
+    mode = CRITIC_OBSERVATION_SAME_AS_ACTOR if value is None else str(value)
+    if mode not in SUPPORTED_CRITIC_OBSERVATION_MODES:
+        raise ValueError(f"Unsupported critic_observation_mode: {mode}.")
+    return mode
 
 
 def infer_hidden_dim(model_state_dict: dict[str, Any], policy_arch: str | None = None) -> int:
@@ -229,6 +243,15 @@ def checkpoint_return_normalization(checkpoint: Any) -> dict[str, Any] | None:
     return None
 
 
+def checkpoint_critic_observation_mode(checkpoint: Any) -> str:
+    """Return checkpoint critic observation mode, defaulting old checkpoints to actor obs."""
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        return normalize_critic_observation_mode(
+            checkpoint.get("critic_observation_mode", CRITIC_OBSERVATION_SAME_AS_ACTOR)
+        )
+    return CRITIC_OBSERVATION_SAME_AS_ACTOR
+
+
 def make_checkpoint(
     model_state_dict: dict[str, Any],
     hidden_dim: int | None = None,
@@ -240,6 +263,9 @@ def make_checkpoint(
     recurrent_sequence_len: int | None = None,
     obs_normalization: dict[str, Any] | None = None,
     return_normalization: dict[str, Any] | None = None,
+    critic_observation_mode: str = CRITIC_OBSERVATION_SAME_AS_ACTOR,
+    actor_observation_dim: int | None = None,
+    critic_observation_dim: int | None = None,
 ) -> dict[str, Any]:
     """Package model weights with Level3 observation-layout and network-width metadata."""
     policy_arch = normalize_policy_arch(policy_arch)
@@ -261,6 +287,7 @@ def make_checkpoint(
         )
     if observation_layout not in SUPPORTED_OBSERVATION_LAYOUTS:
         raise ValueError(f"Unsupported Level3 observation layout: {observation_layout}.")
+    critic_observation_mode = normalize_critic_observation_mode(critic_observation_mode)
     checkpoint = {
         "model_state_dict": model_state_dict,
         "observation_layout": observation_layout,
@@ -277,6 +304,12 @@ def make_checkpoint(
         checkpoint["obs_normalization"] = obs_normalization
     if return_normalization is not None:
         checkpoint["return_normalization"] = return_normalization
+    if critic_observation_mode != CRITIC_OBSERVATION_SAME_AS_ACTOR:
+        checkpoint["critic_observation_mode"] = critic_observation_mode
+        if actor_observation_dim is not None:
+            checkpoint["actor_observation_dim"] = int(actor_observation_dim)
+        if critic_observation_dim is not None:
+            checkpoint["critic_observation_dim"] = int(critic_observation_dim)
     return checkpoint
 
 

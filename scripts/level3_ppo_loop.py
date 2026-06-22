@@ -44,6 +44,12 @@ LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT = (
 LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUT = (
     "level3_gate_corridor_aperture_margin_minimal_2obs_local_history_v11"
 )
+CRITIC_OBSERVATION_SAME_AS_ACTOR = "same_as_actor"
+CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1 = "level3_full_state_v1"
+CRITIC_OBSERVATION_MODE_CHOICES = {
+    CRITIC_OBSERVATION_SAME_AS_ACTOR,
+    CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
+}
 SUPPORTED_OBSERVATION_LAYOUTS = (
     WORLD_HISTORY_OBSERVATION_LAYOUT,
     LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
@@ -433,12 +439,17 @@ V31D_TO_30M_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-22_loop097_continue_v31d_to_30m.md"
 )
+V32_PRIVILEGED_CRITIC_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_loop098_reject_v31d_launch_v32_privileged_critic_support.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
     "teacher_retention_kl",
     "v30_episode_semantics",
     "observation_return_normalization_support",
+    "asymmetric_privileged_critic_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -552,6 +563,7 @@ BASE_PARAMS: dict[str, Any] = {
     "target_kl": 0.03,
     "hidden_dim": 256,
     "policy_arch": "mlp_2x_tanh",
+    "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
     "recurrent_hidden_dim": 256,
     "recurrent_sequence_len": 32,
     "n_obs": 2,
@@ -607,6 +619,7 @@ LOOP052_REMOTE_NOMINAL_PARAMS: dict[str, Any] = {
     "target_kl": 0.03,
     "hidden_dim": 256,
     "policy_arch": "mlp_2x_tanh",
+    "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
     "recurrent_hidden_dim": 256,
     "recurrent_sequence_len": 32,
     "n_obs": 2,
@@ -690,6 +703,7 @@ TRACK_GENERATOR_PROFILE_CHOICES = {
     "v29_train_pool_success_churn_replay",
 }
 STRING_PARAM_CHOICES = {
+    "critic_observation_mode": CRITIC_OBSERVATION_MODE_CHOICES,
     "reward_structure": REWARD_STRUCTURE_CHOICES,
     "track_generator_profile": TRACK_GENERATOR_PROFILE_CHOICES,
 }
@@ -5165,6 +5179,94 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "from the loop097 12M best checkpoint."
         ),
     },
+    "v32_asymmetric_privileged_critic_clean_ppo_5m": {
+        "name": "v32_asymmetric_privileged_critic_clean_ppo_5m",
+        "proposal_name": "structural_v32_asymmetric_privileged_critic_clean_ppo_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 5,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP097_BEST_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "asymmetric_privileged_critic_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V32_PRIVILEGED_CRITIC_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "critic_observation_mode": CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
+            "critic_extra_state": [
+                "drone position velocity angular_velocity rotation_matrix",
+                "target_gate_progress",
+                "all gate positions and quaternions",
+                "all obstacle positions",
+                "gate and obstacle visited flags",
+            ],
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled for v32 parity lane",
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP097_BEST_CHECKPOINT,
+            },
+            "parity_gate_before_training": {
+                "source_checkpoint": LOOP097_BEST_CHECKPOINT,
+                "seed_split": "validation_unseen_101_200",
+                "required": True,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 4 asymmetric privileged Critic",
+            "baseline": "loop097/v31d 12M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can a Critic with training-only full-track state reduce noisy "
+                "advantage estimates while the deployed Actor remains the exact "
+                "v5 observation/history policy?"
+            ),
+            "success_screen": {
+                "precondition": (
+                    "zero-update actor parity against loop097/v31d 12M passes on "
+                    "validation_unseen_101_200"
+                ),
+                "promising_for_maturation": (
+                    "success > 0.20, or mean_gates materially above 1.66 with "
+                    "new success seeds or lower crash rate"
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 48,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
+        },
+        "rationale": (
+            "loop098 rejected further clean-PPO longer-rollout maturation, and "
+            "the framework packet ranks asymmetric privileged Critic as the next "
+            "structural stage before curriculum, PLR, GRU, reward-number search, "
+            "or speed pressure. This lane keeps the deployed Actor observation, "
+            "action semantics, reward numbers, PPO numbers, rollout geometry, "
+            "and final hard eval fixed, but lets the training Critic consume "
+            "full-track state. It is runnable only after the zero-update Actor "
+            "parity check passes."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -5183,6 +5285,7 @@ FIRE_PARAM_KEYS = [
     "target_kl",
     "hidden_dim",
     "policy_arch",
+    "critic_observation_mode",
     "recurrent_hidden_dim",
     "recurrent_sequence_len",
     "n_obs",

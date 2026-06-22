@@ -38,6 +38,8 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   rejected all-gates/v4 lane unless the user explicitly asks.
 - The current structural roadmap is
   `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
+  The latest pasted-framework synthesis is
+  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_pasted_structural_update.md`.
   Its priority order is PPO correctness, clean longer-rollout baseline,
   observation/return normalization, asymmetric privileged critic, gate-phase
   reset curriculum, prioritized level replay, GRU, reward numbers, then speed.

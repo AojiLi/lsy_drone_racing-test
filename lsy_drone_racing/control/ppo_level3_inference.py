@@ -23,9 +23,11 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
     POLICY_ARCH_MLP,
     POLICY_ARCH_RECURRENT_ACTOR_GRU256,
+    CRITIC_OBSERVATION_SAME_AS_ACTOR,
     WORLD_HISTORY_OBSERVATION_LAYOUT,
     checkpoint_action_lowpass_alpha,
     checkpoint_action_rp_limit_deg,
+    checkpoint_critic_observation_mode,
     checkpoint_hidden_dim,
     checkpoint_obs_normalization,
     checkpoint_policy_arch,
@@ -305,7 +307,16 @@ class PPOLevel2Inference(Controller):
                 (self.action_dim,),
                 hidden_dim=self.hidden_dim,
             ).to(self.device)
-        self.agent.load_state_dict(model_state_dict)
+        critic_observation_mode = checkpoint_critic_observation_mode(checkpoint)
+        if critic_observation_mode == CRITIC_OBSERVATION_SAME_AS_ACTOR:
+            self.agent.load_state_dict(model_state_dict)
+        else:
+            deploy_state = {
+                key: value
+                for key, value in model_state_dict.items()
+                if not key.startswith("critic.")
+            }
+            self.agent.load_state_dict(deploy_state, strict=False)
         self.agent.eval()
 
         self._history = np.repeat(self._basic_history(obs)[None, :], N_HISTORY, axis=0)

@@ -31,8 +31,14 @@ success seed union was only about 30/100, so even an oracle selecting among
 those checkpoints would not reach the 60% target. Loop093, the first corrected
 v30 semantics run, reached only `17/100` on final-target `level3.toml`.
 
-This means the next loop should compare explicit structural training hypotheses,
-not continue local reward-number or fixed-seed replay tweaks around loop052.
+Loop094/v31a longer rollout briefly improved the corrected clean-PPO frontier
+to `19/100`; loop097/v31d matured that branch to `20/100` at its 12M checkpoint.
+Loop098 then continued the same branch toward a 30M-style horizon but regressed
+to `19/100`, mean gates `1.63`, and crash rate `81%`.
+
+This means the next loop should not continue local reward-number, fixed-seed
+replay, or longer-rollout-only tweaks. It should move to the next named
+structural support lane: asymmetric privileged Critic with strict Actor parity.
 
 ## Framework Priorities
 
@@ -50,35 +56,39 @@ not continue local reward-number or fixed-seed replay tweaks around loop052.
 
 ## Immediate Executable Lane
 
-The first executable step is `v31a_longer_rollout_clean_ppo_5m`.
+The immediate executable step is
+`v32_asymmetric_privileged_critic_support_parity`.
 
-It keeps:
+This is not a training launch. It implements and validates support for:
 
-- v5 deployed observation;
-- loop052 reward numbers;
-- loop052 PPO numbers;
-- loop052 final checkpoint as initialization;
-- corrected v30 episode/reset/finish semantics;
-- final hard eval on `config/level3.toml` validation seeds 101-200.
+- deployed Actor input: unchanged v5 observation/history prefix;
+- deployed Actor output: unchanged roll/pitch/yaw/thrust PPO controller;
+- training Critic input: Actor prefix plus training-only full-track state;
+- checkpoint metadata: `critic_observation_mode`, `actor_observation_dim`, and
+  `critic_observation_dim`;
+- inference behavior: ignore Critic-only privileged weights and load Actor
+  weights exactly as before.
 
-It changes only rollout geometry:
+Before any v32 training, the loop must generate a zero-update v32 checkpoint
+from the loop097/v31d 12M best checkpoint and prove deterministic parity on
+`validation_unseen_101_200` under `config/level3.toml`.
+
+After that parity passes, the first training lane may be:
 
 ```text
-old: 1024 envs x 32 steps  = 32768 samples/update
-new:  256 envs x 128 steps = 32768 samples/update
+v32_asymmetric_privileged_critic_clean_ppo_5m
 ```
 
-At 50 Hz, this increases per-env rollout horizon from about `0.64s` to `2.56s`,
-which should make gate approach, crossing, recovery, and obstacle-avoidance
-credit assignment less bootstrap-heavy.
+It keeps v5 Actor observation, loop052 reward/PPO numbers, `256 envs x 128`
+rollout geometry, corrected v30 semantics, and hard eval on
+`config/level3.toml`. It changes only the training Critic input.
 
 ## Not Yet Implemented
 
 These framework pieces require code support before training:
 
-- actor observation RunningMeanStd;
-- critic/return running scale;
-- asymmetric privileged critic input and checkpoint metadata;
+- separate actor/critic RunningMeanStd if normalization is combined with
+  asymmetric Critic later;
 - gate-phase reset buffer with physically consistent state resets;
 - competence-gated curriculum stages;
 - prioritized level replay over train track seeds;

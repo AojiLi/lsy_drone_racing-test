@@ -25,6 +25,8 @@ from torch import Tensor
 from torch.distributions.normal import Normal
 
 from lsy_drone_racing.control.ppo_level3_observation import (
+    CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
+    CRITIC_OBSERVATION_SAME_AS_ACTOR,
     LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUT,
     LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS,
     LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
@@ -44,12 +46,14 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     WORLD_HISTORY_OBSERVATION_LAYOUT,
     checkpoint_action_lowpass_alpha,
     checkpoint_action_rp_limit_deg,
+    checkpoint_critic_observation_mode,
     checkpoint_hidden_dim,
     checkpoint_obs_normalization,
     checkpoint_policy_arch,
     checkpoint_recurrent_hidden_dim,
     checkpoint_return_normalization,
     make_checkpoint,
+    normalize_critic_observation_mode,
     normalize_action_lowpass_alpha,
     normalize_action_rp_limit_deg,
     normalize_policy_arch,
@@ -219,6 +223,8 @@ class Args:
     """allow explicit block-copy warm-start from a narrower 2-layer MLP checkpoint"""
     observation_layout: str = WORLD_HISTORY_OBSERVATION_LAYOUT
     """flat observation layout stored in checkpoints"""
+    critic_observation_mode: str = CRITIC_OBSERVATION_SAME_AS_ACTOR
+    """critic input mode; privileged modes are training-only and not deployed"""
     action_rp_limit_deg: float = 90.0
     """roll/pitch command envelope in degrees, stored in checkpoints"""
     action_lowpass_alpha: float = 1.0
@@ -294,6 +300,9 @@ class Args:
         """Create arguments class."""
         args = Args(**kwargs)
         args.policy_arch = normalize_policy_arch(args.policy_arch)
+        args.critic_observation_mode = normalize_critic_observation_mode(
+            args.critic_observation_mode
+        )
         if args.track_generator_profile not in TRACK_GENERATOR_PROFILES:
             choices = ", ".join(sorted(TRACK_GENERATOR_PROFILES))
             raise ValueError(
@@ -310,6 +319,21 @@ class Args:
             )
         if args.v27_teacher_kl_beta < 0.0:
             raise ValueError("v27_teacher_kl_beta must be non-negative.")
+        if args.critic_observation_mode != CRITIC_OBSERVATION_SAME_AS_ACTOR:
+            if args.policy_arch != POLICY_ARCH_MLP:
+                raise NotImplementedError(
+                    "privileged critic support currently targets the feed-forward MLP actor."
+                )
+            if args.v27_teacher_kl_beta > 0.0:
+                raise NotImplementedError(
+                    "privileged critic support is not wired together with v27 "
+                    "teacher-retention KL."
+                )
+            if args.obs_norm_enabled:
+                raise NotImplementedError(
+                    "privileged critic support needs separate actor/critic normalization; "
+                    "run v32 parity with obs_norm_enabled=False first."
+                )
         if args.v27_teacher_kl_beta > 0.0:
             if args.policy_arch != POLICY_ARCH_MLP:
                 raise NotImplementedError(
@@ -1419,6 +1443,7 @@ class RaceObservation(VectorObservationWrapper):
         n_history: int = 2,
         debug_obs: bool = False,
         observation_layout: str = WORLD_HISTORY_OBSERVATION_LAYOUT,
+        critic_observation_mode: str = CRITIC_OBSERVATION_SAME_AS_ACTOR,
         action_lowpass_alpha: float = 1.0,
     ):
         """Initialize observation vector layout."""
@@ -1428,6 +1453,9 @@ class RaceObservation(VectorObservationWrapper):
         self.n_history = n_history
         self.debug_obs = debug_obs
         self.observation_layout = observation_layout
+        self.critic_observation_mode = normalize_critic_observation_mode(
+            critic_observation_mode
+        )
         self.action_lowpass_alpha = normalize_action_lowpass_alpha(action_lowpass_alpha)
         self._printed_obs_debug = False
         raw_space = env.single_observation_space
@@ -1451,7 +1479,22 @@ class RaceObservation(VectorObservationWrapper):
         )
         self.history_dim = self.LOCAL_HISTORY_DIM if self._use_local_obstacles else self.WORLD_HISTORY_DIM
         self.layout = self._build_layout()
+        self.actor_observation_dim = self.layout[-1][1].stop
+        if self.critic_observation_mode == CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1:
+            self._privileged_critic_dim = self._privileged_critic_observation_dim()
+            self.layout.append(
+                (
+                    "critic_privileged_full_state_v1",
+                    slice(
+                        self.actor_observation_dim,
+                        self.actor_observation_dim + self._privileged_critic_dim,
+                    ),
+                )
+            )
+        else:
+            self._privileged_critic_dim = 0
         self.obs_dim = self.layout[-1][1].stop
+        self.critic_observation_dim = self.obs_dim
         self.single_observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.obs_dim,), dtype=np.float32
         )
@@ -1557,6 +1600,20 @@ class RaceObservation(VectorObservationWrapper):
     def _flatten_observations(
         self, observations: dict[str, Array], history: Array, last_action: Array
     ) -> Array:
+        actor_flat = self._actor_observation(observations, history, last_action)
+        if self.critic_observation_mode == CRITIC_OBSERVATION_SAME_AS_ACTOR:
+            return actor_flat
+        if self.critic_observation_mode == CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1:
+            return jp.concatenate(
+                [actor_flat, self._privileged_critic_observation(observations)],
+                axis=-1,
+            )
+        raise ValueError(f"Unsupported critic_observation_mode={self.critic_observation_mode}.")
+
+    def _actor_observation(
+        self, observations: dict[str, Array], history: Array, last_action: Array
+    ) -> Array:
+        """Return the deployed Actor observation prefix."""
         pos = observations["pos"]
         quat = observations["quat"]
         vel = observations["vel"]
@@ -1652,6 +1709,44 @@ class RaceObservation(VectorObservationWrapper):
             observations["gates_visited"].astype(jp.float32),
             last_action,
             history.reshape(pos.shape[0], -1),
+        ]
+        return jp.concatenate(parts, axis=-1)
+
+    def _privileged_critic_observation_dim(self) -> int:
+        """Return the training-only privileged critic feature width."""
+        return (
+            3  # position
+            + 3  # velocity
+            + 3  # angular velocity
+            + 9  # rotation matrix
+            + 1  # normalized target gate
+            + 3 * self.n_gates
+            + 4 * self.n_gates
+            + 3 * self.n_obstacles
+            + self.n_gates
+            + self.n_obstacles
+        )
+
+    def _privileged_critic_observation(self, observations: dict[str, Array]) -> Array:
+        """Return training-only full-state features for asymmetric PPO Critic."""
+        rot = self.quat_to_rotmat(observations["quat"])
+        target_gate = jp.where(
+            observations["target_gate"] < 0,
+            self.n_gates,
+            observations["target_gate"],
+        )
+        target_progress = (target_gate / self.n_gates)[:, None].astype(jp.float32)
+        parts = [
+            observations["pos"],
+            observations["vel"],
+            observations["ang_vel"],
+            rot.reshape(observations["pos"].shape[0], -1),
+            target_progress,
+            observations["gates_pos"].reshape(observations["pos"].shape[0], -1),
+            observations["gates_quat"].reshape(observations["pos"].shape[0], -1),
+            observations["obstacles_pos"].reshape(observations["pos"].shape[0], -1),
+            observations["gates_visited"].astype(jp.float32),
+            observations["obstacles_visited"].astype(jp.float32),
         ]
         return jp.concatenate(parts, axis=-1)
 
@@ -1920,6 +2015,21 @@ def mean_scalar(value: Any) -> float:
     return float(np.asarray(value).mean())
 
 
+def wrapped_attr(env: Any, name: str, default: Any = None) -> Any:
+    """Return an attribute from a possibly nested Gymnasium vector wrapper."""
+    current = env
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if name in getattr(current, "__dict__", {}):
+            return getattr(current, name)
+        try:
+            return object.__getattribute__(current, name)
+        except AttributeError:
+            current = getattr(current, "env", None)
+    return default
+
+
 class RunningMeanStd:
     """Torch running mean/variance with checkpoint-friendly metadata."""
 
@@ -2142,6 +2252,9 @@ def make_envs(
         n_history=coefs.get("n_obs", 0),
         debug_obs=debug_obs,
         observation_layout=str(coefs.get("observation_layout", WORLD_HISTORY_OBSERVATION_LAYOUT)),
+        critic_observation_mode=str(
+            coefs.get("critic_observation_mode", CRITIC_OBSERVATION_SAME_AS_ACTOR)
+        ),
         action_lowpass_alpha=coefs.get("action_lowpass_alpha", 1.0),
     )
     env = JaxToTorch(env, torch_device)
@@ -2159,21 +2272,32 @@ def layer_init(layer: nn.Module, std: float = np.sqrt(2), bias_const: float = 0.
 class Agent(nn.Module):
     """RL Agent."""
 
-    def __init__(self, obs_shape: tuple, action_shape: tuple, hidden_dim: int = 128):
+    def __init__(
+        self,
+        obs_shape: tuple,
+        action_shape: tuple,
+        hidden_dim: int = 128,
+        critic_obs_shape: tuple | None = None,
+    ):
         """Init network structures."""
         super().__init__()
         if hidden_dim <= 0:
             raise ValueError(f"hidden_dim must be positive, got {hidden_dim}.")
+        critic_obs_shape = obs_shape if critic_obs_shape is None else critic_obs_shape
+        actor_obs_dim = int(torch.tensor(obs_shape).prod())
+        critic_obs_dim = int(torch.tensor(critic_obs_shape).prod())
         self.hidden_dim = hidden_dim
+        self.actor_obs_dim = actor_obs_dim
+        self.critic_obs_dim = critic_obs_dim
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(torch.tensor(obs_shape).prod(), hidden_dim)),
+            layer_init(nn.Linear(critic_obs_dim, hidden_dim)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_dim, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(torch.tensor(obs_shape).prod(), hidden_dim)),
+            layer_init(nn.Linear(actor_obs_dim, hidden_dim)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.Tanh(),
@@ -2189,7 +2313,11 @@ class Agent(nn.Module):
         return self.critic(x)
 
     def get_action_and_value(
-        self, x: Tensor, action: Tensor | None = None, deterministic: bool = False
+        self,
+        x: Tensor,
+        action: Tensor | None = None,
+        deterministic: bool = False,
+        critic_x: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Action output."""
         action_mean = self.actor_mean(x)
@@ -2201,7 +2329,8 @@ class Agent(nn.Module):
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample() if not deterministic else action_mean
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+        value_input = x if critic_x is None else critic_x
+        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(value_input)
 
 
 class RecurrentActorAgent(nn.Module):
@@ -2331,9 +2460,12 @@ def make_agent(
     obs_shape: tuple,
     action_shape: tuple,
     args: Args,
+    critic_obs_shape: tuple | None = None,
 ) -> Agent | RecurrentActorAgent:
     """Build the requested PPO policy architecture."""
     policy_arch = normalize_policy_arch(args.policy_arch)
+    if critic_obs_shape is not None and critic_obs_shape != obs_shape and policy_arch != POLICY_ARCH_MLP:
+        raise NotImplementedError("asymmetric critic input currently supports only MLP policies.")
     if policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
         return RecurrentActorAgent(
             obs_shape,
@@ -2341,7 +2473,7 @@ def make_agent(
             hidden_dim=args.hidden_dim,
             recurrent_hidden_dim=args.recurrent_hidden_dim,
         )
-    return Agent(obs_shape, action_shape, hidden_dim=args.hidden_dim)
+    return Agent(obs_shape, action_shape, hidden_dim=args.hidden_dim, critic_obs_shape=critic_obs_shape)
 
 
 def expand_checkpoint_input_dim(
@@ -2370,6 +2502,33 @@ def expand_checkpoint_input_dim(
         )
         padded[:, :source_dim] = source_weight
         expanded[key] = padded
+    return expanded
+
+
+def expand_checkpoint_critic_input_dim(
+    model_state_dict: dict[str, Tensor],
+    target_agent: Agent,
+) -> dict[str, Tensor]:
+    """Zero-pad only the Critic input layer for asymmetric-critic warm starts."""
+    expanded = dict(model_state_dict)
+    key = "critic.0.weight"
+    source_weight = expanded[key]
+    target_weight = target_agent.critic[0].weight
+    source_dim = int(source_weight.shape[1])
+    target_dim = int(target_weight.shape[1])
+    if source_dim == target_dim:
+        return expanded
+    if source_dim > target_dim:
+        raise ValueError(
+            f"Cannot shrink checkpoint Critic input layer {key}: {source_dim} -> {target_dim}."
+        )
+    padded = torch.zeros(
+        (source_weight.shape[0], target_dim),
+        dtype=source_weight.dtype,
+        device=source_weight.device,
+    )
+    padded[:, :source_dim] = source_weight
+    expanded[key] = padded
     return expanded
 
 
@@ -2572,6 +2731,7 @@ def train_ppo(
     r_coefs = {
         "n_obs": args.n_obs,
         "observation_layout": args.observation_layout,
+        "critic_observation_mode": args.critic_observation_mode,
         "action_rp_limit_deg": args.action_rp_limit_deg,
         "action_lowpass_alpha": args.action_lowpass_alpha,
         "reward_structure": args.reward_structure,
@@ -2616,11 +2776,26 @@ def train_ppo(
     assert isinstance(envs.single_action_space, gym.spaces.Box), (
         "only continuous action space is supported"
     )
+    full_obs_dim = int(np.prod(envs.single_observation_space.shape))
+    actor_obs_dim = int(wrapped_attr(envs, "actor_observation_dim", full_obs_dim))
+    critic_obs_dim = int(wrapped_attr(envs, "critic_observation_dim", full_obs_dim))
+    if actor_obs_dim <= 0 or actor_obs_dim > full_obs_dim:
+        raise ValueError(f"Invalid actor_observation_dim={actor_obs_dim} for {full_obs_dim}.")
+    if critic_obs_dim <= 0 or critic_obs_dim > full_obs_dim:
+        raise ValueError(f"Invalid critic_observation_dim={critic_obs_dim} for {full_obs_dim}.")
+    if args.critic_observation_mode == CRITIC_OBSERVATION_SAME_AS_ACTOR:
+        critic_obs_dim = actor_obs_dim
+    elif critic_obs_dim == actor_obs_dim:
+        raise ValueError(
+            "privileged critic mode was requested but the environment did not append "
+            "critic-only observations."
+        )
 
     agent = make_agent(
-        envs.single_observation_space.shape,
+        (actor_obs_dim,),
         envs.single_action_space.shape,
         args,
+        critic_obs_shape=(critic_obs_dim,),
     ).to(device)
     initial_checkpoint: dict[str, Any] | None = None
     if initial_model_path is not None:
@@ -2716,6 +2891,26 @@ def train_ppo(
                     f"hidden_dim={initial_hidden_dim} checkpoint. Use a matching hidden_dim "
                     "or pass allow_hidden_dim_warmstart=True for an explicit capacity lane."
                 )
+            initial_critic_mode = checkpoint_critic_observation_mode(initial_checkpoint)
+            if (
+                args.critic_observation_mode == CRITIC_OBSERVATION_SAME_AS_ACTOR
+                and initial_critic_mode != CRITIC_OBSERVATION_SAME_AS_ACTOR
+            ):
+                raise ValueError(
+                    "Cannot initialize same-observation Critic training from a privileged "
+                    "Critic checkpoint. Use a same-observation checkpoint or keep "
+                    "critic_observation_mode=level3_full_state_v1."
+                )
+            if (
+                args.critic_observation_mode != CRITIC_OBSERVATION_SAME_AS_ACTOR
+                and initial_critic_mode == CRITIC_OBSERVATION_SAME_AS_ACTOR
+            ):
+                model_state_dict = expand_checkpoint_critic_input_dim(model_state_dict, agent)
+                print(
+                    "initialized asymmetric Critic from same-observation checkpoint; "
+                    "Critic input layer is zero-padded for privileged features and "
+                    "Actor weights are unchanged"
+                )
             initial_action_rp_limit_deg = checkpoint_action_rp_limit_deg(initial_checkpoint)
             if round(initial_action_rp_limit_deg, 6) != round(args.action_rp_limit_deg, 6):
                 print(
@@ -2741,13 +2936,13 @@ def train_ppo(
         )
         if obs_norm_state:
             obs_rms = RunningMeanStd(
-                envs.single_observation_space.shape,
+                (actor_obs_dim,),
                 device=device,
                 state=obs_norm_state,
             )
             print(f"initialized observation normalization from {initial_model_path}")
         else:
-            obs_rms = RunningMeanStd(envs.single_observation_space.shape, device=device)
+            obs_rms = RunningMeanStd((actor_obs_dim,), device=device)
             if initial_model_path is not None:
                 print(
                     "initialized fresh observation normalization while warm-starting "
@@ -2771,14 +2966,20 @@ def train_ppo(
                     f"weights from {initial_model_path}"
                 )
 
-    def policy_obs(raw_obs: Tensor, *, update_stats: bool) -> Tensor:
-        """Return the observation tensor fed to Actor/Critic."""
+    def policy_obs(raw_obs: Tensor, *, update_stats: bool) -> tuple[Tensor, Tensor]:
+        """Return Actor and Critic observations for PPO updates."""
         raw_obs = raw_obs.float()
+        actor_raw_obs = raw_obs[..., :actor_obs_dim]
+        if args.critic_observation_mode == CRITIC_OBSERVATION_SAME_AS_ACTOR:
+            critic_raw_obs = actor_raw_obs
+        else:
+            critic_raw_obs = raw_obs[..., :critic_obs_dim]
         if obs_rms is None:
-            return raw_obs
+            return actor_raw_obs, critic_raw_obs
         if update_stats:
-            obs_rms.update(raw_obs)
-        return obs_rms.normalize(raw_obs, clip=args.obs_norm_clip)
+            obs_rms.update(actor_raw_obs.reshape(-1, actor_obs_dim))
+        actor_policy_obs = obs_rms.normalize(actor_raw_obs, clip=args.obs_norm_clip)
+        return actor_policy_obs, critic_raw_obs
 
     def raw_value(value_prediction: Tensor) -> Tensor:
         """Map Critic output to the raw reward scale used for GAE."""
@@ -2811,9 +3012,8 @@ def train_ppo(
     optimizer = optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(
-        device
-    )
+    obs = torch.zeros((args.num_steps, args.num_envs, actor_obs_dim), device=device)
+    critic_obs = torch.zeros((args.num_steps, args.num_envs, critic_obs_dim), device=device)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(
         device
     )
@@ -2855,8 +3055,9 @@ def train_ppo(
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
-            current_policy_obs = policy_obs(next_obs, update_stats=True)
+            current_policy_obs, current_critic_obs = policy_obs(next_obs, update_stats=True)
             obs[step] = current_policy_obs
+            critic_obs[step] = current_critic_obs
             dones[step] = next_done
 
             # ALGO LOGIC: action logic
@@ -2868,7 +3069,10 @@ def train_ppo(
                         next_done,
                     )
                 else:
-                    action, logprob, _, value = agent.get_action_and_value(current_policy_obs)
+                    action, logprob, _, value = agent.get_action_and_value(
+                        current_policy_obs,
+                        critic_x=current_critic_obs,
+                    )
                 values[step] = value.flatten()
                 raw_values[step] = raw_value(value).flatten()
             actions[step] = action
@@ -2901,8 +3105,8 @@ def train_ppo(
 
         # bootstrap value if not done
         with torch.no_grad():
-            bootstrap_obs = policy_obs(next_obs, update_stats=False)
-            next_value = raw_value(agent.get_value(bootstrap_obs)).reshape(1, -1)
+            _, bootstrap_critic_obs = policy_obs(next_obs, update_stats=False)
+            next_value = raw_value(agent.get_value(bootstrap_critic_obs)).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
             for t in reversed(range(args.num_steps)):
@@ -3001,7 +3205,8 @@ def train_ppo(
                     break
         else:
             # flatten the batch
-            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            b_obs = obs.reshape((-1, actor_obs_dim))
+            b_critic_obs = critic_obs.reshape((-1, critic_obs_dim))
             b_logprobs = logprobs.reshape(-1)
             b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
             b_advantages = advantages.reshape(-1)
@@ -3018,7 +3223,9 @@ def train_ppo(
                     mb_inds = b_inds[start:end]
 
                     _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                        b_obs[mb_inds], b_actions[mb_inds]
+                        b_obs[mb_inds],
+                        b_actions[mb_inds],
+                        critic_x=b_critic_obs[mb_inds],
                     )
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
@@ -3221,6 +3428,9 @@ def train_ppo(
                     ),
                     obs_normalization=checkpoint_obs_norm_metadata(),
                     return_normalization=checkpoint_return_norm_metadata(),
+                    critic_observation_mode=args.critic_observation_mode,
+                    actor_observation_dim=actor_obs_dim,
+                    critic_observation_dim=critic_obs_dim,
                 ),
                 checkpoint_path,
             )
@@ -3242,6 +3452,9 @@ def train_ppo(
                 recurrent_sequence_len=args.recurrent_sequence_len if recurrent_enabled else None,
                 obs_normalization=checkpoint_obs_norm_metadata(),
                 return_normalization=checkpoint_return_norm_metadata(),
+                critic_observation_mode=args.critic_observation_mode,
+                actor_observation_dim=actor_obs_dim,
+                critic_observation_dim=critic_obs_dim,
             ),
             model_path,
         )
@@ -3331,7 +3544,13 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
         eval_env.single_action_space.shape,
         eval_args,
     ).to(device)
-    agent.load_state_dict(model_state_dict)
+    if checkpoint_critic_observation_mode(checkpoint) == CRITIC_OBSERVATION_SAME_AS_ACTOR:
+        agent.load_state_dict(model_state_dict)
+    else:
+        deploy_state = {
+            key: value for key, value in model_state_dict.items() if not key.startswith("critic.")
+        }
+        agent.load_state_dict(deploy_state, strict=False)
     with torch.no_grad():
         episode_rewards = []
         episode_lengths = []
@@ -3474,6 +3693,7 @@ def main(
     recurrent_sequence_len: int = 32,
     allow_hidden_dim_warmstart: bool = False,
     observation_layout: str = WORLD_HISTORY_OBSERVATION_LAYOUT,
+    critic_observation_mode: str = CRITIC_OBSERVATION_SAME_AS_ACTOR,
     action_rp_limit_deg: float = 90.0,
     action_lowpass_alpha: float = 1.0,
     reward_structure: str = "legacy_staged",
@@ -3555,6 +3775,7 @@ def main(
         recurrent_sequence_len=recurrent_sequence_len,
         allow_hidden_dim_warmstart=allow_hidden_dim_warmstart,
         observation_layout=observation_layout,
+        critic_observation_mode=critic_observation_mode,
         action_rp_limit_deg=action_rp_limit_deg,
         action_lowpass_alpha=action_lowpass_alpha,
         reward_structure=reward_structure,
