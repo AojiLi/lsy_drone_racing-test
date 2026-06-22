@@ -641,7 +641,7 @@ def write_subagent_briefs(
                     "",
                     "- Structural search is allowed only as an explicit named lane.",
                     "- Do not modify Level3 track geometry or randomization.",
-                    "- Final acceptance must be hard eval on `config/level3_dr.toml`.",
+                    "- Final acceptance must be hard eval on `config/level3.toml`.",
                     "- Reward, observation, controller, PPO/training, or reward-structure "
                     "changes must be named and justified by evidence.",
                     "",
@@ -687,7 +687,7 @@ def render_report(
             "",
             "- Structural search is allowed only as an explicit named lane.",
             "- Do not modify Level3 track geometry or randomization.",
-            "- Final acceptance must be hard eval on `config/level3_dr.toml`.",
+            "- Final acceptance must be hard eval on `config/level3.toml`.",
             "- The main agent must write a decision packet before the next training chunk.",
             "- Allowed next decisions: "
             + ", ".join(f"`{option}`" for option in POST_RUN_DECISION_OPTIONS)
@@ -834,7 +834,7 @@ def main() -> None:
             "mode": "structural_search_with_level3_hard_eval",
             "tunable_reward_params": TUNABLE_REWARD_PARAM_KEYS,
             "disabled_reward_channels": LOCKED_REWARD_CHANNELS,
-            "immutable_target_eval_config": "config/level3_dr.toml",
+            "immutable_target_eval_config": "config/level3.toml",
             "do_not_modify_level3_track": True,
         },
         "post_run_decision_gate": {
@@ -896,7 +896,7 @@ def main() -> None:
             "allowed_decisions": POST_RUN_DECISION_OPTIONS,
             "decision_dir": relative_to_root(DECISION_DIR),
             "requires_packet_before_next_training": True,
-            "hard_eval_config": "config/level3_dr.toml",
+            "hard_eval_config": "config/level3.toml",
             "do_not_modify_level3_track": True,
         }
         if wandb_url:

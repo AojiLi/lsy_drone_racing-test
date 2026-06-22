@@ -126,7 +126,7 @@ class VecMultiDroneRaceEnv(RaceCoreEnv, VectorEnv):
     This environment enables vectorized training of multi-agent drone racing agents.
     """
 
-    metadata = {"autoreset_mode": AutoresetMode.SAME_STEP if AutoresetMode is not None else None}
+    metadata = {"autoreset_mode": AutoresetMode.NEXT_STEP if AutoresetMode is not None else None}
 
     def __init__(
         self,

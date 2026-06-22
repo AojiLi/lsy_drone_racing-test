@@ -5274,8 +5274,18 @@ def summary_for_checkpoint(
     if checkpoint_key is None:
         return None
 
+    def is_target_eval(summary: dict[str, Any], trial: dict[str, Any] | None = None) -> bool:
+        eval_config = summary.get("eval_config")
+        if eval_config is None and trial is not None:
+            eval_config = trial.get("eval_config")
+        return str(eval_config or "") in {TARGET_EVAL_CONFIG, f"config/{TARGET_EVAL_CONFIG}"}
+
     best = state.get("best")
-    if isinstance(best, dict) and normalise_repo_path(best.get("checkpoint_file")) == checkpoint_key:
+    if (
+        isinstance(best, dict)
+        and normalise_repo_path(best.get("checkpoint_file")) == checkpoint_key
+        and is_target_eval(best)
+    ):
         return best
 
     for trial in state.get("trials", []):
@@ -5289,7 +5299,8 @@ def summary_for_checkpoint(
                 isinstance(summary, dict)
                 and normalise_repo_path(summary.get("checkpoint_file")) == checkpoint_key
             ):
-                return summary
+                if is_target_eval(summary, trial):
+                    return summary
     return None
 
 

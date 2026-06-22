@@ -112,7 +112,7 @@ class DroneRaceEnv(RaceCoreEnv, Env):
 class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
     """Vectorized single-agent drone racing environment."""
 
-    metadata = {"autoreset_mode": AutoresetMode.SAME_STEP if AutoresetMode is not None else None}
+    metadata = {"autoreset_mode": AutoresetMode.NEXT_STEP if AutoresetMode is not None else None}
 
     def __init__(
         self,
