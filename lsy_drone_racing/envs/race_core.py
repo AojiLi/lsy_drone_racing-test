@@ -60,6 +60,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+TERMINATION_REASON_NONE = 0
+TERMINATION_REASON_FINISH = 1
+TERMINATION_REASON_CONTACT = 2
+TERMINATION_REASON_BOUNDS = 3
+TERMINATION_REASON_TIMEOUT = 4
+
 
 # region EnvData / Settings
 
@@ -513,35 +519,57 @@ class RaceCoreEnv:
 
         @jax.jit
         def step(data: EnvData, action: Array) -> EnvData:
-            # 1) Save marked_for_reset before it is updated. Autoresets need to be based on the
-            # previous flags, not the ones from the current step
-            marked_for_reset = data.marked_for_reset
-            # 2) Register the commanded action in the sim controllers
+            forced_reset = data.marked_for_reset
+            # 1) Register the commanded action in the sim controllers
             data = apply_action_fn(action, data)
-            # 3) Step the simulation for the number of sim steps per env step
+            # 2) Step the simulation for the number of sim steps per env step
             n_steps = data.sim_data.core.freq // self.settings.freq
             sim_data = sim_step_fn(data.sim_data, n_steps)
             data = data.replace(sim_data=sim_data)
-            # 4) Apply environment logic
-            data = _update_disabled_drones(data, contact_check_fn(data))
+            # 3) Apply environment logic. Gate progress is updated before
+            # disabled flags so finishing the last gate terminates in this same
+            # transition.
+            contacts = contact_check_fn(data)
+            data = _update_target_gates(data)
+            data = _update_disabled_drones(data, contacts)
+            reason_data = data
             data = _warp_disabled_drones(data)  # Prevent interference with alive drones
             data = _update_visited_objects(data)
-            data = _update_target_gates(data)
             data = _mark_drones_for_reset(data)
             data = data.replace(steps=data.steps + 1)
-            # 5) Auto-reset envs if running with autoreset enabled. Disable for single-world envs
+            final_observations = obs(data)
+            final_reward = reward(data)
+            final_terminated = terminated(data)
+            final_truncated = truncated(data, max_episode_steps)
+            termination_reason = _termination_reasons(reason_data, contacts, final_truncated)
+            current_done = jp.all(final_terminated | final_truncated, axis=-1) | forced_reset
+            reset_observations = final_observations
+            # 4) Auto-reset completed worlds immediately after collecting the
+            # terminal transition. The returned done flags/reward still describe
+            # the terminal step, while observations are ready for the next
+            # episode and the terminal observations are preserved in infos.
             if autoreset:
-                # Only run the reset if at least one env is marked for reset
-                data, _ = jax.lax.cond(
-                    marked_for_reset.any(),
+                # Only run the reset if at least one env finished this step.
+                data, (reset_observations, _) = jax.lax.cond(
+                    current_done.any(),
                     reset_fn,
                     lambda data, *_: (data, (obs(data), {})),
                     data,
                     None,
-                    marked_for_reset,
+                    current_done,
                 )
-            _truncated = truncated(data, max_episode_steps)
-            return data, (obs(data), reward(data), terminated(data), _truncated, {})
+            infos = {
+                "final_observation": final_observations,
+                "reset_observations": reset_observations,
+                "termination_reason": termination_reason,
+            }
+            return data, (
+                reset_observations,
+                final_reward,
+                final_terminated,
+                final_truncated,
+                infos,
+            )
 
         return step
 
@@ -720,6 +748,30 @@ def truncated(data: EnvData, max_episode_steps: int) -> Array:
     """Array of booleans indicating if the episode is truncated."""
     n_drones = data.sim_data.core.n_drones
     return jp.tile((data.steps >= max_episode_steps)[..., None], (1, n_drones))
+
+
+def _termination_reasons(data: EnvData, contacts: Array, truncated_flags: Array) -> Array:
+    """Return integer termination reason codes for each drone slot."""
+    pos = data.sim_data.states.pos
+    not_in_platform = jp.any(pos[..., :2] < data.takeoff_pos[..., :2] - 0.02, axis=-1)
+    not_in_platform |= jp.any(pos[..., :2] > data.takeoff_pos[..., :2] + 0.02, axis=-1)
+    bounds = jp.any(pos < data.pos_limit_low, axis=-1) & not_in_platform
+    bounds |= jp.any(pos > data.pos_limit_high, axis=-1)
+    contact = jp.any(contacts[:, :, None] & data.contact_masks, axis=-1)
+    finished = data.target_gate == -1
+    return jp.where(
+        truncated_flags,
+        TERMINATION_REASON_TIMEOUT,
+        jp.where(
+            finished,
+            TERMINATION_REASON_FINISH,
+            jp.where(
+                contact,
+                TERMINATION_REASON_CONTACT,
+                jp.where(bounds, TERMINATION_REASON_BOUNDS, TERMINATION_REASON_NONE),
+            ),
+        ),
+    )
 
 
 @jax.jit

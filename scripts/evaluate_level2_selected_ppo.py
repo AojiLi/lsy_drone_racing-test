@@ -24,10 +24,18 @@ import numpy as np
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 from scipy.spatial.transform import Rotation as R
 
+from lsy_drone_racing.envs import race_core
 from lsy_drone_racing.utils import load_config
 
 ROOT = Path(__file__).parents[1]
 GATE_APERTURE_HALF_WIDTH_M = 0.2
+TERMINATION_REASON_NAMES = {
+    race_core.TERMINATION_REASON_NONE: "none",
+    race_core.TERMINATION_REASON_FINISH: "finish",
+    race_core.TERMINATION_REASON_CONTACT: "contact",
+    race_core.TERMINATION_REASON_BOUNDS: "bounds",
+    race_core.TERMINATION_REASON_TIMEOUT: "timeout",
+}
 GATE_BOXES = {
     "top": (np.array([0.0, 0.0, 0.28]), np.array([0.01, 0.36, 0.08])),
     "bottom": (np.array([0.0, 0.0, -0.28]), np.array([0.01, 0.36, 0.08])),
@@ -104,6 +112,28 @@ def count_dict(values: list[Any]) -> str:
     """Return deterministic JSON counts for a CSV cell."""
     counts = Counter(str(value) for value in values)
     return json.dumps(dict(sorted(counts.items())), sort_keys=True)
+
+
+def termination_reason_name(
+    info: dict[str, Any],
+    *,
+    terminated: bool,
+    truncated: bool,
+    finished: bool,
+) -> str:
+    """Extract the environment-provided termination reason with a safe fallback."""
+    if isinstance(info, dict) and "termination_reason" in info:
+        value = np.asarray(info["termination_reason"])
+        if value.size:
+            code = int(value.reshape(-1)[0])
+            return TERMINATION_REASON_NAMES.get(code, f"unknown_{code}")
+    if finished:
+        return "finish"
+    if truncated:
+        return "timeout"
+    if terminated:
+        return "unknown_terminated"
+    return "none"
 
 
 def point_box_distance(point: np.ndarray, center: np.ndarray, half_size: np.ndarray) -> float:
@@ -190,8 +220,11 @@ def classify_endpoint(row: dict[str, Any]) -> str:
     """Classify episode outcome for aggregate failure taxonomy."""
     if bool(row["success"]):
         return "success"
-    if bool(row["timeout"]):
+    termination_reason = str(row.get("termination_reason", ""))
+    if bool(row["timeout"]) or termination_reason == "timeout":
         return "timeout"
+    if termination_reason == "bounds":
+        return "bounds_or_ground"
     likely_object = str(row.get("likely_object", ""))
     target_local_x = float(row.get("target_local_x", float("nan")))
     if likely_object.startswith("obstacle"):
@@ -290,6 +323,7 @@ def run_checkpoint(
             finished = False
             crashed = False
             timeout = False
+            termination_reason = "none"
 
             while True:
                 last_target_before = int(np.asarray(obs["target_gate"]).item())
@@ -316,6 +350,12 @@ def run_checkpoint(
                 finished = target_gate < 0
                 crashed = bool(terminated and not finished)
                 timeout = bool(truncated and not finished)
+                termination_reason = termination_reason_name(
+                    info,
+                    terminated=bool(terminated),
+                    truncated=bool(truncated),
+                    finished=finished,
+                )
                 controller_finished = controller.step_callback(
                     action, obs, reward, terminated, truncated, info
                 )
@@ -333,6 +373,7 @@ def run_checkpoint(
                 "success": finished,
                 "crashed": crashed,
                 "timeout": timeout,
+                "termination_reason": termination_reason,
                 "steps": steps,
                 "time_s": steps / float(config.env.freq),
                 "target_gate": last_target_before,
@@ -405,6 +446,7 @@ def run_checkpoint(
             [float(row["cmd_tilt_over_limit_frac"]) for row in rows]
         ),
         "success_seeds": json.dumps([int(row["seed"]) for row in successes]),
+        "termination_reasons": count_dict([row["termination_reason"] for row in rows]),
     }
     if failure_taxonomy:
         failed_rows = [row for row in rows if not row["success"]]

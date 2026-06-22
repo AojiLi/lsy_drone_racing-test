@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import gymnasium
 from gymnasium import Env
@@ -19,6 +19,13 @@ if TYPE_CHECKING:
 AutoresetMode = None
 if Version(gymnasium.__version__) >= Version("1.1"):
     from gymnasium.vector import AutoresetMode
+
+
+def _tree_index(tree: Any, index: Any) -> Any:
+    """Index a nested observation/info pytree without dropping nested dicts."""
+    if isinstance(tree, dict):
+        return {key: _tree_index(value, index) for key, value in tree.items()}
+    return tree[index]
 
 
 class DroneRaceEnv(RaceCoreEnv, Env):
@@ -98,14 +105,14 @@ class DroneRaceEnv(RaceCoreEnv, Env):
         """
         self.data, (obs, reward, terminated, truncated, info) = self._step(self.data, action)
         obs = {k: v[0, 0] for k, v in obs.items()}
-        info = {k: v[0, 0] for k, v in info.items()}
+        info = _tree_index(info, (0, 0))
         return obs, float(reward[0, 0]), bool(terminated[0, 0]), bool(truncated[0, 0]), info
 
 
 class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
     """Vectorized single-agent drone racing environment."""
 
-    metadata = {"autoreset_mode": AutoresetMode.NEXT_STEP if AutoresetMode is not None else None}
+    metadata = {"autoreset_mode": AutoresetMode.SAME_STEP if AutoresetMode is not None else None}
 
     def __init__(
         self,
@@ -184,5 +191,5 @@ class VecDroneRaceEnv(RaceCoreEnv, VectorEnv):
         """
         self.data, (obs, reward, terminated, truncated, info) = self._step(self.data, action)
         obs = {k: v[:, 0] for k, v in obs.items()}
-        info = {k: v[:, 0] for k, v in info.items()}
+        info = _tree_index(info, (slice(None), 0))
         return obs, reward[:, 0], terminated[:, 0], truncated[:, 0], info

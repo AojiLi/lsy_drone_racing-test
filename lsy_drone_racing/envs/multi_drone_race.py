@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import gymnasium
 from gymnasium import Env
@@ -19,6 +19,13 @@ if TYPE_CHECKING:
 AutoresetMode = None
 if Version(gymnasium.__version__) >= Version("1.1"):
     from gymnasium.vector import AutoresetMode
+
+
+def _tree_index(tree: Any, index: Any) -> Any:
+    """Index a nested observation/info pytree without dropping nested dicts."""
+    if isinstance(tree, dict):
+        return {key: _tree_index(value, index) for key, value in tree.items()}
+    return tree[index]
 
 
 class MultiDroneRaceEnv(RaceCoreEnv, Env):
@@ -107,7 +114,7 @@ class MultiDroneRaceEnv(RaceCoreEnv, Env):
         """
         self.data, (obs, reward, terminated, truncated, info) = self._step(self.data, action)
         obs = {k: v[0] for k, v in obs.items()}
-        info = {k: v[0] for k, v in info.items()}
+        info = _tree_index(info, 0)
         # TODO: Fix by moving towards pettingzoo API
         # https://pettingzoo.farama.org/api/parallel/
         return obs, reward[0, 0], terminated[0].all(), truncated[0].all(), info
@@ -119,7 +126,7 @@ class VecMultiDroneRaceEnv(RaceCoreEnv, VectorEnv):
     This environment enables vectorized training of multi-agent drone racing agents.
     """
 
-    metadata = {"autoreset_mode": AutoresetMode.NEXT_STEP if AutoresetMode is not None else None}
+    metadata = {"autoreset_mode": AutoresetMode.SAME_STEP if AutoresetMode is not None else None}
 
     def __init__(
         self,

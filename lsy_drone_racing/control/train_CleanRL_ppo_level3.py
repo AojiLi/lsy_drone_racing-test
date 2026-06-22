@@ -732,9 +732,27 @@ class Level2RaceReward(VectorRewardWrapper):
         self._prev_obstacle_dist = self._closest_obstacle_distance(observations)
         return observations, infos
 
+    @staticmethod
+    def _info_observations(
+        infos: dict, key: str, fallback: dict[str, Array]
+    ) -> dict[str, Array]:
+        """Return observation dictionaries carried in info, when present."""
+        value = infos.get(key) if isinstance(infos, dict) else None
+        return value if isinstance(value, dict) and "target_gate" in value else fallback
+
+    @staticmethod
+    def _done_mask(terminations: Array, truncations: Array) -> Array:
+        done = jp.asarray(terminations) | jp.asarray(truncations)
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        return done
+
     def step(self, actions: Array) -> tuple[dict, Array, Array, Array, dict]:
         """Apply action and replace sparse environment reward with shaped reward."""
         observations, _rewards, terminations, truncations, infos = self.env.step(actions)
+        reward_observations = self._info_observations(
+            infos, "final_observation", observations
+        )
         (
             reward,
             components,
@@ -743,20 +761,26 @@ class Level2RaceReward(VectorRewardWrapper):
             new_back_gate_active,
             new_back_gate_idx,
             new_prev_back_gate_local,
-        ) = self._reward_components(observations, actions, terminations, truncations)
-        self._prev_gate_dist = self._gate_distance(observations)
-        self._prev_gate_local = self._gate_frame_pos(observations)
-        self._prev_gate_x = self._prev_gate_local[:, 0]
-        self._prev_target_gate = observations["target_gate"]
-        self._gate_stage = new_gate_stage
-        self._prev_stage_dist = self._gate_stage_distance(
-            observations, self._gate_stage, observations["target_gate"]
+        ) = self._reward_components(reward_observations, actions, terminations, truncations)
+        state_observations = self._info_observations(
+            infos, "reset_observations", observations
         )
-        self._back_gate_active = new_back_gate_active
-        self._back_gate_idx = new_back_gate_idx
-        self._prev_back_gate_local = new_prev_back_gate_local
-        self._prev_obstacle_dist = self._closest_obstacle_distance(observations)
-        self._last_action = jp.asarray(actions)
+        done = self._done_mask(terminations, truncations)
+        self._prev_gate_dist = self._gate_distance(state_observations)
+        self._prev_gate_local = self._gate_frame_pos(state_observations)
+        self._prev_gate_x = self._prev_gate_local[:, 0]
+        self._prev_target_gate = state_observations["target_gate"]
+        self._gate_stage = jp.where(done, 0, new_gate_stage)
+        self._prev_stage_dist = self._gate_stage_distance(
+            state_observations, self._gate_stage, state_observations["target_gate"]
+        )
+        self._back_gate_active = jp.where(done, False, new_back_gate_active)
+        self._back_gate_idx = jp.where(done, 0, new_back_gate_idx)
+        self._prev_back_gate_local = jp.where(
+            done[:, None], jp.zeros_like(new_prev_back_gate_local), new_prev_back_gate_local
+        )
+        self._prev_obstacle_dist = self._closest_obstacle_distance(state_observations)
+        self._last_action = jp.where(done[:, None], 0.0, jp.asarray(actions))
 
         infos = dict(infos)
         infos.update({f"reward_{k}": v for k, v in components.items()})
@@ -773,11 +797,12 @@ class Level2RaceReward(VectorRewardWrapper):
     ) -> tuple[Array, dict[str, Array], dict[str, Array], Array, Array, Array, Array]:
         gate_dist = self._gate_distance(observations)
         target_gate = observations["target_gate"]
-        finished = target_gate < 0
+        finished = (target_gate < 0) & (self._prev_target_gate >= 0)
+        course_finished = target_gate < 0
         passed_gate = (target_gate != self._prev_target_gate) & (self._prev_target_gate >= 0)
         target_changed = target_gate != self._prev_target_gate
-        crashed = terminations & ~finished
-        timed_out = truncations & ~finished
+        crashed = terminations & ~course_finished
+        timed_out = truncations & ~course_finished
 
         raw_progress = self._prev_gate_dist - gate_dist
         progress = jp.where(passed_gate | finished, 0.0, jp.clip(raw_progress, -0.25, 0.25))
@@ -1235,10 +1260,13 @@ class ObservationLatencyNoise(VectorObservationWrapper):
                 )
                 for key, value in observations.items()
             }
+        done = self._done_mask(terminations, truncations)
+        reset_observations = self._info_observations(
+            infos, "reset_observations", observations
+        )
+        self._reset_episode_state(done, reset_observations)
         delayed_observations = self._select_delayed_observations()
         noisy_observations = self._add_noise(delayed_observations)
-        done = self._done_mask(terminations, truncations)
-        self._reset_episode_state(done, observations)
         return noisy_observations, rewards, terminations, truncations, infos
 
     def _initial_obs_buffer(self, observations: dict[str, Array]) -> dict[str, Array]:
@@ -1286,6 +1314,14 @@ class ObservationLatencyNoise(VectorObservationWrapper):
             for key, value in self._obs_buffer.items()
         }
         self._sample_episode_params(done)
+
+    @staticmethod
+    def _info_observations(
+        infos: dict, key: str, fallback: dict[str, Array]
+    ) -> dict[str, Array]:
+        """Return observation dictionaries carried in info, when present."""
+        value = infos.get(key) if isinstance(infos, dict) else None
+        return value if isinstance(value, dict) and "target_gate" in value else fallback
 
     def _add_noise(self, observations: dict[str, Array]) -> dict[str, Array]:
         """Add zero-mean measurement noise to continuous observation fields."""
@@ -1424,6 +1460,7 @@ class RaceObservation(VectorObservationWrapper):
         filtered_actions = self._filter_actions(actions, self._last_action, self.action_lowpass_alpha)
         observations, rewards, terminations, truncations, infos = self.env.step(filtered_actions)
         self._last_action = filtered_actions
+        self._reset_episode_state(observations, terminations, truncations)
         return self.observations(observations), rewards, terminations, truncations, infos
 
     @staticmethod
@@ -1441,6 +1478,23 @@ class RaceObservation(VectorObservationWrapper):
             basic = self._basic_history(observations)
             self._history = jp.concatenate([self._history[:, 1:, :], basic[:, None, :]], axis=1)
         return flat
+
+    def _reset_episode_state(
+        self,
+        observations: dict[str, Array],
+        terminations: Array,
+        truncations: Array,
+    ) -> None:
+        """Reset observation history and last action for completed vector slots."""
+        done = jp.asarray(terminations) | jp.asarray(truncations)
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        basic = self._basic_history(observations)
+        reset_history = jp.repeat(basic[:, None, :], self.n_history, axis=1)
+        history_mask = done.reshape((self.num_envs, 1, 1))
+        self._history = jp.where(history_mask, reset_history, self._history)
+        action_mask = done.reshape((self.num_envs,) + (1,) * (self._last_action.ndim - 1))
+        self._last_action = jp.where(action_mask, 0.0, self._last_action)
 
     def _build_layout(self) -> list[tuple[str, slice]]:
         layout = []

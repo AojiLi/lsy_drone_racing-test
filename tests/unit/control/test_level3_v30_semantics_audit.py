@@ -91,7 +91,6 @@ def test_geometry_fallback_is_not_a_true_termination_reason() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(strict=True, reason="v30 must terminate finish on the same step")
 def test_finish_updates_target_gate_before_disabled_check() -> None:
     """Passing the final gate should be terminal in the same transition."""
     source = inspect.getsource(race_core.RaceCoreEnv.build_step_fn)
@@ -100,7 +99,6 @@ def test_finish_updates_target_gate_before_disabled_check() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(strict=True, reason="v30 must award finish bonus only on the finish event")
 def test_finish_bonus_is_transition_event_not_persistent_state() -> None:
     """Finish reward should use the -1 transition, not every target_gate < 0 state."""
     source = inspect.getsource(level3_ppo.Level2RaceReward._reward_components)
@@ -109,7 +107,6 @@ def test_finish_bonus_is_transition_event_not_persistent_state() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(strict=True, reason="v30 must not collect terminal-to-reset dummy steps")
 def test_autoreset_uses_current_done_flags_not_previous_marked_for_reset() -> None:
     """Rollout collection should not include a dummy step after terminal state."""
     source = inspect.getsource(race_core.RaceCoreEnv.build_step_fn)
@@ -118,7 +115,6 @@ def test_autoreset_uses_current_done_flags_not_previous_marked_for_reset() -> No
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(strict=True, reason="v30 must reset RaceObservation per done vector slot")
 def test_race_observation_has_per_slot_done_reset_hook() -> None:
     """Flattened observation history and last_action need per-slot episode reset."""
     source = inspect.getsource(level3_ppo.RaceObservation)
@@ -129,7 +125,6 @@ def test_race_observation_has_per_slot_done_reset_hook() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(strict=True, reason="v30 delay reset must use true reset observations")
 def test_observation_delay_reset_uses_true_post_reset_observation() -> None:
     """Delay buffers for done slots should not be rebuilt from stale terminal observations."""
     source = inspect.getsource(level3_ppo.ObservationLatencyNoise.step)
@@ -138,7 +133,6 @@ def test_observation_delay_reset_uses_true_post_reset_observation() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(strict=True, reason="v30 evaluator must log environment termination reasons")
 def test_evaluator_records_true_termination_reason() -> None:
     """Crash taxonomy should consume env-provided reasons, not only geometry guesses."""
     source = inspect.getsource(evaluate_level2_selected_ppo)
