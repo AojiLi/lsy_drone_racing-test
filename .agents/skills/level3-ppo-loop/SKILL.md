@@ -42,12 +42,13 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   observation/return normalization, asymmetric privileged critic, gate-phase
   reset curriculum, prioritized level replay, GRU, reward numbers, then speed.
 - The immediate executable structural lane is
-  `v31d_v31a_longer_rollout_maturation_15m`: it rejects the failed v31b/v31c
-  normalization lanes, keeps v5 observations, loop052 reward/PPO numbers,
-  corrected v30 semantics, hard eval on `config/level3.toml`, and the longer
-  `256 envs x 128 steps` rollout geometry. It starts from the current best
-  loop094/v31a 4M checkpoint, keeps observation/return normalization disabled,
-  and evaluates 1/2/3/4/5/8/10/12/15M milestones before any next decision.
+  `v31d_longer_rollout_maturation_from_loop097_12m_to_30m`: it continues the
+  weakly improved clean-PPO branch from the loop097/v31d 12M best checkpoint,
+  keeps v5 observations, loop052 reward/PPO numbers, corrected v30 semantics,
+  hard eval on `config/level3.toml`, no observation/return normalization, and
+  the `256 envs x 128 steps` rollout geometry. It adds 18M training steps to
+  reach a roughly 30M-style branch horizon, then evaluates 3/6/9/12/15/18M
+  continuation milestones before any next decision.
 - The stateirving reference packet
   `experiments/level3_ppo_loop/research/2026-06-19_stateirving_level3_remote_reference.md`
   is the current source-backed packet for v5 and remote reward-scale evidence.

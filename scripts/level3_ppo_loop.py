@@ -424,6 +424,15 @@ V31D_V31A_MATURATION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-22_loop096_reject_v31c_continue_v31a_maturation.md"
 )
+LOOP097_BEST_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_097_structural_v31d_v31a_longer_rollout_maturation_15m/"
+    "level3_loop_097_structural_v31d_v31a_longer_rollout_maturation_15m_step_012000000.ckpt"
+)
+V31D_TO_30M_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-22_loop097_continue_v31d_to_30m.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -5051,6 +5060,109 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "the clean longer-rollout branch a bounded 15M maturation chunk with "
             "frequent milestone hard evals, while keeping the track, observation, "
             "reward numbers, PPO numbers, and deployed actor path fixed."
+        ),
+    },
+    "v31d_longer_rollout_maturation_from_loop097_12m_to_30m": {
+        "name": "v31d_longer_rollout_maturation_from_loop097_12m_to_30m",
+        "proposal_name": "structural_v31d_longer_rollout_mature_loop097_12m_to_30m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 18_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 7,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "3,6,9,12,15,18",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP097_BEST_CHECKPOINT,
+        "allow_step_curve_maturation": True,
+        "allow_repeat_params": True,
+        "requires_training_support": "v30_episode_semantics",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V31D_TO_30M_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP097_BEST_CHECKPOINT,
+                "additional_train_steps": 18_000_000,
+                "approx_cumulative_branch_steps": 30_000_000,
+            },
+            "semantic_repairs": [
+                "same_step_finish_termination",
+                "finish_bonus_once",
+                "no_terminal_to_reset_dummy_transition",
+                "per_slot_wrapper_reset",
+                "true_observation_delay_reset",
+                "termination_reason_logging",
+            ],
+            "changed_reward_numbers": [],
+            "changed_training_numbers": ["train_timesteps", "initial_checkpoint"],
+            "deferred_support": [
+                "asymmetric_privileged_critic",
+                "gate_phase_reset_buffer",
+                "prioritized_level_replay",
+                "recurrent_actor_gru256",
+                "gate_acquisition_reward_adjustment",
+            ],
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 1c clean PPO maturation to 30M-style horizon",
+            "baseline": "loop097/v31d 12M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Does the weakly improved clean-PPO branch continue gaining "
+                "success seeds when matured from its 12M best checkpoint toward "
+                "a 30M-style horizon, without changing reward numbers?"
+            ),
+            "evidence": {
+                "loop094_v31a_best": "19/100 success, mean_gates 1.55, crash 81%",
+                "loop097_v31d_best": "20/100 success, mean_gates 1.66, crash 80%",
+                "reviewer_split": (
+                    "Evaluator and structure reviewers favor same-hypothesis "
+                    "maturation; W&B reviewer flags weak conversion and keeps "
+                    "gate-acquisition reward adjustment as the next fallback."
+                ),
+            },
+            "promotion_gate": {
+                "continue_toward_60m": (
+                    "success > 0.20, or mean_gates materially above 1.66 with "
+                    "new success seeds or lower crash rate"
+                ),
+                "fallback_if_plateau": (
+                    "reject same-hypothesis maturation and choose either a named "
+                    "gate-acquisition reward-number lane or v32 trainer-support work"
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 47,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+        },
+        "rationale": (
+            "loop097/v31d marginally but genuinely improved the clean-PPO frontier "
+            "to 20% success and 1.66 mean gates from the 12M checkpoint. Under the "
+            "Level2-calibrated step-curve policy, a branch with nonzero success and "
+            "mean-gate expansion should receive a bounded maturation check before "
+            "being rejected. This lane keeps v5 observation, loop052 reward/PPO "
+            "numbers, corrected v30 semantics, no normalization, and unchanged "
+            "config/level3.toml hard eval, while adding 18M more training steps "
+            "from the loop097 12M best checkpoint."
         ),
     },
 }
