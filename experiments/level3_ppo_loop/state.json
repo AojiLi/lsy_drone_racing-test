@@ -128,6 +128,21 @@
       "report": "experiments/level3_ppo_loop/analysis/level3_loop_015_stage2_no_wrappers_sensor15_curriculum_decision.md",
       "status": "rejected_hold_loop015_no_transfer_to_hard_eval",
       "target_met": false
+    },
+    {
+      "created_at": "2026-06-22T09:10:56.320504+00:00",
+      "override_required": "--override-state-hold",
+      "override_requirements": "Only override after unseen validation re-evaluation and a new approved v27 or other named hypothesis packet.",
+      "proposal": "hold_after_loop084_reject_v26",
+      "proposal_reason": "loop084/v26 maturation regressed; fix evaluator seed splits and unseen validation before any loop085 or long training",
+      "reasons": [
+        "loop084 failed the v26 maturation stop rule",
+        "seeds 1-20 have been overused for adaptive experiment selection",
+        "hard-eval seed replay leaked evaluator seeds into training",
+        "evaluator must support seed manifests, Wilson CI, and failure taxonomy before further training"
+      ],
+      "source_report": "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md",
+      "status": "held_by_state_guard"
     }
   ],
   "initial_checkpoint_audit": {
@@ -184,17 +199,20 @@
     "summary_csv": "experiments/level3_ppo_loop/level3_initial_checkpoint_audit_summary.csv"
   },
   "last_decision": {
-    "active_observation_layout": "obstacle_heading_xy_v1",
-    "best_checkpoint": "lsy_drone_racing/control/checkpoints/level3_loop_016_loop010_step_curve_maturation_100m/level3_loop_016_loop010_step_curve_maturation_100m_step_055000000.ckpt",
-    "created_at": "2026-06-19T16:26:14+00:00",
-    "do_not_modify_level3_track": true,
-    "next_allowed_observation_layout": "level3_target_gate_nearest_gate_2obs_local_history_v5",
-    "packet": "experiments/level3_ppo_loop/research/2026-06-19_user_approves_structural_search.md",
-    "proposal": "open_level3_structural_search_v5_first",
-    "reason": "User approved canceling reward-only default and opening structural experiments while keeping Level3 track immutable.",
-    "status": "structural_search_opened",
-    "target_eval_config": "config/level3_dr.toml",
-    "target_met": false
+    "created_at": "2026-06-22T09:23:19.511540+00:00",
+    "override_required": "--override-state-hold",
+    "override_requirements": "Only override with explicit user-approved v27 or another named hypothesis packet after this evaluation-protocol hold.",
+    "proposal": "hold_after_loop084_reject_v26_eval_protocol_and_v27",
+    "proposal_reason": "loop084/v26 regressed on dev_seen and unseen validation; loop085/long training is blocked until the next approved v27 or other named hypothesis packet.",
+    "reasons": [
+      "loop084 failed to beat loop078 on dev_seen and degraded further on validation_unseen",
+      "validation_unseen selects loop052 final as the current robustness anchor",
+      "old dev_seen frontier was overfit by adaptive experiment selection",
+      "next experiment should target success-behavior retention, not another blind long run"
+    ],
+    "source_report": "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md",
+    "status": "held_by_state_guard",
+    "validation_report": "experiments/level3_ppo_loop/analysis/2026-06-22_validation_unseen_frontier_eval.md"
   },
   "last_loop076_decision": {
     "best_checkpoint": "lsy_drone_racing/control/checkpoints/level3_loop_076_structural_v20_loop071_default_distribution_recovery_20m/level3_loop_076_structural_v20_loop071_default_distribution_recovery_20m_step_005000000.ckpt",
@@ -278,7 +296,24 @@
     "structural_hypothesis": "v5_localobs_remote_reward",
     "summary": "Loop now supports built-in v5 local-obstacle structural hypothesis and auto structural search while keeping hard eval fixed to level3_dr.toml."
   },
-  "last_main_agent_decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-22_loop083_continue_v26_success_replay_maturation_to_60m.md",
+  "last_main_agent_decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md",
+  "level3_after_loop084_eval_protocol_hold": {
+    "created_at": "2026-06-22T09:23:19.511540+00:00",
+    "episodes_csv": "experiments/level3_ppo_loop/validation_unseen_frontier_eval_2026-06-22_episodes.csv",
+    "override_requirements": [
+      "Use --override-state-hold explicitly.",
+      "Attach an approved hypothesis packet for v27 or another named lane.",
+      "Keep hard evaluation on config/level3_dr.toml.",
+      "Do not modify Level3 track geometry or randomization."
+    ],
+    "reason": "Reject loop084/v26; block loop085/long training until evaluation protocol, unseen validation, and an approved v27 or other named hypothesis packet are in place.",
+    "report": "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md",
+    "requires_override_state_hold": true,
+    "requires_user_approval_for_next_training": true,
+    "status": "hold_after_loop084_eval_protocol_and_v27_design",
+    "summary_csv": "experiments/level3_ppo_loop/validation_unseen_frontier_eval_2026-06-22_summary.csv",
+    "validation_report": "experiments/level3_ppo_loop/analysis/2026-06-22_validation_unseen_frontier_eval.md"
+  },
   "level3_loop_014_reject_hold_decision": {
     "acceptance_met": false,
     "created_at": "2026-06-18T17:29:24+00:00",
@@ -358,6 +393,9 @@
     "analysis_report": "experiments/level3_ppo_loop/analysis/level3_loop_084_structural_v26_v23_10m_success_replay_retention_mature_to_60m_analysis.md",
     "created_at": "2026-06-22T08:08:44+00:00",
     "decision_dir": "experiments/level3_ppo_loop/decisions",
+    "decision_packets": [
+      "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md"
+    ],
     "do_not_modify_level3_track": true,
     "hard_eval_config": "config/level3_dr.toml",
     "required_review_roles": [
@@ -366,7 +404,9 @@
       "structure_research_synthesis"
     ],
     "requires_packet_before_next_training": true,
-    "status": "awaiting_main_agent_decision",
+    "resolved_at": "2026-06-22T09:10:56.320504+00:00",
+    "resolved_by_decision": "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md",
+    "status": "resolved_by_main_agent_hold_decision",
     "subagent_briefs": [
       "experiments/level3_ppo_loop/analysis/level3_loop_084_structural_v26_v23_10m_success_replay_retention_mature_to_60m_eval_subagent_brief.md",
       "experiments/level3_ppo_loop/analysis/level3_loop_084_structural_v26_v23_10m_success_replay_retention_mature_to_60m_wandb_ppo_subagent_brief.md",
@@ -32040,7 +32080,7 @@
       "eval_returncode": 0,
       "initial_checkpoint": "lsy_drone_racing/control/checkpoints/level3_loop_083_structural_v26_v23_10m_success_replay_retention_20m/level3_loop_083_structural_v26_v23_10m_success_replay_retention_20m_step_015000000.ckpt",
       "keep_latest_params": false,
-      "main_agent_decision_packet": null,
+      "main_agent_decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md",
       "network_capacity": {
         "capacity_lane": "default",
         "checkpoint_selection": "observation_layout_and_hidden_dim",
@@ -32115,6 +32155,13 @@
         "requires_main_agent_packet_before_next_training": true
       },
       "post_run_decision_required": true,
+      "post_run_hold": {
+        "created_at": "2026-06-22T09:23:19.511540+00:00",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-22_loop084_reject_v26_hold_for_eval_protocol_and_v27.md",
+        "reason": "reject v26 maturation; state guard blocks loop085 until v27 or another named lane is explicitly approved",
+        "status": "hold_for_more_analysis",
+        "validation_report": "experiments/level3_ppo_loop/analysis/2026-06-22_validation_unseen_frontier_eval.md"
+      },
       "post_run_required_review_roles": [
         "evaluator_metrics",
         "wandb_ppo_diagnostics",
@@ -32311,5 +32358,79 @@
       "wandb_url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/level3_loop_084_structural_v26_v23_10m_success_replay_retention_mature_to_60m"
     }
   ],
-  "updated_at": "2026-06-22T08:08:44+00:00"
+  "updated_at": "2026-06-22T08:08:44+00:00",
+  "validation_unseen": {
+    "anchor_checkpoint": {
+      "checkpoint_file": "lsy_drone_racing/control/checkpoints/level3_loop_052_structural_v8_gate_corridor_obstacle_obs_from_loop031_best_30m/level3_loop_052_structural_v8_gate_corridor_obstacle_obs_from_loop031_best_30m_final.ckpt",
+      "crash_rate": 0.8,
+      "mean_gates": 1.47,
+      "mean_time_s_success": 6.86,
+      "median_time_s_success": 6.82,
+      "name": "loop052_final",
+      "p90_time_s_success": 8.26,
+      "success_ci95_high": 0.2888,
+      "success_ci95_low": 0.1334,
+      "success_rate": 0.2
+    },
+    "anchor_selection_order": [
+      "success_rate",
+      "success_ci95_low",
+      "crash_rate",
+      "mean_gates",
+      "mean_time_s_success"
+    ],
+    "confidence_interval": "wilson_95",
+    "created_at": "2026-06-22T09:23:19.511540+00:00",
+    "episodes_csv": "experiments/level3_ppo_loop/validation_unseen_frontier_eval_2026-06-22_episodes.csv",
+    "failure_taxonomy": true,
+    "frontier": [
+      {
+        "crash_rate": 0.8,
+        "mean_gates": 1.47,
+        "mean_time_s_success": 6.86,
+        "name": "loop052_final",
+        "success_rate": 0.2
+      },
+      {
+        "crash_rate": 0.84,
+        "mean_gates": 1.65,
+        "mean_time_s_success": 7.87,
+        "name": "loop071_20m",
+        "success_rate": 0.16
+      },
+      {
+        "crash_rate": 0.86,
+        "mean_gates": 1.37,
+        "mean_time_s_success": 8.63,
+        "name": "v23_10m",
+        "success_rate": 0.14
+      },
+      {
+        "crash_rate": 0.86,
+        "mean_gates": 1.46,
+        "mean_time_s_success": 6.91,
+        "name": "loop083_15m",
+        "success_rate": 0.14
+      },
+      {
+        "crash_rate": 0.87,
+        "mean_gates": 1.49,
+        "mean_time_s_success": 6.85,
+        "name": "loop078_final",
+        "success_rate": 0.13
+      },
+      {
+        "crash_rate": 0.93,
+        "mean_gates": 1.14,
+        "mean_time_s_success": 6.71,
+        "name": "loop084_30m",
+        "success_rate": 0.07
+      }
+    ],
+    "report": "experiments/level3_ppo_loop/analysis/2026-06-22_validation_unseen_frontier_eval.md",
+    "seed_count": 100,
+    "seed_manifest": "experiments/level3_ppo_loop/seed_manifests/validation_unseen_101_200.txt",
+    "seed_split_name": "validation_unseen",
+    "summary_csv": "experiments/level3_ppo_loop/validation_unseen_frontier_eval_2026-06-22_summary.csv"
+  }
 }

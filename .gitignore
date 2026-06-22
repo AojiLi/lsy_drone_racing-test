@@ -3,6 +3,7 @@
 **/__pycache__/
 submission.csv
 logs
+*.log
 wandb/
 secrets
 **/*.secret
@@ -12,6 +13,8 @@ saves
 !devcontainer.json
 !experiments/level3_ppo_loop/state.json
 **/*.csv
+*.ckpt
+lsy_drone_racing/control/checkpoints/
 plots/
 c_generated_code/
 /build

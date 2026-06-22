@@ -5030,6 +5030,7 @@ def active_state_training_hold(state: dict[str, Any]) -> dict[str, Any] | None:
     for key in (
         "stage2_after_loop014_escalation_audit",
         "level3_loop_014_taxonomy_reward_code_hold",
+        "level3_after_loop084_eval_protocol_hold",
     ):
         value = state.get(key)
         if not isinstance(value, dict):
@@ -5071,6 +5072,7 @@ def build_state_hold_decision(
         args.config != args.eval_config
         or args.observation_layout != WORLD_HISTORY_OBSERVATION_LAYOUT
     )
+    requires_override = bool(hold.get("requires_override_state_hold"))
     explicit_approval = bool(
         args.override_state_hold
         and (
@@ -5078,6 +5080,8 @@ def build_state_hold_decision(
             or (structural_command and args.approved_hypothesis_packet)
         )
         or (
+            not requires_override
+            and
             structural_search_approved(state)
             and structural_command
             and args.approved_hypothesis_packet
