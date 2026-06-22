@@ -6559,6 +6559,7 @@ def active_state_training_hold(state: dict[str, Any]) -> dict[str, Any] | None:
         "level3_after_loop087_v27_teacher_kl_hold",
         "level3_after_loop089_gate_conversion_hold",
         "level3_after_loop090_v29_rejection_hold",
+        "level3_after_loop098_v32_parity_hold",
         "level3_v30_semantics_audit_hold",
     ):
         value = state.get(key)
