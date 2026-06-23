@@ -89,13 +89,16 @@
   v42 as-is and do not start future training from loop113 checkpoints.
 - The immediate next lane is
   `v43_success_trajectory_imitation_warmstart_gru_v10`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop113_reject_v42_prepare_v43_success_trajectory_imitation.md`
+  `experiments/level3_ppo_loop/decisions/2026-06-23_v43_bc_preflight_launch_v43_ppo_finetune.md`
   and sourced by
   `experiments/level3_ppo_loop/research/2026-06-23_level3_v43_success_trajectory_imitation_warmstart_plan.md`.
-  This is a preflight/support lane before PPO training: build or audit a v10
-  success-trajectory imitation dataset, implement or verify sequence-aware
-  GRU/v10 BC warmstart support, then hard-eval the BC checkpoint on unchanged
-  `config/level3.toml` before launching PPO fine-tuning.
+  Its preflight packet is
+  `experiments/level3_ppo_loop/parity/2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md`.
+  The v43 BC checkpoint is not a deployable controller (`0%` success, `0.15`
+  mean gates on validation_unseen), but it shows first-gate conversion above
+  v42's `0.01` mean gates. The next step is one bounded W&B-tracked PPO
+  fine-tune screen from
+  `lsy_drone_racing/control/checkpoints/level3_v43_success_trajectory_bc_warmstart/level3_v43_success_trajectory_bc_warmstart.ckpt`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

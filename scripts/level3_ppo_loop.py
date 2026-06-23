@@ -517,6 +517,23 @@ V42_GRU_V10_GATE_PHASE_CURRICULUM_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_v41_clean_launch_v42_gru_v10_gate_phase_curriculum.md"
 )
+V43_SUCCESS_TRAJECTORY_IMITATION_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-23_level3_v43_success_trajectory_imitation_warmstart_plan.md"
+)
+V43_SUCCESS_TRAJECTORY_IMITATION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_v43_bc_preflight_launch_v43_ppo_finetune.md"
+)
+V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
+    "experiments/level3_ppo_loop/parity/"
+    "2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md"
+)
+V43_SUCCESS_TRAJECTORY_BC_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_v43_success_trajectory_bc_warmstart/"
+    "level3_v43_success_trajectory_bc_warmstart.ckpt"
+)
 LOOP107_V37_1M_CHECKPOINT = (
     "lsy_drone_racing/control/checkpoints/"
     "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight/"
@@ -540,6 +557,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "online_competence_gated_level_replay_support",
     "mlp_to_gru_transfer_support",
     "residual_gru_teacher_retention_support",
+    "success_trajectory_imitation_warmstart_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -6796,6 +6814,130 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "motivation, but adds a training-only gate-phase reset curriculum "
             "to bootstrap gate acquisition while preserving unchanged "
             "config/level3.toml hard eval."
+        ),
+    },
+    "v43_success_trajectory_imitation_warmstart_gru_v10": {
+        "name": "v43_success_trajectory_imitation_warmstart_gru_v10",
+        "proposal_name": "structural_v43_success_trajectory_bc_warmstart_gru_v10_10m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+        "train_timesteps": 10_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 7,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5,8,10",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": V43_SUCCESS_TRAJECTORY_BC_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "success_trajectory_imitation_warmstart_support",
+        "research_packet": V43_SUCCESS_TRAJECTORY_IMITATION_PACKET,
+        "approved_hypothesis_packet": V43_SUCCESS_TRAJECTORY_IMITATION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "recurrent_actor_gru256",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "preflight_packet": V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET,
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "policy_arch",
+                "observation_layout",
+                "recurrent_hidden_dim",
+                "recurrent_sequence_len",
+                "train_timesteps",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [
+                "gate_stage_coef",
+                "gate_axis_coef",
+                "gate_front_bonus",
+                "gate_bonus",
+                "gate_back_bonus",
+                "finish_bonus",
+                "time_penalty",
+            ],
+            "warmstart": {
+                "type": "success_trajectory_behavior_cloning",
+                "checkpoint": V43_SUCCESS_TRAJECTORY_BC_CHECKPOINT,
+                "teacher": "loop110/v39 3M feed-forward policy",
+                "student_observation_layout": (
+                    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT
+                ),
+                "seed_split_exclusions": "1-20,101-200,1001-1200",
+                "inference_policy": "PPO Actor only; no teacher, planner, or shield at deployment",
+            },
+            "memory_structure": {
+                "actor": "FC128, FC128, GRU256, FC192, FC96, action_mean4",
+                "sequence_len": 128,
+                "reset_hidden_on_done": True,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 12 sequence-level success trajectory warmstart",
+            "baseline": "loop113/v42 GRU/v10 curriculum acquired almost no normal-start gates",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can a GRU/v10 Actor that first imitates successful full "
+                "teacher trajectories retain enough normal-start gate behavior "
+                "for PPO fine-tuning to escape the 0-gate v40/v42 failure mode "
+                "and then challenge the 21% validation plateau?"
+            ),
+            "promotion_gate": {
+                "short_screen": (
+                    "Promote or mature if a milestone checkpoint shows nonzero "
+                    "hard-eval success, mean_gates above 0.5, materially lower "
+                    "crash than the 79% plateau, or clear first-gate conversion "
+                    "that continues beyond the BC-only diagnostic."
+                ),
+                "anti_drift": (
+                    "Use milestone best, not final by default. Reject if PPO "
+                    "erases the BC first-gate signal, remains below 0.5 mean "
+                    "gates, or only converts training imitation loss without "
+                    "validation_unseen gate progress."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 61,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "recurrent_actor_gru256",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 128,
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "v40 and v42 showed that clean GRU/v10 from-scratch training does "
+            "not acquire normal-start gate progress. The v43 BC preflight used "
+            "train-pool successful teacher trajectories only, excluding "
+            "dev_seen, validation_unseen, and final_locked seeds. It drove "
+            "teacher-action MSE from 0.266 to 0.0015 and, when hard-evaluated "
+            "alone on unchanged config/level3.toml validation_unseen seeds, "
+            "raised mean_gates to 0.15 with 12 seeds passing at least gate 0. "
+            "This is not sufficient as a controller, but it is a concrete "
+            "normal-start signal above v42's 0.01 mean_gates and justifies one "
+            "bounded PPO fine-tune screen."
         ),
     },
 }

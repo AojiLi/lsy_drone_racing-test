@@ -191,11 +191,20 @@ v43_success_trajectory_imitation_warmstart_gru_v10
 ```
 
 v42 showed that from-scratch GRU/v10 plus training-only gate-phase reset still
-does not acquire normal-start gate progress. v43 is therefore a preflight lane:
-build or audit success-trajectory imitation data with v10 student observations,
-verify sequence-aware GRU/v10 behavior-cloning warmstart support, save a
-correctly tagged GRU/v10 checkpoint, and hard-eval that checkpoint on unchanged
-`config/level3.toml` before any PPO fine-tuning.
+does not acquire normal-start gate progress. The v43 BC preflight is complete:
+it built success-trajectory imitation data with v10 student observations,
+verified sequence-aware GRU/v10 behavior-cloning warmstart support, saved a
+correctly tagged GRU/v10 checkpoint, and hard-evaluated that checkpoint on
+unchanged `config/level3.toml`.
+
+BC-only hard eval is not sufficient as a controller (`0%` success, `0.15` mean
+gates, `99%` crash), but it shows first-gate conversion above v42's `0.01`
+mean gates. The next immediate action is one bounded W&B-tracked PPO fine-tune
+screen from:
+
+```text
+lsy_drone_racing/control/checkpoints/level3_v43_success_trajectory_bc_warmstart/level3_v43_success_trajectory_bc_warmstart.ckpt
+```
 
 ## Research-Guided Tuning
 
