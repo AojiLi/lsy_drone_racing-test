@@ -95,6 +95,12 @@ It must keep unchanged `config/level3.toml`, v5 Actor observation, MLP policy,
 v39 reward numbers, and Actor-only deployment. Do not start this lane from
 loop110 final.
 
+Treat this as a diagnostic, not the main route from 21% to 60%. If a completed
+v39b run remains around 18%-22%, only swaps success seeds, or improves
+successful time without success-rate/crash conversion, stop reward-number
+small-tuning. The next step should be a named structural lane targeting
+training distribution, memory/strategy, observation, or anti-drift stability.
+
 ## Not Yet Implemented
 
 These framework pieces require code support before training:

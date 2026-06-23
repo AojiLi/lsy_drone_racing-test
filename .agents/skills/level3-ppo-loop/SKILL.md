@@ -77,6 +77,11 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   with 21% success / 1.64 mean gates / 79% crash / 6.756s and 8 newly solved
   validation seeds, but later checkpoints regressed. Continue only from loop110
   3M, keep v39 reward numbers unchanged, and do not start from loop110 final.
+  Treat v39b as a short diagnostic, not the main path to 60% success. If a
+  completed v39b run does not move clearly beyond the 21% plateau, roughly into
+  the 25%-30% range with lower crash or broader gate progress, stop reward
+  number small-tuning and pivot to a named structural lane for training
+  distribution, memory/strategy, observation, or stability.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
