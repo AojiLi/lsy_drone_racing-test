@@ -489,6 +489,10 @@ V38_RETENTION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop108_reject_plain_v37_prepare_v38_retention.md"
 )
+V39_GATE_ACQUISITION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop109_reject_v38_launch_v39_gate_acquisition.md"
+)
 LOOP107_V37_1M_CHECKPOINT = (
     "lsy_drone_racing/control/checkpoints/"
     "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight/"
@@ -6287,6 +6291,110 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "plain residual-GRU continuation should stop and the next step "
             "should be a held v38 preflight for explicit teacher retention or "
             "distillation from the stable frontier."
+        ),
+    },
+    "v39_feedforward_gate_acquisition_reward_rebalance_loop101_final": {
+        "name": "v39_feedforward_gate_acquisition_reward_rebalance_loop101_final",
+        "proposal_name": "structural_v39_feedforward_gate_acquisition_reward_loop101_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 5,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+        "allow_repeat_params": True,
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V39_GATE_ACQUISITION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [
+                "gate_stage_coef",
+                "gate_axis_coef",
+                "gate_front_bonus",
+                "gate_bonus",
+                "gate_back_bonus",
+                "finish_bonus",
+                "time_penalty",
+            ],
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 9 feed-forward gate-acquisition reward screen",
+            "baseline": "loop101/v33 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "After GRU retention preserved teacher behavior but failed to "
+                "improve hard eval, can the stable feed-forward frontier improve "
+                "gate acquisition using stronger gate-axis/stage/bonus shaping "
+                "and slightly lower time pressure?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.21, or success >= 0.20 with mean_gates > 1.69 "
+                    "and crash <= 0.80, or clear new validation success-seed "
+                    "coverage without worse crash"
+                ),
+                "rollback": (
+                    "If hard eval stays below 20% success, mean_gates below "
+                    "1.69, or crash remains above 80%, reject this reward "
+                    "screen instead of continuing from its checkpoints."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 57,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "loop109/v38 proved online teacher retention was active but did not "
+            "convert to hard-eval progress: best was 18% success, 1.64 mean "
+            "gates, and 82% crash, below both loop107 1M and loop101 final. "
+            "The analyzer diagnosed gate acquisition and proposed stronger "
+            "gate-stage/axis/bonus shaping with slightly lower time pressure. "
+            "v39 returns to the stable feed-forward loop101 checkpoint, keeps "
+            "the v5 observation, PPO architecture, rollout geometry, and "
+            "unchanged config/level3.toml fixed, and tests only that "
+            "gate-acquisition reward-number hypothesis."
         ),
     },
 }

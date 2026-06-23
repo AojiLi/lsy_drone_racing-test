@@ -81,14 +81,16 @@ short continuation from loop107 1M and failed to reproduce it: best was only
 The immediate step is:
 
 ```text
-v38_gru_teacher_retention_distillation_from_loop107_1m
+v39_feedforward_gate_acquisition_reward_rebalance_loop101_final
 ```
 
-Residual-GRU online teacher-retention support has now passed preflight in
-`experiments/level3_ppo_loop/parity/2026-06-23_v38_residual_gru_teacher_retention_preflight.md`.
-The next runnable step is a bounded v38 screen from loop107 1M, with loop101
-final as the stable feed-forward teacher/reference. It must keep unchanged
-`config/level3.toml`, v5 Actor observation, and Actor-only deployment.
+loop109/v38 proved residual-GRU online teacher retention was active, but hard
+eval still regressed below the loop101/loop107 frontier. The next runnable step
+is a bounded feed-forward gate-acquisition reward screen from loop101 final,
+approved by
+`experiments/level3_ppo_loop/decisions/2026-06-23_loop109_reject_v38_launch_v39_gate_acquisition.md`.
+It must keep unchanged `config/level3.toml`, v5 Actor observation, MLP policy,
+and Actor-only deployment.
 
 ## Not Yet Implemented
 

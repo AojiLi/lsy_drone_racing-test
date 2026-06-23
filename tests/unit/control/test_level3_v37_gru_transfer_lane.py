@@ -143,6 +143,55 @@ def test_loop_registers_v38_teacher_retention_as_runnable_lane() -> None:
 
 
 @pytest.mark.unit
+def test_loop_registers_v39_feedforward_gate_acquisition_lane() -> None:
+    """v39 must return to loop101 MLP and change only approved gate reward numbers."""
+    hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v39_feedforward_gate_acquisition_reward_rebalance_loop101_final"
+    ]
+
+    assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["observation_layout"] == LOCAL_OBSTACLE_OBSERVATION_LAYOUT
+    assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP101_V33_BEST_CHECKPOINT
+    assert hypothesis["approved_hypothesis_packet"] == (
+        level3_ppo_loop.V39_GATE_ACQUISITION_DECISION_PACKET
+    )
+    assert "requires_training_support" not in hypothesis
+    assert level3_ppo_loop.structural_hypothesis_runnable(hypothesis)
+    assert hypothesis["train_timesteps"] == 5_000_000
+    assert hypothesis["checkpoint_interval"] == 1_000_000
+    assert hypothesis["eval_milestones_m"] == "1,2,3,4,5"
+
+    architecture = hypothesis["architecture"]
+    assert architecture["track_geometry_change"] == "forbidden"
+    assert architecture["policy_arch"] == "mlp_2x_tanh"
+    assert architecture["train_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert architecture["hard_eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert architecture["changed_reward_numbers"] == [
+        "gate_stage_coef",
+        "gate_axis_coef",
+        "gate_front_bonus",
+        "gate_bonus",
+        "gate_back_bonus",
+        "finish_bonus",
+        "time_penalty",
+    ]
+
+    params = hypothesis["params"]
+    assert params["policy_arch"] == "mlp_2x_tanh"
+    assert params["critic_observation_mode"] == CRITIC_OBSERVATION_SAME_AS_ACTOR
+    assert params["track_generator_profile"] == "default"
+    assert params["gate_stage_coef"] == 13.0
+    assert params["gate_axis_coef"] == 24.0
+    assert params["gate_front_bonus"] == 5.0
+    assert params["gate_bonus"] == 200.0
+    assert params["gate_back_bonus"] == 35.0
+    assert params["finish_bonus"] == 175.0
+    assert params["time_penalty"] == 0.02
+    assert params.get("v27_teacher_kl_beta", 0.0) == 0.0
+
+
+@pytest.mark.unit
 def test_residual_gru_args_allow_online_teacher_without_dataset() -> None:
     """v38 retention uses an online teacher checkpoint instead of an npz dataset."""
     args = Args.create(

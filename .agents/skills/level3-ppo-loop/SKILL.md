@@ -70,13 +70,14 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   79% crash / 7.578s; later checkpoints drifted down to 15%, 12%, 12%, and
   17% success. Do not continue v37 from loop107 final.
 - The immediate next lane is
-  `v38_gru_teacher_retention_distillation_from_loop107_1m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop108_reject_plain_v37_prepare_v38_retention.md`.
-  Residual-GRU online teacher-retention support passed preflight in
-  `experiments/level3_ppo_loop/parity/2026-06-23_v38_residual_gru_teacher_retention_preflight.md`.
-  The next runnable command is a bounded v38 screen from loop107 1M with
-  loop101 final as teacher. Do not continue plain v37/v37b or start from
-  loop108 checkpoints.
+  `v39_feedforward_gate_acquisition_reward_rebalance_loop101_final`, approved
+  by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop109_reject_v38_launch_v39_gate_acquisition.md`.
+  loop109/v38 proved residual-GRU online teacher retention was active but did
+  not improve hard eval: best was 18% success / 1.64 mean gates / 82% crash.
+  Do not continue v38 or start from loop109 checkpoints. v39 returns to
+  loop101 final MLP and tests only the analyzer's gate-acquisition reward
+  numbers on unchanged `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
