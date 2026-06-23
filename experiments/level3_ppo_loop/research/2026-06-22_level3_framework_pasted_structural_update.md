@@ -66,7 +66,7 @@ Recommended order:
 The current lane is:
 
 ```text
-v34_lowprob_train_pool_plr_from_loop101
+v35_competence_gated_gate_phase_curriculum_from_loop101
 ```
 
 This lane is a bounded 10M training screen from the loop101/v33 final checkpoint.
@@ -80,16 +80,17 @@ It keeps:
 - `256 envs x 128 steps`;
 - no observation/return normalization.
 
-It keeps the v33 gate-phase reset curriculum and changes only the training
-track sampler:
+It keeps the default random Level3 track sampler and changes only the
+training-only gate-phase reset schedule:
 
-- `track_generator_profile=v34_lowprob_train_pool_bounds_plr`;
-- 8% replay over train-pool bounds/ground failure seeds;
-- 92% normal random Level3 tracks;
-- no dev_seen, validation_unseen, or final_locked seed replay.
+- max gate-phase reset probability remains `0.45`;
+- initial probability is `0.12`;
+- probability increases by `0.02` only when rollout pass/finish/crash
+  competence metrics are healthy;
+- no dev_seen, validation_unseen, or final_locked seed replay is used.
 
 ## Deferred Work
 
-Online PLR, competence-gated curriculum, GRU, and reward-number changes remain
-valid next stages, but they should be separate named lanes with their own
-packets and hard-eval analysis. They should not be smuggled into v34.
+Online PLR, GRU, and reward-number changes remain valid next stages, but they
+should be separate named lanes with their own packets and hard-eval analysis.
+They should not be smuggled into v35.

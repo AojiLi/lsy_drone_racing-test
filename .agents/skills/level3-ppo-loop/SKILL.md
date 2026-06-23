@@ -56,17 +56,20 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   80% crash with 6.873s mean successful time. The 8M checkpoint reached 1.81
   mean gates but only 19% success. Do not continue v33 as-is without a new
   explicit decision packet.
+- loop102 tested v34 offline train-pool PLR for 10M and regressed: best loop102
+  was only 17% success / 1.59 mean gates / 83% crash, and final fell to 10%
+  success / 1.43 mean gates / 90% crash. Do not continue v34 as-is and do not
+  start future training from loop102 checkpoints.
 - The immediate next lane is
-  `v34_lowprob_train_pool_plr_from_loop101`: a 10M offline train-pool PLR
-  screen from the loop101 final checkpoint. It keeps the deployed v5 Actor
-  path, reward numbers, PPO numbers, rollout geometry, disabled normalization,
-  v33 gate-phase reset curriculum, and unchanged `config/level3.toml` hard eval
-  fixed. It changes only the training track sampler by adding
-  `track_generator_profile=v34_lowprob_train_pool_bounds_plr`, an 8% replay
-  probability over train-pool bounds/ground seeds. Validation, dev, and
-  final_locked seeds must not be used for replay. If v34 does not beat 20%
-  success or materially expand mean gates with crash no worse than 80%, stop
-  offline PLR and write a new named online-PLR/competence-gating/GRU packet.
+  `v35_competence_gated_gate_phase_curriculum_from_loop101`: a 10M screen from
+  loop101 final that keeps v5 Actor observation, reward numbers, PPO numbers,
+  rollout geometry, disabled normalization, default track sampler, and
+  unchanged `config/level3.toml` hard eval fixed. It changes only the
+  training-only gate-phase reset schedule: start at 0.12 reset probability and
+  increase toward the v33 0.45 ceiling only when rollout pass/finish/crash
+  competence metrics are healthy. If v35 does not beat 20% success or expand
+  mean gates above 1.69 with crash no worse than 80%, reject it and write a new
+  online-PLR-with-competence-gates or GRU packet.
 - The rejected previous lane was
   `v31d_longer_rollout_maturation_from_loop097_12m_to_30m`. It reached only
   19% success / 1.63 mean gates / 81% crash at its best loop098 checkpoint,

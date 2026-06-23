@@ -47,8 +47,10 @@ tied the old success frontier at `20/100`, improved mean gates slightly to
 `1.69`, and improved mean successful time to `6.873s`, but crash remained
 `80/100`. Its 8M checkpoint reached `1.81` mean gates with only `19/100`
 success. This means v33 is not a breakthrough and should not continue as-is.
-The next loop should move to the next named training-distribution lane:
-low-probability offline train-pool PLR.
+loop102 tested the next named training-distribution lane, low-probability
+offline train-pool PLR, and it regressed validation-unseen hard eval. The next
+loop should return to loop101 final and test competence-gated gate-phase reset
+curriculum before any direct GRU or reward-number move.
 
 ## Framework Priorities
 
@@ -69,17 +71,17 @@ low-probability offline train-pool PLR.
 The immediate executable step is:
 
 ```text
-v34_lowprob_train_pool_plr_from_loop101
+v35_competence_gated_gate_phase_curriculum_from_loop101
 ```
 
-This is a training-only offline PLR screen. It keeps v5 Actor observation,
-loop052 reward/PPO numbers, `256 envs x 128` rollout geometry, corrected v30
-semantics, v33 gate-phase reset curriculum, and hard eval on unchanged
-`config/level3.toml`. It changes only the training track sampler:
+This is a training-only competence-gated curriculum screen. It keeps v5 Actor
+observation, loop052 reward/PPO numbers, `256 envs x 128` rollout geometry,
+corrected v30 semantics, default random track sampling, and hard eval on
+unchanged `config/level3.toml`. It changes only the gate-phase reset schedule:
 
-- 92% of generated tracks remain normal random Level3 tracks;
-- 8% replay train-pool bounds/ground failure seeds;
-- replay excludes dev_seen, validation_unseen, and final_locked seeds;
+- reset exposure starts at 12%;
+- reset exposure may rise toward the v33 45% ceiling;
+- probability rises only when rollout pass/finish/crash competence gates pass;
 - the target race track geometry and final hard-eval protocol stay unchanged.
 
 The first screen should train 10M from the loop101/v33 final checkpoint and
@@ -91,7 +93,6 @@ These framework pieces require code support before training:
 
 - separate actor/critic RunningMeanStd if normalization is combined with
   asymmetric Critic later;
-- competence-gated curriculum stages;
 - online or dynamic prioritized level replay over train track seeds;
 - tanh-squashed Gaussian PPO log-prob parity;
 - GRU rerun with full hidden-state reset checks.

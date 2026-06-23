@@ -465,6 +465,10 @@ V34_TRAIN_POOL_PLR_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop101_reject_v33_launch_v34_train_pool_plr.md"
 )
+V35_COMPETENCE_GATED_CURRICULUM_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop102_reject_v34_launch_v35_competence_gated_curriculum.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -474,6 +478,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "asymmetric_privileged_critic_support",
     "gate_phase_reset_curriculum_support",
     "offline_train_pool_plr_support",
+    "competence_gated_gate_phase_curriculum_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -601,6 +606,12 @@ BASE_PARAMS: dict[str, Any] = {
     "gate_phase_reset_yz_max": 0.16,
     "gate_phase_reset_speed_min": 0.15,
     "gate_phase_reset_speed_max": 1.20,
+    "gate_phase_reset_competence_enabled": False,
+    "gate_phase_reset_competence_start_prob": 0.12,
+    "gate_phase_reset_competence_step_prob": 0.02,
+    "gate_phase_reset_competence_min_passed_gate_rate": 0.0068,
+    "gate_phase_reset_competence_min_finished_rate": 0.0007,
+    "gate_phase_reset_competence_max_crashed_rate": 0.0082,
     "obs_norm_enabled": False,
     "obs_norm_clip": 10.0,
     "return_norm_enabled": False,
@@ -713,7 +724,13 @@ PARAM_BOUNDS: dict[str, tuple[float, float]] = {
     "max_grad_norm": (0.30, 3.00),
 }
 
-BOOL_PARAM_KEYS = {"anneal_lr", "clip_vloss", "obs_norm_enabled", "return_norm_enabled"}
+BOOL_PARAM_KEYS = {
+    "anneal_lr",
+    "clip_vloss",
+    "obs_norm_enabled",
+    "return_norm_enabled",
+    "gate_phase_reset_competence_enabled",
+}
 REWARD_STRUCTURE_CHOICES = {
     "legacy_staged",
     "gate_potential",
@@ -5628,6 +5645,134 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "the dominant training distribution."
         ),
     },
+    "v35_competence_gated_gate_phase_curriculum_from_loop101": {
+        "name": "v35_competence_gated_gate_phase_curriculum_from_loop101",
+        "proposal_name": "structural_v35_competence_gated_curriculum_loop101_10m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 10_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,5,8,10",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "competence_gated_gate_phase_curriculum_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V35_COMPETENCE_GATED_CURRICULUM_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "gate_phase_reset_prob",
+                "gate_phase_reset_x_min",
+                "gate_phase_reset_x_max",
+                "gate_phase_reset_yz_max",
+                "gate_phase_reset_speed_min",
+                "gate_phase_reset_speed_max",
+                "gate_phase_reset_competence_enabled",
+                "gate_phase_reset_competence_start_prob",
+                "gate_phase_reset_competence_step_prob",
+                "gate_phase_reset_competence_min_passed_gate_rate",
+                "gate_phase_reset_competence_min_finished_rate",
+                "gate_phase_reset_competence_max_crashed_rate",
+            ],
+            "changed_reward_numbers": [],
+            "curriculum": {
+                "training_only": True,
+                "normal_reset_probability_initial": 0.88,
+                "normal_reset_probability_min": 0.55,
+                "gate_phase_reset_probability_initial": 0.12,
+                "gate_phase_reset_probability_max": 0.45,
+                "gate_phase_reset_increment": 0.02,
+                "competence_gate": {
+                    "min_passed_gate_rate": 0.0068,
+                    "min_finished_rate": 0.0007,
+                    "max_crashed_rate": 0.0082,
+                    "source": "rollout race metrics, updated once per PPO iteration",
+                },
+                "local_gate_x_range_m": [-1.05, -0.18],
+                "local_gate_yz_abs_max_m": 0.16,
+                "forward_speed_range_mps": [0.15, 1.20],
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 5b competence-gated gate-phase reset curriculum",
+            "baseline": "loop101/v33 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "validation_seed_leakage": "forbidden",
+            "primary_question": (
+                "Can the loop101 policy keep its 20% validation-unseen frontier "
+                "while gate-phase reset exposure is unlocked only when rollout "
+                "finish/pass/crash competence signals are healthy?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.20, or mean_gates > 1.69 with crash <= 0.80 "
+                    "and no late-checkpoint collapse"
+                ),
+                "rollback": (
+                    "If all checkpoints are <=0.17 success, mean gates do not "
+                    "expand, or crash rises to >=0.83, reject v35 and move to a "
+                    "new packet for online PLR with competence gates or GRU."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 52,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "gate_phase_reset_prob": 0.45,
+            "gate_phase_reset_x_min": -1.05,
+            "gate_phase_reset_x_max": -0.18,
+            "gate_phase_reset_yz_max": 0.16,
+            "gate_phase_reset_speed_min": 0.15,
+            "gate_phase_reset_speed_max": 1.20,
+            "gate_phase_reset_competence_enabled": True,
+            "gate_phase_reset_competence_start_prob": 0.12,
+            "gate_phase_reset_competence_step_prob": 0.02,
+            "gate_phase_reset_competence_min_passed_gate_rate": 0.0068,
+            "gate_phase_reset_competence_min_finished_rate": 0.0007,
+            "gate_phase_reset_competence_max_crashed_rate": 0.0082,
+        },
+        "rationale": (
+            "loop102/v34 showed that even an 8% train-pool failure replay sampler "
+            "can create negative transfer: best hard eval fell to 17% success, "
+            "1.59 mean gates, and 83% crash, with final collapsing to 10%. "
+            "All three reviewers rejected continuing offline PLR as-is and "
+            "recommended returning to loop101 final. v35 keeps the final Level3 "
+            "track, deployed v5 Actor, reward numbers, PPO numbers, rollout "
+            "geometry, and normal random track sampler fixed. It changes only "
+            "the gate-phase reset curriculum schedule: start at 12% reset "
+            "exposure and increase toward the proven 45% ceiling only when "
+            "rollout pass/finish/crash metrics indicate the policy is not "
+            "forgetting the base task."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -5660,6 +5805,12 @@ FIRE_PARAM_KEYS = [
     "gate_phase_reset_yz_max",
     "gate_phase_reset_speed_min",
     "gate_phase_reset_speed_max",
+    "gate_phase_reset_competence_enabled",
+    "gate_phase_reset_competence_start_prob",
+    "gate_phase_reset_competence_step_prob",
+    "gate_phase_reset_competence_min_passed_gate_rate",
+    "gate_phase_reset_competence_min_finished_rate",
+    "gate_phase_reset_competence_max_crashed_rate",
     "v27_teacher_kl_beta",
     "v27_teacher_model_name",
     "v27_teacher_observation_layout",

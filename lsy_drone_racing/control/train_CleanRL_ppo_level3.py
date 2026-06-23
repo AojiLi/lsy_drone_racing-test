@@ -280,6 +280,18 @@ class Args:
     """minimum initial forward speed for gate-phase curriculum resets"""
     gate_phase_reset_speed_max: float = 1.20
     """maximum initial forward speed for gate-phase curriculum resets"""
+    gate_phase_reset_competence_enabled: bool = False
+    """adapt gate-phase reset probability from rollout competence signals"""
+    gate_phase_reset_competence_start_prob: float = 0.12
+    """initial probability for competence-gated gate-phase resets"""
+    gate_phase_reset_competence_step_prob: float = 0.02
+    """probability increment when rollout competence gates pass"""
+    gate_phase_reset_competence_min_passed_gate_rate: float = 0.0068
+    """minimum rollout passed-gate rate before increasing curriculum pressure"""
+    gate_phase_reset_competence_min_finished_rate: float = 0.0007
+    """minimum rollout finish rate before increasing curriculum pressure"""
+    gate_phase_reset_competence_max_crashed_rate: float = 0.0082
+    """maximum rollout crash rate allowed before increasing curriculum pressure"""
     v27_teacher_kl_beta: float = 0.0
     """v27 teacher-retention KL coefficient; beta=0 is the control arm."""
     v27_teacher_model_name: str | None = None
@@ -410,6 +422,34 @@ class Args:
             raise ValueError("gate_phase_reset_speed_min must be non-negative.")
         if args.gate_phase_reset_speed_min > args.gate_phase_reset_speed_max:
             raise ValueError("gate_phase_reset_speed_min must be <= gate_phase_reset_speed_max.")
+        if args.gate_phase_reset_competence_enabled:
+            if args.gate_phase_reset_prob <= 0.0:
+                raise ValueError(
+                    "gate_phase_reset_competence_enabled requires gate_phase_reset_prob > 0."
+                )
+            if not 0.0 <= args.gate_phase_reset_competence_start_prob <= args.gate_phase_reset_prob:
+                raise ValueError(
+                    "gate_phase_reset_competence_start_prob must be in "
+                    "[0, gate_phase_reset_prob]."
+                )
+            if args.gate_phase_reset_competence_step_prob <= 0.0:
+                raise ValueError("gate_phase_reset_competence_step_prob must be positive.")
+            if args.gate_phase_reset_competence_step_prob > args.gate_phase_reset_prob:
+                raise ValueError(
+                    "gate_phase_reset_competence_step_prob must be <= gate_phase_reset_prob."
+                )
+            if args.gate_phase_reset_competence_min_passed_gate_rate < 0.0:
+                raise ValueError(
+                    "gate_phase_reset_competence_min_passed_gate_rate must be non-negative."
+                )
+            if args.gate_phase_reset_competence_min_finished_rate < 0.0:
+                raise ValueError(
+                    "gate_phase_reset_competence_min_finished_rate must be non-negative."
+                )
+            if args.gate_phase_reset_competence_max_crashed_rate < 0.0:
+                raise ValueError(
+                    "gate_phase_reset_competence_max_crashed_rate must be non-negative."
+                )
         args.batch_size = int(args.num_envs * args.num_steps)
         args.minibatch_size = int(args.batch_size // args.num_minibatches)
         args.num_iterations = args.total_timesteps // args.batch_size
@@ -742,6 +782,13 @@ class GatePhaseResetCurriculum(VectorWrapper):
             raise ValueError("invalid gate-phase reset speed range.")
         rng_seed = random.randrange(2**31) if seed is None or seed == -1 else int(seed) + 20_033
         self._rng_key = jax.random.PRNGKey(rng_seed)
+
+    def set_probability(self, probability: float) -> None:
+        """Update the training-only curriculum probability for future resets."""
+        probability = float(probability)
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError("gate-phase reset probability must be in [0, 1].")
+        self.gate_phase_reset_prob = probability
 
     def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
         """Reset the base environment, then optionally move slots to gate-phase states."""
@@ -2294,6 +2341,18 @@ def wrapped_attr(env: Any, name: str, default: Any = None) -> Any:
     return default
 
 
+def wrapped_instance(env: Any, cls: type) -> Any | None:
+    """Return the first wrapped environment instance of the requested type."""
+    current = env
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, cls):
+            return current
+        current = getattr(current, "env", None)
+    return None
+
+
 class RunningMeanStd:
     """Torch running mean/variance with checkpoint-friendly metadata."""
 
@@ -2393,6 +2452,7 @@ def setup_wandb(args: Args) -> None:
         "retention/*",
         "reward_components/*",
         "race/*",
+        "curriculum/*",
         "train/*",
     ):
         wandb.define_metric(metric_pattern, step_metric="global_step")
@@ -2451,8 +2511,11 @@ def make_envs(
         seed=cfg.env.seed,
         device=jax_device,
     )
-    gate_phase_reset_prob = float(coefs.get("gate_phase_reset_prob", 0.0))
-    if gate_phase_reset_prob > 0.0:
+    gate_phase_reset_max_prob = float(coefs.get("gate_phase_reset_prob", 0.0))
+    gate_phase_reset_prob = float(
+        coefs.get("gate_phase_reset_initial_prob", gate_phase_reset_max_prob)
+    )
+    if gate_phase_reset_max_prob > 0.0 or gate_phase_reset_prob > 0.0:
         env = GatePhaseResetCurriculum(
             env,
             probability=gate_phase_reset_prob,
@@ -3018,6 +3081,11 @@ def train_ppo(
         "gate_phase_reset_yz_max": args.gate_phase_reset_yz_max,
         "gate_phase_reset_speed_min": args.gate_phase_reset_speed_min,
         "gate_phase_reset_speed_max": args.gate_phase_reset_speed_max,
+        "gate_phase_reset_initial_prob": (
+            args.gate_phase_reset_competence_start_prob
+            if args.gate_phase_reset_competence_enabled
+            else args.gate_phase_reset_prob
+        ),
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
@@ -3319,12 +3387,25 @@ def train_ppo(
     next_done = torch.zeros(args.num_envs).to(device)
     sum_rewards = torch.zeros((args.num_envs)).to(device)
     sum_rewards_hist = []
+    gate_phase_curriculum = wrapped_instance(envs, GatePhaseResetCurriculum)
+    current_gate_phase_reset_prob = (
+        args.gate_phase_reset_competence_start_prob
+        if args.gate_phase_reset_competence_enabled
+        else args.gate_phase_reset_prob
+    )
+    if gate_phase_curriculum is not None:
+        gate_phase_curriculum.set_probability(current_gate_phase_reset_prob)
+    if args.gate_phase_reset_competence_enabled and gate_phase_curriculum is None:
+        raise RuntimeError(
+            "gate_phase_reset_competence_enabled requires a GatePhaseResetCurriculum wrapper."
+        )
 
     for iteration in range(1, args.num_iterations + 1):
         start_time = time.time()
         reward_component_sums = dict.fromkeys(REWARD_COMPONENT_KEYS, 0.0)
         race_metric_sums = dict.fromkeys(RACE_METRIC_KEYS, 0.0)
         reward_component_batches = 0
+        collect_rollout_metrics = wandb_enabled or args.gate_phase_reset_competence_enabled
         initial_recurrent_state = (
             next_recurrent_state.clone() if next_recurrent_state is not None else None
         )
@@ -3368,7 +3449,7 @@ def train_ppo(
             sum_rewards += reward
             next_done = terminations | truncations
 
-            if wandb_enabled:
+            if collect_rollout_metrics:
                 reward_component_batches += 1
                 for key in REWARD_COMPONENT_KEYS:
                     if (value := infos.get(f"reward_{key}")) is not None:
@@ -3604,23 +3685,53 @@ def train_ppo(
                 f"teacher_agreement={teacher_agreement_log:.4f} "
                 f"sampled_batch_size={retention_batch_size_log:.1f}"
             )
+
+        reward_component_logs = {}
+        race_metric_logs = {}
+        curriculum_logs = {}
+        if reward_component_batches > 0:
+            reward_component_logs = {
+                f"reward_components/{key}": value / reward_component_batches
+                for key, value in reward_component_sums.items()
+            }
+            race_metric_logs = {
+                f"race/{key}": value / reward_component_batches
+                for key, value in race_metric_sums.items()
+            }
+            if args.gate_bonus:
+                reward_component_logs["reward_components/gate_bonus_rate"] = (
+                    reward_component_logs["reward_components/gate_bonus"] / args.gate_bonus
+                )
+            if args.gate_phase_reset_competence_enabled:
+                passed_gate_rate = race_metric_sums["passed_gate_rate"] / reward_component_batches
+                finished_rate = race_metric_sums["finished_rate"] / reward_component_batches
+                crashed_rate = race_metric_sums["crashed_rate"] / reward_component_batches
+                competence_gate_met = (
+                    passed_gate_rate >= args.gate_phase_reset_competence_min_passed_gate_rate
+                    and finished_rate >= args.gate_phase_reset_competence_min_finished_rate
+                    and crashed_rate <= args.gate_phase_reset_competence_max_crashed_rate
+                )
+                next_gate_phase_reset_prob = current_gate_phase_reset_prob
+                if competence_gate_met:
+                    next_gate_phase_reset_prob = min(
+                        args.gate_phase_reset_prob,
+                        current_gate_phase_reset_prob
+                        + args.gate_phase_reset_competence_step_prob,
+                    )
+                if gate_phase_curriculum is not None:
+                    gate_phase_curriculum.set_probability(next_gate_phase_reset_prob)
+                curriculum_logs = {
+                    "curriculum/gate_phase_reset_prob": current_gate_phase_reset_prob,
+                    "curriculum/gate_phase_reset_next_prob": next_gate_phase_reset_prob,
+                    "curriculum/competence_gate_met": float(competence_gate_met),
+                    "curriculum/competence_passed_gate_rate": passed_gate_rate,
+                    "curriculum/competence_finished_rate": finished_rate,
+                    "curriculum/competence_crashed_rate": crashed_rate,
+                }
+                current_gate_phase_reset_prob = next_gate_phase_reset_prob
+
         if wandb_enabled:
             total_reward = rewards.float().sum().item()
-            reward_component_logs = {}
-            race_metric_logs = {}
-            if reward_component_batches > 0:
-                reward_component_logs = {
-                    f"reward_components/{key}": value / reward_component_batches
-                    for key, value in reward_component_sums.items()
-                }
-                race_metric_logs = {
-                    f"race/{key}": value / reward_component_batches
-                    for key, value in race_metric_sums.items()
-                }
-                if args.gate_bonus:
-                    reward_component_logs["reward_components/gate_bonus_rate"] = (
-                        reward_component_logs["reward_components/gate_bonus"] / args.gate_bonus
-                    )
             normalization_logs = {}
             if obs_rms is not None:
                 obs_abs = obs.detach().float().abs()
@@ -3685,6 +3796,7 @@ def train_ppo(
                     "charts/SPS": int(global_step / (time.time() - start_time)),
                     **reward_component_logs,
                     **race_metric_logs,
+                    **curriculum_logs,
                     **normalization_logs,
                 },
                 step=global_step,
@@ -3986,6 +4098,12 @@ def main(
     gate_phase_reset_yz_max: float = 0.16,
     gate_phase_reset_speed_min: float = 0.15,
     gate_phase_reset_speed_max: float = 1.20,
+    gate_phase_reset_competence_enabled: bool = False,
+    gate_phase_reset_competence_start_prob: float = 0.12,
+    gate_phase_reset_competence_step_prob: float = 0.02,
+    gate_phase_reset_competence_min_passed_gate_rate: float = 0.0068,
+    gate_phase_reset_competence_min_finished_rate: float = 0.0007,
+    gate_phase_reset_competence_max_crashed_rate: float = 0.0082,
     v27_teacher_kl_beta: float = 0.0,
     v27_teacher_model_name: str | None = None,
     v27_teacher_observation_layout: str | None = None,
@@ -4074,6 +4192,18 @@ def main(
         gate_phase_reset_yz_max=gate_phase_reset_yz_max,
         gate_phase_reset_speed_min=gate_phase_reset_speed_min,
         gate_phase_reset_speed_max=gate_phase_reset_speed_max,
+        gate_phase_reset_competence_enabled=gate_phase_reset_competence_enabled,
+        gate_phase_reset_competence_start_prob=gate_phase_reset_competence_start_prob,
+        gate_phase_reset_competence_step_prob=gate_phase_reset_competence_step_prob,
+        gate_phase_reset_competence_min_passed_gate_rate=(
+            gate_phase_reset_competence_min_passed_gate_rate
+        ),
+        gate_phase_reset_competence_min_finished_rate=(
+            gate_phase_reset_competence_min_finished_rate
+        ),
+        gate_phase_reset_competence_max_crashed_rate=(
+            gate_phase_reset_competence_max_crashed_rate
+        ),
         v27_teacher_kl_beta=v27_teacher_kl_beta,
         v27_teacher_model_name=v27_teacher_model_name,
         v27_teacher_observation_layout=v27_teacher_observation_layout,
