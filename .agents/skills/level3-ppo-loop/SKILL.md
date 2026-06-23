@@ -79,14 +79,20 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   parity, v10 observation parity/sanity, and recurrent PPO gradient/update
   sanity were all clean. This rules out an obvious wiring bug as the cause of
   v40's zero-gate failure.
-- The immediate next train/evaluate lane is
-  `v42_gru_v10_gate_phase_reset_curriculum_from_scratch`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_v41_clean_launch_v42_gru_v10_gate_phase_curriculum.md`
+- loop113 tested
+  `v42_gru_v10_gate_phase_reset_curriculum_from_scratch` and also failed to
+  acquire normal-start gate progress: best was the 4M checkpoint with `0%`
+  success, `0.01` mean gates, `54%` crash, and `46%` timeout. Do not continue
+  v42 as-is and do not start future training from loop113 checkpoints.
+- The immediate next lane is
+  `v43_success_trajectory_imitation_warmstart_gru_v10`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop113_reject_v42_prepare_v43_success_trajectory_imitation.md`
   and sourced by
-  `experiments/level3_ppo_loop/research/2026-06-23_level3_v42_gru_v10_gate_phase_curriculum_plan.md`.
-  It keeps GRU/v10 and v39 gate-acquisition rewards, starts from scratch, adds
-  the training-only v33-style gate-phase reset curriculum, and hard-evals only
-  on unchanged `config/level3.toml`.
+  `experiments/level3_ppo_loop/research/2026-06-23_level3_v43_success_trajectory_imitation_warmstart_plan.md`.
+  This is a preflight/support lane before PPO training: build or audit a v10
+  success-trajectory imitation dataset, implement or verify sequence-aware
+  GRU/v10 BC warmstart support, then hard-eval the BC checkpoint on unchanged
+  `config/level3.toml` before launching PPO fine-tuning.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

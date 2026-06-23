@@ -35,10 +35,11 @@ for an explicitly accepted blind run without analysis.
 
 For the user's unattended Codex-supervised loop, run one train/evaluate chunk at
 a time and let the Codex main agent do the analysis/subagent/research decision
-between invocations. The latest completed chunk, loop112/v40, failed all hard
-eval milestones with `0%` success and `0.0` mean gates, so do not relaunch the
-old v40 training command. The immediate next step is the v41 diagnostic audit
-described below.
+between invocations. The latest completed chunk, loop113/v42, failed all hard
+eval milestones with `0%` success and at most `0.01` mean gates, so do not
+continue v42 or start from loop113 checkpoints. The immediate next step is the
+v43 success-trajectory imitation warmstart preflight, not another reward-only
+or from-scratch GRU/v10 run.
 
 Historical v40 command, retained only for provenance:
 
@@ -186,14 +187,15 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v42_gru_v10_gate_phase_reset_curriculum_from_scratch
+v43_success_trajectory_imitation_warmstart_gru_v10
 ```
 
-v41 passed the GRU/v10 wiring audit, so the next bounded train/evaluate lane is
-v42: keep GRU/v10 and v39 gate-acquisition rewards, start from scratch, add the
-training-only v33-style gate-phase reset curriculum, and hard-eval only on
-unchanged `config/level3.toml`. The goal of v42 is first-gate acquisition and
-nonzero normal-start hard-eval gate progress, not speed optimization.
+v42 showed that from-scratch GRU/v10 plus training-only gate-phase reset still
+does not acquire normal-start gate progress. v43 is therefore a preflight lane:
+build or audit success-trajectory imitation data with v10 student observations,
+verify sequence-aware GRU/v10 behavior-cloning warmstart support, save a
+correctly tagged GRU/v10 checkpoint, and hard-eval that checkpoint on unchanged
+`config/level3.toml` before any PPO fine-tuning.
 
 ## Research-Guided Tuning
 
