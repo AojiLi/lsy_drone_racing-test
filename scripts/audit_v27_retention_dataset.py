@@ -398,7 +398,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             "",
             "- This is an offline teacher-success retention audit, not Level3 hard eval.",
             "- It does not inspect `final_locked` seeds.",
-            "- Hard acceptance still requires `config/level3_dr.toml` evaluator metrics.",
+            "- Hard acceptance still requires unchanged `config/level3.toml` evaluator metrics.",
             "",
         ]
     )

@@ -64,6 +64,27 @@ def test_v46_lane_is_held_until_residual_teacher_action_preflight() -> None:
 
 
 @pytest.mark.unit
+def test_v47_residual_frontier_union_retention_lane_is_runnable() -> None:
+    """v47 is the bounded production screen after the v46 preflight passes."""
+    hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m"
+    ]
+
+    assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["architecture"]["track_geometry_change"] == "forbidden"
+    assert hypothesis["requires_training_support"] == "teacher_retention_kl"
+    assert hypothesis["approved_hypothesis_packet"] == (
+        level3_ppo_loop.V47_RESIDUAL_FRONTIER_UNION_RETENTION_DECISION_PACKET
+    )
+    assert hypothesis["params"]["v27_retention_dataset_path"] == (
+        level3_ppo_loop.V46_RESIDUAL_FRONTIER_UNION_RETENTION_DATASET_PATH
+    )
+    assert hypothesis["params"]["policy_arch"] == "mlp_2x_tanh"
+    assert level3_ppo_loop.structural_hypothesis_runnable(hypothesis)
+
+
+@pytest.mark.unit
 def test_teacher_distribution_includes_residual_gru_branch() -> None:
     """Dataset extraction must not fall back to the MLP base actor for loop107."""
     torch.manual_seed(460)

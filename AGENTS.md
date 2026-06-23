@@ -106,16 +106,17 @@
   mean successful time; final was `19%` success and `1.59` mean gates. Do not
   continue v45 as-is and do not start future training from loop116 final.
 - The immediate next lane is
-  `v46_v5_residual_frontier_teacher_action_retention_preflight`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop116_reject_v45_prepare_v46_residual_frontier_teacher_action_retention.md`.
-  Its diagnostic preflight has passed in
+  `v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_v46_preflight_passed_launch_v47_residual_frontier_union_retention.md`.
+  The v46 diagnostic preflight passed in
   `experiments/level3_ppo_loop/parity/2026-06-23_v46_residual_frontier_teacher_action_preflight.md`:
   residual-GRU teacher action extraction from loop107/v37 1M matches direct
-  inference with `0.0` action diff and `0.0` hidden-state diff, and the
-  diagnostic dataset has finite KL/MSE/agreement. It is still not a blind
-  training lane: first write or consume the next decision packet for the
-  production residual-frontier retention dataset/training screen. Keep hard eval
-  on unchanged `config/level3.toml`.
+  inference with `0.0` action diff and `0.0` hidden-state diff. The v47
+  production union dataset has `72` train-pool success trajectories, `24388`
+  samples, no excluded seed overlap, and audit metrics `KL=0.083788`,
+  `MSE=0.017196`, agreement `0.830296`. Run at most one bounded W&B-tracked
+  v47 screen before analysis and the next decision. Keep hard eval on unchanged
+  `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
