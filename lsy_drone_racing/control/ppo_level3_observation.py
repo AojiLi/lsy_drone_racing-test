@@ -291,6 +291,7 @@ def make_checkpoint(
     critic_observation_mode: str = CRITIC_OBSERVATION_SAME_AS_ACTOR,
     actor_observation_dim: int | None = None,
     critic_observation_dim: int | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Package model weights with Level3 observation-layout and network-width metadata."""
     policy_arch = normalize_policy_arch(policy_arch)
@@ -335,6 +336,11 @@ def make_checkpoint(
             checkpoint["actor_observation_dim"] = int(actor_observation_dim)
         if critic_observation_dim is not None:
             checkpoint["critic_observation_dim"] = int(critic_observation_dim)
+    if extra_metadata is not None:
+        reserved = set(checkpoint).intersection(extra_metadata)
+        if reserved:
+            raise ValueError(f"extra checkpoint metadata overwrites reserved keys: {reserved}")
+        checkpoint.update(extra_metadata)
     return checkpoint
 
 

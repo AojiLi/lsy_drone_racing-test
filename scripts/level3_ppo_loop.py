@@ -506,6 +506,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "competence_gated_gate_phase_curriculum_support",
     "online_competence_gated_level_replay_support",
     "mlp_to_gru_transfer_support",
+    "residual_gru_teacher_retention_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2

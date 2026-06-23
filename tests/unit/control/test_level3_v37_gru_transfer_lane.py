@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -16,8 +18,12 @@ from lsy_drone_racing.control.ppo_level3_observation import (
 )
 from lsy_drone_racing.control.train_CleanRL_ppo_level3 import (
     Agent,
+    Args,
     MLPResidualRecurrentActorAgent,
+    V27OnlineTeacher,
+    load_v27_online_teacher,
     transfer_mlp_checkpoint_to_residual_gru,
+    v27_online_teacher_retention_loss,
 )
 from scripts import level3_ppo_loop
 
@@ -97,8 +103,8 @@ def test_loop_registers_v37b_from_loop107_1m_not_final() -> None:
 
 
 @pytest.mark.unit
-def test_loop_registers_v38_teacher_retention_as_support_hold() -> None:
-    """v38 must be explicit and held until retention support exists."""
+def test_loop_registers_v38_teacher_retention_as_runnable_lane() -> None:
+    """v38 must be explicit, track-safe, and backed by retention support."""
     hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
         "v38_gru_teacher_retention_distillation_from_loop107_1m"
     ]
@@ -113,9 +119,10 @@ def test_loop_registers_v38_teacher_retention_as_support_hold() -> None:
     assert hypothesis["requires_training_support"] == (
         "residual_gru_teacher_retention_support"
     )
-    assert "residual_gru_teacher_retention_support" not in (
+    assert "residual_gru_teacher_retention_support" in (
         level3_ppo_loop.SUPPORTED_TRAINING_STRUCTURES
     )
+    assert level3_ppo_loop.structural_hypothesis_runnable(hypothesis)
 
     architecture = hypothesis["architecture"]
     assert architecture["track_geometry_change"] == "forbidden"
@@ -133,6 +140,111 @@ def test_loop_registers_v38_teacher_retention_as_support_hold() -> None:
     assert params["track_generator_profile"] == "default"
     assert params["v27_teacher_kl_beta"] > 0.0
     assert params["v27_teacher_model_name"] == level3_ppo_loop.LOOP101_V33_BEST_CHECKPOINT
+
+
+@pytest.mark.unit
+def test_residual_gru_args_allow_online_teacher_without_dataset() -> None:
+    """v38 retention uses an online teacher checkpoint instead of an npz dataset."""
+    args = Args.create(
+        num_steps=128,
+        recurrent_sequence_len=128,
+        policy_arch=POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
+        observation_layout=LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        v27_teacher_kl_beta=0.08,
+        v27_teacher_model_name=level3_ppo_loop.LOOP101_V33_BEST_CHECKPOINT,
+        v27_teacher_observation_layout=LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+    )
+
+    assert args.policy_arch == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256
+    assert args.v27_retention_dataset_path is None
+
+
+@pytest.mark.unit
+def test_online_teacher_retention_loss_samples_recurrent_minibatch() -> None:
+    """Teacher retention must be active and finite on residual-GRU sequences."""
+    torch.manual_seed(38)
+    obs_shape = (68,)
+    action_shape = (4,)
+    teacher = Agent(obs_shape, action_shape, hidden_dim=256)
+    student = MLPResidualRecurrentActorAgent(
+        obs_shape,
+        action_shape,
+        hidden_dim=256,
+        recurrent_hidden_dim=256,
+    )
+    student.load_state_dict(transfer_mlp_checkpoint_to_residual_gru(teacher.state_dict(), student))
+    with torch.no_grad():
+        student.actor_residual_head.bias.fill_(0.05)
+
+    teacher_source = V27OnlineTeacher(
+        agent=teacher,
+        model_path=level3_ppo_loop.ROOT / "synthetic_teacher.ckpt",
+        observation_layout=LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        policy_arch="mlp_2x_tanh",
+    )
+    seq_len = 4
+    batch_size = 3
+    obs = torch.randn(seq_len, batch_size, obs_shape[0]) * 0.25
+    done = torch.zeros(seq_len, batch_size)
+    done[2, 1] = 1.0
+    hidden = student.get_initial_state(batch_size, torch.device("cpu"))
+
+    teacher_kl, teacher_action_mse, teacher_agreement, sampled = (
+        v27_online_teacher_retention_loss(
+            student,
+            teacher_source,
+            obs,
+            hidden,
+            done,
+            batch_size=7,
+        )
+    )
+    teacher_kl.backward()
+
+    assert sampled == 7
+    assert torch.isfinite(teacher_kl)
+    assert torch.isfinite(teacher_action_mse)
+    assert torch.isfinite(teacher_agreement)
+    assert teacher_action_mse.item() > 0.0
+    assert student.actor_residual_head.bias.grad is not None
+
+
+@pytest.mark.unit
+def test_load_v27_online_teacher_from_checkpoint(tmp_path: Path) -> None:
+    """The v38 teacher loader must validate checkpoint metadata and freeze weights."""
+    torch.manual_seed(39)
+    teacher = Agent((68,), (4,), hidden_dim=256)
+    checkpoint_path = tmp_path / "teacher.ckpt"
+    torch.save(
+        make_checkpoint(
+            teacher.state_dict(),
+            hidden_dim=256,
+            observation_layout=LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            policy_arch="mlp_2x_tanh",
+        ),
+        checkpoint_path,
+    )
+    args = Args.create(
+        num_steps=128,
+        recurrent_sequence_len=128,
+        policy_arch=POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
+        observation_layout=LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        v27_teacher_kl_beta=0.08,
+        v27_teacher_model_name=str(checkpoint_path),
+        v27_teacher_observation_layout=LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+    )
+
+    source = load_v27_online_teacher(
+        args,
+        obs_shape=(68,),
+        action_shape=(4,),
+        device=torch.device("cpu"),
+    )
+
+    assert source is not None
+    assert source.model_path == checkpoint_path
+    assert source.observation_layout == LOCAL_OBSTACLE_OBSERVATION_LAYOUT
+    assert not any(parameter.requires_grad for parameter in source.agent.parameters())
 
 
 @pytest.mark.unit

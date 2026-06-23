@@ -84,13 +84,11 @@ The immediate step is:
 v38_gru_teacher_retention_distillation_from_loop107_1m
 ```
 
-This is not a training command yet. It is a support/preflight lane for explicit
-teacher retention or distillation from loop107 1M, with a stable feed-forward
-frontier checkpoint such as loop101 final as teacher/reference. It must keep
-unchanged `config/level3.toml`, v5 Actor observation, and Actor-only
-deployment. Do not launch v38 training until tests prove nonzero retention
-sampling and finite teacher KL/action MSE/agreement logging for recurrent
-students.
+Residual-GRU online teacher-retention support has now passed preflight in
+`experiments/level3_ppo_loop/parity/2026-06-23_v38_residual_gru_teacher_retention_preflight.md`.
+The next runnable step is a bounded v38 screen from loop107 1M, with loop101
+final as the stable feed-forward teacher/reference. It must keep unchanged
+`config/level3.toml`, v5 Actor observation, and Actor-only deployment.
 
 ## Not Yet Implemented
 
@@ -99,7 +97,8 @@ These framework pieces require code support before training:
 - separate actor/critic RunningMeanStd if normalization is combined with
   asymmetric Critic later;
 - tanh-squashed Gaussian PPO log-prob parity;
-- residual-GRU teacher retention/distillation support for recurrent students.
+- sequence-level teacher-success retention datasets for residual-GRU students,
+  if online current-minibatch retention is not enough.
 
 Do not mark a lane as one of these until the trainer/evaluator support exists
 and focused tests or dry-runs prove it.

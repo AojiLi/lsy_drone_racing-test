@@ -498,17 +498,29 @@ class Args:
                     "run v32 parity with obs_norm_enabled=False first."
                 )
         if args.v27_teacher_kl_beta > 0.0:
-            if args.policy_arch != POLICY_ARCH_MLP:
+            has_real_retention_dataset = bool(args.v27_retention_dataset_path) and (
+                str(args.v27_retention_dataset_path) != "disabled_control_arm"
+            )
+            if args.policy_arch == POLICY_ARCH_MLP:
+                if not has_real_retention_dataset:
+                    raise ValueError(
+                        "v27_teacher_kl_beta > 0 with MLP policy requires a real "
+                        "v27_retention_dataset_path."
+                    )
+            elif args.policy_arch == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256:
+                if has_real_retention_dataset:
+                    raise NotImplementedError(
+                        "residual-GRU teacher retention uses online teacher sampling, "
+                        "not v27_retention_dataset_path."
+                    )
+                if not args.v27_teacher_model_name:
+                    raise ValueError(
+                        "residual-GRU teacher retention requires v27_teacher_model_name."
+                    )
+            else:
                 raise NotImplementedError(
-                    "v27 teacher-retention KL currently supports only the "
-                    "feed-forward 2xTanh MLP policy."
-                )
-            if not args.v27_retention_dataset_path or (
-                str(args.v27_retention_dataset_path) == "disabled_control_arm"
-            ):
-                raise ValueError(
-                    "v27_teacher_kl_beta > 0 requires a real "
-                    "v27_retention_dataset_path."
+                    "v27 teacher-retention KL currently supports only MLP dataset "
+                    "retention and residual-GRU online teacher retention."
                 )
             if args.v27_retention_batch_size <= 0:
                 raise ValueError("v27_retention_batch_size must be positive.")
@@ -3420,6 +3432,33 @@ class V27RetentionDataset:
         return int(self.student_obs.shape[0])
 
 
+@dataclass
+class V27OnlineTeacher:
+    """Frozen teacher policy used for online current-minibatch retention."""
+
+    agent: Agent
+    model_path: Path
+    observation_layout: str
+    policy_arch: str
+
+
+def resolve_v27_teacher_checkpoint_path(value: str | Path) -> Path:
+    """Resolve teacher checkpoints from absolute, repo-relative, or control-relative paths."""
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    repo_root = Path(__file__).parents[2]
+    control_dir = Path(__file__).parent
+    candidates = (
+        control_dir / path,
+        repo_root / path,
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0]
+
+
 def load_v27_retention_dataset(
     args: Args,
     obs_shape: tuple[int, ...],
@@ -3429,10 +3468,12 @@ def load_v27_retention_dataset(
     """Load teacher-retention data for nonzero-beta v27 runs."""
     if args.v27_teacher_kl_beta <= 0.0:
         return None
+    if args.v27_retention_dataset_path is None:
+        return None
+    if str(args.v27_retention_dataset_path) == "disabled_control_arm":
+        return None
     if args.policy_arch != POLICY_ARCH_MLP:
         raise NotImplementedError("v27 retention KL currently supports only MLP policies.")
-    if args.v27_retention_dataset_path is None:
-        raise ValueError("v27_retention_dataset_path is required for nonzero-beta v27 runs.")
 
     dataset_path = Path(args.v27_retention_dataset_path)
     if not dataset_path.is_absolute():
@@ -3498,6 +3539,118 @@ def load_v27_retention_dataset(
     return dataset
 
 
+def load_v27_online_teacher(
+    args: Args,
+    obs_shape: tuple[int, ...],
+    action_shape: tuple[int, ...],
+    device: torch.device,
+) -> V27OnlineTeacher | None:
+    """Load a frozen feed-forward teacher for residual-GRU online retention."""
+    if args.v27_teacher_kl_beta <= 0.0:
+        return None
+    if args.policy_arch != POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256:
+        return None
+    if not args.v27_teacher_model_name:
+        raise ValueError("v27_teacher_model_name is required for residual-GRU retention.")
+
+    teacher_path = resolve_v27_teacher_checkpoint_path(args.v27_teacher_model_name)
+    if not teacher_path.exists():
+        raise FileNotFoundError(f"v27 teacher checkpoint not found: {teacher_path}")
+
+    checkpoint = torch.load(teacher_path, map_location=device)
+    model_state_dict, observation_layout = unpack_checkpoint(checkpoint)
+    teacher_policy_arch = checkpoint_policy_arch(checkpoint, model_state_dict)
+    if teacher_policy_arch != POLICY_ARCH_MLP:
+        raise NotImplementedError(
+            "residual-GRU online retention currently supports only MLP teacher checkpoints."
+        )
+    requested_layout = args.v27_teacher_observation_layout or observation_layout
+    if observation_layout != requested_layout:
+        raise ValueError(
+            f"Teacher checkpoint layout {observation_layout} does not match "
+            f"v27_teacher_observation_layout={requested_layout}."
+        )
+    if requested_layout != args.observation_layout:
+        raise NotImplementedError(
+            "online teacher retention requires teacher and student observation layouts "
+            "to match; no dual-observation encoder is wired for v38."
+        )
+    if checkpoint_obs_normalization(checkpoint) is not None:
+        raise NotImplementedError(
+            "online teacher retention does not yet apply teacher obs normalization."
+        )
+    if checkpoint_critic_observation_mode(checkpoint) != CRITIC_OBSERVATION_SAME_AS_ACTOR:
+        raise NotImplementedError(
+            "online teacher retention currently requires a same-observation teacher Critic."
+        )
+
+    expected_obs_dim = int(np.prod(obs_shape))
+    expected_action_dim = int(np.prod(action_shape))
+    teacher_obs_dim = int(model_state_dict["actor_mean.0.weight"].shape[1])
+    teacher_action_dim = int(model_state_dict["actor_mean.4.weight"].shape[0])
+    if teacher_obs_dim != expected_obs_dim:
+        raise ValueError(
+            "teacher observation dimension mismatch: "
+            f"checkpoint has {teacher_obs_dim}, expected {expected_obs_dim}."
+        )
+    if teacher_action_dim != expected_action_dim:
+        raise ValueError(
+            "teacher action dimension mismatch: "
+            f"checkpoint has {teacher_action_dim}, expected {expected_action_dim}."
+        )
+
+    teacher = Agent(
+        obs_shape,
+        action_shape,
+        hidden_dim=checkpoint_hidden_dim(checkpoint, model_state_dict),
+    ).to(device)
+    teacher.load_state_dict(model_state_dict)
+    teacher.eval()
+    for parameter in teacher.parameters():
+        parameter.requires_grad_(False)
+
+    print(
+        "loaded v27 online teacher: "
+        f"{teacher_path} layout={observation_layout} policy_arch={teacher_policy_arch}"
+    )
+    if wandb.run is not None:
+        wandb.config.update(
+            {
+                "v27_online_teacher_model_resolved": str(teacher_path),
+                "v27_online_teacher_observation_layout": observation_layout,
+                "v27_online_teacher_policy_arch": teacher_policy_arch,
+            },
+            allow_val_change=True,
+        )
+    return V27OnlineTeacher(
+        agent=teacher,
+        model_path=teacher_path,
+        observation_layout=observation_layout,
+        policy_arch=teacher_policy_arch,
+    )
+
+
+def v27_distribution_retention_metrics(
+    student_mean: Tensor,
+    student_logstd: Tensor,
+    teacher_mean: Tensor,
+    teacher_logstd: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Return KL(pi_teacher || pi_student), MSE, and action agreement."""
+    teacher_var = torch.exp(2.0 * teacher_logstd)
+    student_var = torch.exp(2.0 * student_logstd)
+    kl_per_action = (
+        student_logstd
+        - teacher_logstd
+        + (teacher_var + (teacher_mean - student_mean).pow(2)) / (2.0 * student_var)
+        - 0.5
+    )
+    teacher_kl = kl_per_action.sum(dim=-1).mean()
+    teacher_action_mse = (student_mean - teacher_mean).pow(2).mean()
+    teacher_agreement = (torch.abs(student_mean - teacher_mean) <= 0.15).float().mean()
+    return teacher_kl, teacher_action_mse, teacher_agreement
+
+
 def v27_teacher_retention_loss(
     agent: Agent,
     dataset: V27RetentionDataset,
@@ -3512,17 +3665,44 @@ def v27_teacher_retention_loss(
 
     student_mean = agent.actor_mean(student_obs)
     student_logstd = agent.actor_logstd.expand_as(student_mean)
-    teacher_var = torch.exp(2.0 * teacher_logstd)
-    student_var = torch.exp(2.0 * student_logstd)
-    kl_per_action = (
-        student_logstd
-        - teacher_logstd
-        + (teacher_var + (teacher_mean - student_mean).pow(2)) / (2.0 * student_var)
-        - 0.5
+    teacher_kl, teacher_action_mse, teacher_agreement = (
+        v27_distribution_retention_metrics(
+            student_mean,
+            student_logstd,
+            teacher_mean,
+            teacher_logstd,
+        )
     )
-    teacher_kl = kl_per_action.sum(dim=-1).mean()
-    teacher_action_mse = (student_mean - teacher_mean).pow(2).mean()
-    teacher_agreement = (torch.abs(student_mean - teacher_mean) <= 0.15).float().mean()
+    return teacher_kl, teacher_action_mse, teacher_agreement, sample_size
+
+
+def v27_online_teacher_retention_loss(
+    agent: MLPResidualRecurrentActorAgent,
+    teacher: V27OnlineTeacher,
+    student_obs: Tensor,
+    hidden_state: Tensor,
+    done: Tensor,
+    batch_size: int,
+) -> tuple[Tensor, Tensor, Tensor, int]:
+    """Return online teacher-retention loss for one recurrent PPO minibatch."""
+    student_mean, _ = agent._actor_mean(student_obs, hidden_state, done)
+    flat_obs = student_obs.reshape(-1, student_obs.shape[-1])
+    with torch.no_grad():
+        teacher_mean = teacher.agent.actor_mean(flat_obs)
+        teacher_logstd = teacher.agent.actor_logstd.expand_as(teacher_mean)
+    student_logstd = agent.actor_logstd.expand_as(student_mean)
+
+    total = int(flat_obs.shape[0])
+    sample_size = min(int(batch_size), total)
+    if sample_size <= 0:
+        raise ValueError("online teacher retention minibatch has no samples.")
+    indices = torch.randint(total, (sample_size,), device=student_mean.device)
+    teacher_kl, teacher_action_mse, teacher_agreement = v27_distribution_retention_metrics(
+        student_mean[indices],
+        student_logstd[indices],
+        teacher_mean[indices],
+        teacher_logstd[indices],
+    )
     return teacher_kl, teacher_action_mse, teacher_agreement, sample_size
 
 
@@ -3914,6 +4094,35 @@ def train_ppo(
         envs.single_action_space.shape,
         device,
     )
+    online_teacher = load_v27_online_teacher(
+        args,
+        envs.single_observation_space.shape,
+        envs.single_action_space.shape,
+        device,
+    )
+    retention_active = retention_dataset is not None or online_teacher is not None
+    teacher_retention_metadata = None
+    if args.v27_teacher_kl_beta > 0.0:
+        teacher_retention_metadata = {
+            "enabled": True,
+            "beta": float(args.v27_teacher_kl_beta),
+            "lane_name": args.v27_lane_name,
+            "source": "online_teacher" if online_teacher is not None else "dataset",
+            "teacher_model_name": args.v27_teacher_model_name,
+            "teacher_model_resolved": (
+                str(online_teacher.model_path) if online_teacher is not None else None
+            ),
+            "teacher_observation_layout": (
+                online_teacher.observation_layout
+                if online_teacher is not None
+                else args.v27_teacher_observation_layout
+            ),
+            "teacher_policy_arch": (
+                online_teacher.policy_arch if online_teacher is not None else POLICY_ARCH_MLP
+            ),
+            "retention_dataset_path": args.v27_retention_dataset_path,
+            "retention_batch_size": int(args.v27_retention_batch_size),
+        }
     optimizer = optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -4130,6 +4339,33 @@ def train_ppo(
 
                     entropy_loss = entropy.mean()
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                    if online_teacher is not None:
+                        if not isinstance(agent, MLPResidualRecurrentActorAgent):
+                            raise TypeError(
+                                "online teacher retention requires residual-GRU agent."
+                            )
+                        (
+                            teacher_kl_loss,
+                            teacher_action_mse,
+                            teacher_agreement,
+                            retention_batch_size,
+                        ) = v27_online_teacher_retention_loss(
+                            agent,
+                            online_teacher,
+                            obs[:, mb_env_inds],
+                            initial_recurrent_state[:, mb_env_inds],
+                            dones[:, mb_env_inds],
+                            args.v27_retention_batch_size,
+                        )
+                        loss = loss + args.v27_teacher_kl_beta * teacher_kl_loss
+                        teacher_kl_values.append(float(teacher_kl_loss.detach().cpu().item()))
+                        teacher_action_mse_values.append(
+                            float(teacher_action_mse.detach().cpu().item())
+                        )
+                        teacher_agreement_values.append(
+                            float(teacher_agreement.detach().cpu().item())
+                        )
+                        retention_batch_sizes.append(float(retention_batch_size))
 
                     optimizer.zero_grad()
                     loss.backward()
@@ -4249,7 +4485,7 @@ def train_ppo(
         retention_batch_size_log = (
             float(np.mean(retention_batch_sizes)) if retention_batch_sizes else 0.0
         )
-        if retention_dataset is not None:
+        if retention_active:
             print(
                 "v27 retention "
                 f"teacher_kl={teacher_kl_log:.6f} "
@@ -4440,6 +4676,11 @@ def train_ppo(
                     critic_observation_mode=args.critic_observation_mode,
                     actor_observation_dim=actor_obs_dim,
                     critic_observation_dim=critic_obs_dim,
+                    extra_metadata=(
+                        {"teacher_retention": teacher_retention_metadata}
+                        if teacher_retention_metadata is not None
+                        else None
+                    ),
                 ),
                 checkpoint_path,
             )
@@ -4464,6 +4705,11 @@ def train_ppo(
                 critic_observation_mode=args.critic_observation_mode,
                 actor_observation_dim=actor_obs_dim,
                 critic_observation_dim=critic_obs_dim,
+                extra_metadata=(
+                    {"teacher_retention": teacher_retention_metadata}
+                    if teacher_retention_metadata is not None
+                    else None
+                ),
             ),
             model_path,
         )
