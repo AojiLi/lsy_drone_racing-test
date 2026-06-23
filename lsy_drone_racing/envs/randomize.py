@@ -219,7 +219,7 @@ def build_random_track_fn(
 
     def _eval_track_key(seed: Array) -> Array:
         """Rebuild the random-track key used by single-env hard eval for a reset seed."""
-        _, subkey = jax.random.split(jax.random.key(seed), 2)
+        _, subkey = jax.random.split(jax.random.PRNGKey(seed), 2)
         return jax.random.split(subkey, 1)[0]
 
     def generate(key: Array) -> tuple[Array, Array, Array]:
