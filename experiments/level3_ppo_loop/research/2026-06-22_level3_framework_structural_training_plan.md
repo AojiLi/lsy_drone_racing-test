@@ -51,9 +51,12 @@ loop102 tested the next named training-distribution lane, low-probability
 offline train-pool PLR, and it regressed validation-unseen hard eval. The next
 loop returned to loop101 final and tested competence-gated gate-phase reset
 curriculum. loop103 did not beat the loop101 frontier: best was `19/100`,
-`1.68` mean gates, and `81%` crash, and the competence gate never opened. The
-next lane should keep loop101 as the start point and test online
-competence-gated level replay before any direct GRU or reward-number move.
+`1.68` mean gates, and `81%` crash, and the competence gate never opened.
+loop106 then tested online competence-gated level replay from loop101 and also
+failed to improve the frontier: its best checkpoint tied `20/100` success but
+fell to `1.63` mean gates and `7.744s`, while final collapsed to `14/100`,
+`1.41` mean gates, and `86%` crash. The next lane should reject replay tuning
+and move to a GRU transfer / memory-structure preflight from loop101.
 
 ## Framework Priorities
 
@@ -69,26 +72,22 @@ competence-gated level replay before any direct GRU or reward-number move.
    trustworthy.
 9. Speed optimization only after success approaches roughly 50%.
 
-## Immediate Executable Lane
+## Immediate Lane
 
-The immediate executable step is:
+The immediate step is:
 
 ```text
-v36_online_competence_gated_level_replay_from_loop101
+v37_gru_transfer_memory_structure_from_loop101
 ```
 
-This is a training-only online level-replay screen. It keeps v5 Actor
-observation, loop052 reward/PPO numbers, `256 envs x 128` rollout geometry,
-corrected v30 semantics, default random track generation, and hard eval on
-unchanged `config/level3.toml`. It changes only training-time sampling:
-
-- train-pool-only level replay starts at 3% and may rise toward 8%;
-- replay probability rises only when rollout pass/finish/crash competence gates pass;
-- gate-phase reset keeps the v35 competence-gated schedule;
-- the target race track geometry and final hard-eval protocol stay unchanged.
-
-The first screen should train 10M from the loop101/v33 final checkpoint and
-evaluate 1M/2M/3M/5M/8M/10M milestones on `validation_unseen`.
+This is not a long training command yet. It keeps v5 Actor observation,
+loop052 reward/PPO numbers, corrected v30 semantics, default random track
+generation, and hard eval on unchanged `config/level3.toml`, but changes the
+Actor structure to a GRU-256 memory lane. Because the old from-scratch GRU lane
+failed, the next step must first implement and verify MLP-to-GRU transfer from
+loop101 final, hidden-state reset checks, sequence rollout/BPTT behavior,
+checkpoint metadata, inference recurrent-state reset, and a bounded
+zero-update or deterministic parity packet where meaningful.
 
 ## Not Yet Implemented
 
@@ -97,7 +96,7 @@ These framework pieces require code support before training:
 - separate actor/critic RunningMeanStd if normalization is combined with
   asymmetric Critic later;
 - tanh-squashed Gaussian PPO log-prob parity;
-- GRU rerun with full hidden-state reset checks.
+- MLP-to-GRU transfer from loop101 with full hidden-state reset checks.
 
 Do not mark a lane as one of these until the trainer/evaluator support exists
 and focused tests or dry-runs prove it.

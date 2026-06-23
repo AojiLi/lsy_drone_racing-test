@@ -63,17 +63,18 @@
   was only 17% success / 1.59 mean gates / 83% crash, and final fell to 10%
   success / 1.43 mean gates / 90% crash. Do not continue v34 as-is and do not
   start future training from loop102 checkpoints.
+- loop106 tested v36 online competence-gated level replay for 10M and did not
+  beat the loop101 frontier. Its best checkpoint was 1M with 20% success /
+  1.63 mean gates / 80% crash / 7.744s, and final collapsed to 14% success /
+  1.41 mean gates / 86% crash. Do not continue v36, tune replay probability,
+  or start future training from loop106 checkpoints.
 - The immediate next lane is
-  `v36_online_competence_gated_level_replay_from_loop101`: a 10M screen from
-  loop101 final after loop103/v35 failed to beat the frontier. It keeps v5
-  Actor observation, MLP policy, reward numbers, PPO numbers, rollout geometry,
-  disabled normalization, default random Level3 track generation, and unchanged
-  `config/level3.toml` hard eval fixed. It changes only training-time level
-  sampling by adding train-pool-only replay with online competence-gated
-  probability: start 0.03, max 0.08, and increase only when rollout
-  pass/finish/crash metrics are healthy. If v36 does not beat 20% success or
-  expand mean gates above 1.69 with crash no worse than 80%, reject replay
-  tuning and write a GRU transfer/memory-structure packet.
+  `v37_gru_transfer_memory_structure_from_loop101`. This is not a direct long
+  training command yet. First implement and verify MLP-to-GRU transfer from
+  loop101 final, hidden-state reset on episode boundaries, sequence
+  rollout/BPTT behavior, checkpoint metadata, inference hidden-state reset, and
+  a bounded zero-update or deterministic parity packet where meaningful. Do not
+  repeat the old from-scratch GRU lane, which had already failed.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

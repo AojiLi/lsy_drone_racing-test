@@ -40,10 +40,14 @@ Parity passed, but loop099 and loop100 did not beat loop097 on unchanged
 
 loop101 tested gate-phase reset curriculum. It tied the old success frontier at
 `20/100`, reached `1.69` mean gates at final and `1.81` mean gates at 8M, but
-did not reduce crash below `80/100`. Therefore the loop should stop treating
+did not reduce crash below `80/100`. loop106 then tested online
+competence-gated level replay from loop101 and did not improve the frontier:
+the best checkpoint only tied `20/100` success with lower `1.63` mean gates and
+slower `7.744s` successful time, while final collapsed to `14/100`, `1.41`
+mean gates, and `86%` crash. Therefore the loop should stop treating
 reward-number tuning, longer-rollout-only continuation, privileged-Critic
-maturation, or v33 reset curriculum alone as the main bottleneck. The next
-bottleneck is likely level/track distribution coverage.
+maturation, v33 reset curriculum, or MLP replay as the main bottleneck. The
+next bottleneck is likely memory / partial observability.
 
 ## Structural Priority
 
@@ -66,11 +70,11 @@ Recommended order:
 The current lane is:
 
 ```text
-v36_online_competence_gated_level_replay_from_loop101
+v37_gru_transfer_memory_structure_from_loop101
 ```
 
-This lane is a bounded 10M training screen from the loop101/v33 final checkpoint
-after loop103/v35 failed to beat the frontier.
+This lane is a transfer and memory-structure preflight from the loop101/v33
+final checkpoint after loop106/v36 failed to beat the frontier.
 
 It keeps:
 
@@ -81,18 +85,14 @@ It keeps:
 - `256 envs x 128 steps`;
 - no observation/return normalization.
 
-It keeps the default random Level3 track generator dominant and changes only
-training-time sampling:
-
-- train-pool-only level replay starts at `0.03`, may rise to `0.08`, and
-  increases only when rollout pass/finish/crash competence metrics are healthy;
-- gate-phase reset keeps the v35 competence-gated schedule: start `0.12`, max
-  `0.45`;
-- no dev_seen, validation_unseen, or final_locked seed replay is used.
+It changes the Actor structure to a GRU-256 memory lane, but training must not
+launch until MLP-to-GRU transfer, hidden-state reset, sequence rollout/BPTT,
+checkpoint metadata, inference recurrent-state reset, and parity/preflight
+tests pass. Do not repeat the old from-scratch GRU lane.
 
 ## Deferred Work
 
-GRU and reward-number changes remain valid next stages, but they should be
-separate named lanes with their own packets and hard-eval analysis. They should
-not be smuggled into v36. If v36 fails, prefer a GRU transfer or
-memory-structure packet over replay-probability tuning.
+Reward-number changes remain valid later stages, but they should not be
+smuggled into v37. If MLP-to-GRU transfer cannot preserve useful loop101
+behavior, hold for a GRU distillation or memory-pretraining packet instead of
+launching training.

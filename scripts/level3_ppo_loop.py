@@ -473,6 +473,10 @@ V36_ONLINE_LEVEL_REPLAY_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop103_reject_v35_launch_v36_online_level_replay.md"
 )
+V37_GRU_TRANSFER_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop106_reject_v36_prepare_v37_gru_transfer.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -5952,6 +5956,118 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "pass/finish/crash metrics are healthy."
         ),
     },
+    "v37_gru_transfer_memory_structure_from_loop101": {
+        "name": "v37_gru_transfer_memory_structure_from_loop101",
+        "proposal_name": "structural_v37_gru_transfer_memory_loop101_preflight",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 5,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "mlp_to_gru_transfer_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V37_GRU_TRANSFER_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "recurrent_actor_gru256",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "policy_arch",
+                "recurrent_hidden_dim",
+                "recurrent_sequence_len",
+                "mlp_to_gru_transfer",
+            ],
+            "changed_reward_numbers": [],
+            "transfer": {
+                "source_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+                "source_policy_arch": "mlp_2x_tanh",
+                "target_policy_arch": "recurrent_actor_gru256",
+                "required_before_training": [
+                    "MLP-to-GRU initialization support",
+                    "hidden-state reset checks on episode boundaries",
+                    "sequence rollout and BPTT checks",
+                    "checkpoint metadata checks",
+                    "ppo_level3_inference recurrent hidden-state reset checks",
+                    "bounded zero-update or deterministic parity packet",
+                ],
+                "reason": (
+                    "old from-scratch GRU evidence was poor, so the next GRU "
+                    "lane must preserve useful loop101 behavior instead of "
+                    "blindly restarting memory training"
+                ),
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "sequence_len": 128,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 7a GRU transfer memory preflight",
+            "baseline": "loop101/v33 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can a recurrent Actor with GRU-256 memory preserve useful "
+                "loop101 behavior through explicit MLP-to-GRU transfer, then "
+                "improve gate acquisition on the partially observable Level3 "
+                "task?"
+            ),
+            "preflight_gate": {
+                "required": (
+                    "Do not launch training until transfer support, reset "
+                    "semantics, sequence updates, metadata, and inference "
+                    "hidden-state handling have focused tests and a dry-run "
+                    "or parity packet."
+                ),
+                "rollback": (
+                    "If transfer cannot preserve useful deterministic behavior "
+                    "from loop101, hold for a GRU distillation or memory "
+                    "pretraining packet instead of launching training."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 54,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "recurrent_actor_gru256",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 128,
+        },
+        "rationale": (
+            "loop106/v36 did not improve the loop101 frontier: best hard eval "
+            "was only a 20% success tie with lower mean gates and slower "
+            "successful time, and final collapsed to 14% success with 86% "
+            "crash. The replay and curriculum gates did not open, and all "
+            "three reviewers recommended rejecting replay tuning. v37 therefore "
+            "moves to the next roadmap mechanism, recurrent memory, but it is "
+            "held before training until explicit MLP-to-GRU transfer and reset "
+            "parity support exists."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -7156,6 +7272,15 @@ def build_training_structure_hold(
             "bonus, no terminal-to-reset dummy transition, per-slot wrapper "
             "resets, true observation-delay reset, termination reason logging, "
             "and squashed-Gaussian logprob support when requested"
+        )
+    elif missing_support == "mlp_to_gru_transfer_support":
+        support_steps = (
+            "implement explicit MLP-to-GRU checkpoint transfer from loop101, "
+            "hidden-state reset checks on episode boundaries, sequence rollout "
+            "and BPTT checks, checkpoint metadata validation, "
+            "ppo_level3_inference recurrent hidden-state reset checks, and a "
+            "bounded zero-update or deterministic parity packet before "
+            "launching this lane"
         )
     else:
         support_steps = (
