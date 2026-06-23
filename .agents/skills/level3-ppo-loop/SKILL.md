@@ -121,9 +121,12 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   It starts a hidden512 capacity-family baseline: loop110/v39 3M v5 MLP is
   block-copy warm-started from hidden_dim `256` to `512`, v5 observation and
   v39 reward numbers stay fixed, retention is disabled, and hard eval remains
-  unchanged `config/level3.toml`. If v49 does not clearly degrade, later
-  reward, observation, GRU, curriculum, or training-distribution lanes should
-  be written as hidden512-family successor lanes.
+  unchanged `config/level3.toml`. v49 is a bootstrap screen, not a one-shot
+  capacity verdict. Unless it catastrophically loses basic gate progress or
+  exposes a wiring bug, the next decision should stay inside the hidden512
+  family. Do not abandon hidden512 until at least three evaluated hidden512
+  family trials exist: the baseline screen, one reward/PPO-number follow-up,
+  and one observation, memory, or curriculum follow-up.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

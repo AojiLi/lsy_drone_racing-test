@@ -29,6 +29,10 @@ capacity family. If the first screen does not degrade the frontier, later
 reward, observation, GRU, curriculum, or training-distribution experiments
 should be written as hidden512-family successor lanes.
 
+Also, v49 alone must not be used as a simple pass/fail judgment on the larger
+network. The hidden512 family should get multiple targeted follow-up loops
+before being abandoned.
+
 ## Rationale
 
 v48 regressed the hard evaluator:
@@ -65,6 +69,8 @@ loop changes. v49 therefore isolates network capacity:
 - Do not run `--max-iterations > 1`.
 - After v49 completes, run the analyzer and exactly three subagent reviews
   before any next training chunk.
+- Do not reject the hidden512 family from v49 alone unless it catastrophically
+  loses basic gate progress or exposes a wiring/training bug.
 
 ## Promotion / Rejection
 
@@ -77,9 +83,20 @@ Promote or mature v49 if:
 Use v49 as the temporary hidden512 baseline if it preserves the frontier
 without clear degradation, even if it does not yet hit the final target.
 
-Reject hidden512 as the new baseline if success falls below `18%`, mean gates
-fall below `1.55`, crash rises above `83%`, or W&B gate/finish conversion
-weakens further.
+If v49 underperforms but still has meaningful gate progress, the next decision
+should stay inside the hidden512 family and choose a targeted follow-up:
+
+- hidden512 reward/PPO-number adjustment;
+- hidden512 observation variant;
+- hidden512 GRU or residual-GRU transfer;
+- hidden512 curriculum or training-distribution reshaping.
+
+Do not abandon the hidden512 base until at least three evaluated hidden512
+family trials exist: the baseline screen, one reward/PPO-number follow-up, and
+one observation/memory/curriculum follow-up.
+
+Hold for diagnosis, rather than reject the family, only if v49 has near-zero
+success with mean gates below `0.50`, or if training/evaluation wiring fails.
 
 ## Next Command
 

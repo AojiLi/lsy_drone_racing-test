@@ -7656,16 +7656,29 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             },
             "followup_loop_policy": {
                 "baseline_rule": (
-                    "If v49 does not clearly regress, treat the best v49 "
-                    "checkpoint as the hidden512 baseline for later reward, "
-                    "observation, curriculum, or GRU lanes."
+                    "Treat v49 as the bootstrap checkpoint for a hidden512 "
+                    "loop family, not as a one-shot capacity verdict. Its "
+                    "hard-eval result should choose the next hidden512 "
+                    "adjustment axis."
                 ),
+                "minimum_evaluated_family_trials_before_capacity_rejection": 3,
                 "allowed_hidden512_successors": [
                     "hidden512_reward_or_ppo_number_followup",
                     "hidden512_observation_variant",
                     "hidden512_residual_gru_or_gru_transfer",
                     "hidden512_curriculum_or_training_distribution",
                 ],
+                "required_family_axes_before_rejecting_capacity": [
+                    "hidden512_baseline",
+                    "hidden512_reward_or_ppo_number_followup",
+                    "hidden512_observation_or_memory_or_curriculum_followup",
+                ],
+                "single_run_rule": (
+                    "Do not reject hidden512 as a base family from v49 alone "
+                    "unless it catastrophically loses basic gate progress. "
+                    "Even a regressed v49 should normally lead to a targeted "
+                    "hidden512 follow-up or diagnostic lane."
+                ),
             },
         },
         "hypothesis": {
@@ -7687,15 +7700,18 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
                     "losing the old frontier"
                 ),
                 "baseline_acceptance": (
-                    "If success remains near 0.20-0.21 but mean_gates/crash "
-                    "do not degrade, keep the best checkpoint as a hidden512 "
-                    "baseline for one follow-up lane rather than treating it "
-                    "as a final success."
+                    "Use the best v49 checkpoint as the first hidden512 "
+                    "baseline even if it only roughly preserves the frontier; "
+                    "the next decision should stay in the hidden512 family "
+                    "and tune reward/PPO numbers, observation, memory, or "
+                    "curriculum unless the run catastrophically loses gate "
+                    "progress."
                 ),
-                "rollback": (
-                    "Reject as the new baseline if success falls below 0.18, "
-                    "mean_gates falls below 1.55, crash rises above 0.83, or "
-                    "W&B shows lower passed-gate/finish conversion."
+                "catastrophic_hold": (
+                    "Hold for diagnosis if success is near zero and mean_gates "
+                    "fall below 0.50, or if training/evaluation wiring fails. "
+                    "Do not use ordinary underperformance from one v49 screen "
+                    "to reject the hidden512 family."
                 ),
             },
         },
@@ -7728,9 +7744,9 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "screen regressed. v49 starts a separate hidden512 loop family: "
             "it block-copy warm-starts the loop110/v39 3M v5 MLP into a 2x512 "
             "Actor/Critic, keeps v39 reward numbers and unchanged "
-            "config/level3.toml, then uses the best v49 checkpoint as the "
-            "capacity baseline for later structural follow-ups if it does not "
-            "degrade."
+            "config/level3.toml, then uses the post-run analysis to choose "
+            "the next hidden512-family adjustment rather than judging the "
+            "larger network from one screen."
         ),
     },
 }

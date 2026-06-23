@@ -125,6 +125,20 @@ def test_v49_hidden512_baseline_lane_is_runnable() -> None:
     assert hypothesis["architecture"]["changed_reward_numbers"] == []
     assert hypothesis["architecture"]["warmstart"]["source_hidden_dim"] == 256
     assert hypothesis["architecture"]["warmstart"]["target_hidden_dim"] == 512
+    assert (
+        hypothesis["architecture"]["followup_loop_policy"][
+            "minimum_evaluated_family_trials_before_capacity_rejection"
+        ]
+        == 3
+    )
+    assert (
+        "hidden512_reward_or_ppo_number_followup"
+        in hypothesis["architecture"]["followup_loop_policy"][
+            "allowed_hidden512_successors"
+        ]
+    )
+    assert "catastrophic_hold" in hypothesis["hypothesis"]["promotion_gate"]
+    assert "rollback" not in hypothesis["hypothesis"]["promotion_gate"]
     assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP110_V39_3M_CHECKPOINT
     assert hypothesis["allow_hidden_dim_warmstart"] is True
     assert hypothesis["approved_hypothesis_packet"] == (

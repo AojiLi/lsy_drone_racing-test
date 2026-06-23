@@ -95,8 +95,26 @@ family:
 - hidden512 residual-GRU or GRU transfer;
 - hidden512 curriculum or training-distribution reshaping.
 
-If v49 regresses, reject the hidden512 baseline and return to non-capacity
-structural causes.
+If v49 regresses, do not immediately reject hidden512. v49 is the bootstrap
+screen for a new loop family, not a final capacity verdict. The post-run
+decision should normally choose a targeted hidden512 follow-up based on the
+failure mode:
+
+- poor gate acquisition: adjust hidden512 reward/PPO numbers;
+- gate geometry confusion: add a hidden512 observation variant;
+- drift/seed churn: add hidden512 retention or curriculum;
+- partial observability: add hidden512 GRU or residual-GRU support.
+
+Do not reject the hidden512 family until at least three evaluated hidden512
+family trials exist:
+
+- the hidden512 baseline screen;
+- one hidden512 reward/PPO-number follow-up;
+- one hidden512 observation, memory, or curriculum follow-up.
+
+The only exception is catastrophic loss of basic ability: near-zero success
+with mean gates below `0.50`, or a confirmed wiring/training failure. In that
+case, hold for diagnosis instead of silently returning to 2x256.
 
 ## Promotion / Rejection Rule
 
@@ -106,19 +124,21 @@ Promote or mature v49 if it shows one of:
 - success `>=21%` with mean gates above `1.66` and crash `<=79%`;
 - clear success-seed expansion without losing the old frontier.
 
-Accept as a temporary hidden512 baseline only if it stays near the frontier
-without degradation, even if it does not yet meet the final target.
+Accept as a temporary hidden512 baseline if it stays near the frontier without
+degradation, even if it does not yet meet the final target.
 
-Reject as baseline if:
+Hold for diagnosis, not family rejection, if:
 
-- success `<18%`;
-- mean gates `<1.55`;
-- crash `>83%`;
-- W&B passed-gate or finished-rate conversion weakens further.
+- success is near zero;
+- mean gates `<0.50`;
+- training/evaluation wiring fails;
+- checkpoint warm-start metadata is inconsistent.
 
 ## Next-Loop Requirement
 
 After v49 completes, run `scripts/analyze_level3_ppo_trial.py`, spawn exactly
 three review subagents for evaluator metrics, W&B/PPO diagnostics, and
 structure/research synthesis, then write a main-agent decision packet before
-any further hidden512 follow-up training.
+any further hidden512 follow-up training. That packet should keep the next move
+inside the hidden512 family unless v49 catastrophically loses basic gate
+progress or exposes a wiring bug.
