@@ -73,14 +73,13 @@
   79% crash / 7.578s; later checkpoints drifted down to 15%, 12%, 12%, and
   17% success. Do not continue v37 from loop107 final.
 - The immediate next lane is
-  `v39_feedforward_gate_acquisition_reward_rebalance_loop101_final`, approved
-  by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop109_reject_v38_launch_v39_gate_acquisition.md`.
-  loop109/v38 proved residual-GRU online teacher retention was active but did
-  not improve hard eval: best was 18% success / 1.64 mean gates / 82% crash.
-  Do not continue v38 or start from loop109 checkpoints. v39 returns to
-  loop101 final MLP and tests only the analyzer's gate-acquisition reward
-  numbers on unchanged `config/level3.toml`.
+  `v39b_feedforward_gate_acquisition_seed_expansion_from_loop110_3m`,
+  approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop110_continue_v39b_from_3m.md`.
+  loop110/v39 tied the current success/crash frontier at its 3M checkpoint
+  with 21% success / 1.64 mean gates / 79% crash / 6.756s and 8 newly solved
+  validation seeds, but later checkpoints regressed. Continue only from loop110
+  3M, keep v39 reward numbers unchanged, and do not start from loop110 final.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

@@ -493,10 +493,19 @@ V39_GATE_ACQUISITION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop109_reject_v38_launch_v39_gate_acquisition.md"
 )
+V39B_LOOP110_3M_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop110_continue_v39b_from_3m.md"
+)
 LOOP107_V37_1M_CHECKPOINT = (
     "lsy_drone_racing/control/checkpoints/"
     "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight/"
     "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight_step_001000000.ckpt"
+)
+LOOP110_V39_3M_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_110_structural_v39_feedforward_gate_acquisition_reward_loop101_5m/"
+    "level3_loop_110_structural_v39_feedforward_gate_acquisition_reward_loop101_5m_step_003000000.ckpt"
 )
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
@@ -6395,6 +6404,103 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "the v5 observation, PPO architecture, rollout geometry, and "
             "unchanged config/level3.toml fixed, and tests only that "
             "gate-acquisition reward-number hypothesis."
+        ),
+    },
+    "v39b_feedforward_gate_acquisition_seed_expansion_from_loop110_3m": {
+        "name": "v39b_feedforward_gate_acquisition_seed_expansion_from_loop110_3m",
+        "proposal_name": "structural_v39b_feedforward_gate_acquisition_loop110_3m_3m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 3_000_000,
+        "checkpoint_interval": 500_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "0.5,1,1.5,2,2.5,3",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+        "allow_repeat_params": True,
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V39B_LOOP110_3M_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "train_timesteps",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [],
+            "continues_hypothesis": (
+                "v39_feedforward_gate_acquisition_reward_rebalance_loop101_final"
+            ),
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 9b feed-forward gate-acquisition maturation",
+            "baseline": "loop110/v39 3M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can the v39 3M checkpoint's success-rate tie, faster "
+                "successful time, and validation seed redistribution reproduce "
+                "or improve under a short same-hypothesis continuation?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.21, success >= 0.21 with mean_gates > 1.66, "
+                    "or success >= 0.20 with mean_gates > 1.69 and crash <= 0.80"
+                ),
+                "rollback": (
+                    "Reject v39 if the continuation drifts below 20% success, "
+                    "stays <=1.64 mean_gates with about 80% contact crashes, "
+                    "or repeats loop110's late-checkpoint collapse."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 58,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "loop110/v39 tied the current 21% success / 79% crash frontier at "
+            "its 3M checkpoint, improved successful time to 6.756s, and solved "
+            "8 validation seeds not solved by loop107 1M, but it did not improve "
+            "mean gates and later checkpoints regressed. All three reviewers "
+            "recommended a bounded same-hypothesis continuation from loop110 "
+            "3M before changing reward numbers again. v39b keeps the exact v39 "
+            "reward numbers, MLP policy, v5 observation, rollout geometry, and "
+            "unchanged config/level3.toml fixed."
         ),
     },
 }

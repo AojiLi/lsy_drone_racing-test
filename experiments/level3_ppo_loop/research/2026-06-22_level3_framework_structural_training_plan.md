@@ -81,16 +81,19 @@ short continuation from loop107 1M and failed to reproduce it: best was only
 The immediate step is:
 
 ```text
-v39_feedforward_gate_acquisition_reward_rebalance_loop101_final
+v39b_feedforward_gate_acquisition_seed_expansion_from_loop110_3m
 ```
 
-loop109/v38 proved residual-GRU online teacher retention was active, but hard
-eval still regressed below the loop101/loop107 frontier. The next runnable step
-is a bounded feed-forward gate-acquisition reward screen from loop101 final,
+loop110/v39 tied the current success/crash frontier at its 3M checkpoint with
+21% success, 1.64 mean gates, 79% crash, and 6.756s mean successful time. It
+also solved 8 validation seeds not solved by loop107 1M, but later checkpoints
+regressed and mean gates did not beat the loop101/loop107 frontier. The next
+runnable step is a bounded same-hypothesis continuation from loop110 3M,
 approved by
-`experiments/level3_ppo_loop/decisions/2026-06-23_loop109_reject_v38_launch_v39_gate_acquisition.md`.
+`experiments/level3_ppo_loop/decisions/2026-06-23_loop110_continue_v39b_from_3m.md`.
 It must keep unchanged `config/level3.toml`, v5 Actor observation, MLP policy,
-and Actor-only deployment.
+v39 reward numbers, and Actor-only deployment. Do not start this lane from
+loop110 final.
 
 ## Not Yet Implemented
 

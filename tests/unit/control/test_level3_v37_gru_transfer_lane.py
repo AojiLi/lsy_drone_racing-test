@@ -192,6 +192,55 @@ def test_loop_registers_v39_feedforward_gate_acquisition_lane() -> None:
 
 
 @pytest.mark.unit
+def test_loop_registers_v39b_from_loop110_3m_not_final() -> None:
+    """v39b must continue only the promising 3M checkpoint with unchanged rewards."""
+    hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v39b_feedforward_gate_acquisition_seed_expansion_from_loop110_3m"
+    ]
+
+    assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["observation_layout"] == LOCAL_OBSTACLE_OBSERVATION_LAYOUT
+    assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP110_V39_3M_CHECKPOINT
+    assert "final" not in hypothesis["initial_checkpoint"]
+    assert "step_003000000" in hypothesis["initial_checkpoint"]
+    assert hypothesis["approved_hypothesis_packet"] == (
+        level3_ppo_loop.V39B_LOOP110_3M_DECISION_PACKET
+    )
+    assert "requires_training_support" not in hypothesis
+    assert level3_ppo_loop.structural_hypothesis_runnable(hypothesis)
+    assert hypothesis["train_timesteps"] == 3_000_000
+    assert hypothesis["checkpoint_interval"] == 500_000
+    assert hypothesis["eval_milestones_m"] == "0.5,1,1.5,2,2.5,3"
+
+    architecture = hypothesis["architecture"]
+    assert architecture["track_geometry_change"] == "forbidden"
+    assert architecture["policy_arch"] == "mlp_2x_tanh"
+    assert architecture["changed_reward_numbers"] == []
+    assert architecture["continues_hypothesis"] == (
+        "v39_feedforward_gate_acquisition_reward_rebalance_loop101_final"
+    )
+
+    v39_params = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v39_feedforward_gate_acquisition_reward_rebalance_loop101_final"
+    ]["params"]
+    params = hypothesis["params"]
+    for key in (
+        "gate_stage_coef",
+        "gate_axis_coef",
+        "gate_front_bonus",
+        "gate_bonus",
+        "gate_back_bonus",
+        "finish_bonus",
+        "time_penalty",
+    ):
+        assert params[key] == v39_params[key]
+    assert params["policy_arch"] == "mlp_2x_tanh"
+    assert params["critic_observation_mode"] == CRITIC_OBSERVATION_SAME_AS_ACTOR
+    assert params.get("v27_teacher_kl_beta", 0.0) == 0.0
+
+
+@pytest.mark.unit
 def test_residual_gru_args_allow_online_teacher_without_dataset() -> None:
     """v38 retention uses an online teacher checkpoint instead of an npz dataset."""
     args = Args.create(
