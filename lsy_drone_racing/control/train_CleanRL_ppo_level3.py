@@ -877,6 +877,15 @@ class OnlineLevelReplayCurriculum(VectorWrapper):
         self._rng_key = jax.random.PRNGKey(rng_seed)
         self._apply_level_replay_fn: Any | None = None
 
+    @property
+    def data(self) -> Any:
+        """Expose wrapped environment data for downstream curriculum wrappers."""
+        return self.env.data
+
+    @data.setter
+    def data(self, value: Any) -> None:
+        self.env.data = value
+
     def set_probability(self, probability: float) -> None:
         """Update training-only level replay probability for future resets."""
         probability = float(probability)

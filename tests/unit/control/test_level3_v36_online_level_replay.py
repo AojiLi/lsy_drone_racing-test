@@ -14,6 +14,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
 from lsy_drone_racing.control.train_CleanRL_ppo_level3 import (
     LEVEL_REPLAY_PROFILES,
     Args,
+    GatePhaseResetCurriculum,
     OnlineLevelReplayCurriculum,
     make_envs,
     train_ppo,
@@ -90,6 +91,32 @@ def test_online_level_replay_wrapper_uses_initial_probability() -> None:
 
         replay.set_probability(0.05)
         assert replay.level_replay_prob == pytest.approx(0.05)
+    finally:
+        envs.close()
+
+
+@pytest.mark.unit
+def test_online_level_replay_stacks_with_gate_phase_reset() -> None:
+    """The replay wrapper must expose env data to later reset curricula."""
+    envs = make_envs(
+        config="level3.toml",
+        num_envs=4,
+        jax_device="cpu",
+        torch_device=torch.device("cpu"),
+        coefs={
+            "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "n_obs": 2,
+            "online_level_replay_profile": "v36_train_pool_bounds_gate0_gate2",
+            "online_level_replay_initial_prob": 0.03,
+            "gate_phase_reset_prob": 0.45,
+            "gate_phase_reset_initial_prob": 0.12,
+        },
+    )
+    try:
+        assert wrapped_instance(envs, OnlineLevelReplayCurriculum) is not None
+        assert wrapped_instance(envs, GatePhaseResetCurriculum) is not None
+        obs, _ = envs.reset(seed=53)
+        assert obs.shape == (4, 68)
     finally:
         envs.close()
 
