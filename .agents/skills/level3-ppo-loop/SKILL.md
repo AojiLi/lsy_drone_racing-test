@@ -84,18 +84,19 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   acquire normal-start gate progress: best was the 4M checkpoint with `0%`
   success, `0.01` mean gates, `54%` crash, and `46%` timeout. Do not continue
   v42 as-is and do not start future training from loop113 checkpoints.
+- loop114 tested `v43_success_trajectory_imitation_warmstart_gru_v10` and
+  failed to preserve the BC first-gate signal: best was the 5M checkpoint with
+  `0%` success, `0.01` mean gates, `51%` crash, and `49%` timeout. The highest
+  mean-gates milestone was only `0.06`, below the BC-only diagnostic's `0.15`.
+  Do not continue v43 as-is and do not start future training from loop114
+  checkpoints.
 - The immediate next lane is
-  `v43_success_trajectory_imitation_warmstart_gru_v10`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_v43_bc_preflight_launch_v43_ppo_finetune.md`
-  and sourced by
-  `experiments/level3_ppo_loop/research/2026-06-23_level3_v43_success_trajectory_imitation_warmstart_plan.md`.
-  Its preflight packet is
-  `experiments/level3_ppo_loop/parity/2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md`.
-  The v43 BC checkpoint is not a deployable controller (`0%` success, `0.15`
-  mean gates on validation_unseen), but it shows first-gate conversion above
-  v42's `0.01` mean gates. The next step is one bounded W&B-tracked PPO
-  fine-tune screen from
-  `lsy_drone_racing/control/checkpoints/level3_v43_success_trajectory_bc_warmstart/level3_v43_success_trajectory_bc_warmstart.ckpt`.
+  `v44_sequence_success_retention_failure_correction_gru_v10`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop114_reject_v43_prepare_v44_sequence_retention.md`.
+  This is a preflight/support lane: implement or verify active recurrent
+  sequence retention during PPO, prove nonzero retention sampling and finite
+  KL/MSE/agreement before training, and keep hard eval on unchanged
+  `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

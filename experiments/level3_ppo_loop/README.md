@@ -187,24 +187,20 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v43_success_trajectory_imitation_warmstart_gru_v10
+v44_sequence_success_retention_failure_correction_gru_v10
 ```
 
 v42 showed that from-scratch GRU/v10 plus training-only gate-phase reset still
-does not acquire normal-start gate progress. The v43 BC preflight is complete:
-it built success-trajectory imitation data with v10 student observations,
-verified sequence-aware GRU/v10 behavior-cloning warmstart support, saved a
-correctly tagged GRU/v10 checkpoint, and hard-evaluated that checkpoint on
-unchanged `config/level3.toml`.
+does not acquire normal-start gate progress. v43 then proved the GRU/v10 Actor
+can imitate successful train-pool trajectories, but loop114 showed that
+unanchored PPO fine-tuning erases that small BC signal: best loop114 was `0%`
+success and `0.01` mean gates, while the highest milestone mean gates was only
+`0.06`, below the BC-only diagnostic's `0.15`.
 
-BC-only hard eval is not sufficient as a controller (`0%` success, `0.15` mean
-gates, `99%` crash), but it shows first-gate conversion above v42's `0.01`
-mean gates. The next immediate action is one bounded W&B-tracked PPO fine-tune
-screen from:
-
-```text
-lsy_drone_racing/control/checkpoints/level3_v43_success_trajectory_bc_warmstart/level3_v43_success_trajectory_bc_warmstart.ckpt
-```
+The next immediate action is v44 preflight/support work: implement or verify
+active recurrent sequence retention during PPO, prove nonzero retention
+sampling and finite KL/MSE/agreement, then run only one bounded W&B-tracked
+train/evaluate chunk if the preflight passes.
 
 ## Research-Guided Tuning
 
