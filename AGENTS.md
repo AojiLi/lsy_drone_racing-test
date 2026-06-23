@@ -72,18 +72,18 @@
   best checkpoint was the 1M checkpoint with 21% success / 1.66 mean gates /
   79% crash / 7.578s; later checkpoints drifted down to 15%, 12%, 12%, and
   17% success. Do not continue v37 from loop107 final.
-- The immediate next lane is
-  `v40_sequence_memory_gru_phase_corridor_from_scratch`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_launch_v40_sequence_memory_gru_phase_corridor.md`
-  and sourced by
-  `experiments/level3_ppo_loop/research/2026-06-23_level3_sequence_memory_gru_phase_corridor_plan.md`.
-  The current evidence says reward-only and residual-GRU routes are plateaued
-  around 19%-21% success, with seed-set reshuffling rather than stable
-  capability growth. v40 therefore tests true GRU-256 sequence memory with
-  explicit phase/corridor/aperture local observation, fixed v39 gate-acquisition
-  reward scale, from-scratch 5M screening, 1M milestone evaluation, and hard
-  eval on unchanged `config/level3.toml`. Do not continue v39b, v37, or v38 as
-  the main route without a new decision packet.
+- loop112 tested
+  `v40_sequence_memory_gru_phase_corridor_from_scratch` and regressed hard:
+  every 1M/2M/3M/4M/final milestone had `0%` success and `0.0` mean gates, with
+  all failures at gate 0. Do not continue v40 as-is, do not mature it to a long
+  run, and do not start future training from loop112 checkpoints.
+- The immediate next lane is the diagnostic packet
+  `v41_gru_v10_recurrent_wiring_audit_and_zero_update_parity`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop112_reject_v40_launch_v41_gru_v10_wiring_audit.md`.
+  This is not a long training lane. Before any further GRU/v10 training, audit
+  recurrent Actor zero-update parity, train/eval action-scale parity,
+  hidden-state reset/carry parity, v10 observation numeric sanity, and
+  recurrent PPO gradient/update sanity.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

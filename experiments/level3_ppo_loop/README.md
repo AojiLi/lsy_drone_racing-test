@@ -35,7 +35,12 @@ for an explicitly accepted blind run without analysis.
 
 For the user's unattended Codex-supervised loop, run one train/evaluate chunk at
 a time and let the Codex main agent do the analysis/subagent/research decision
-between invocations:
+between invocations. The latest completed chunk, loop112/v40, failed all hard
+eval milestones with `0%` success and `0.0` mean gates, so do not relaunch the
+old v40 training command. The immediate next step is the v41 diagnostic audit
+described below.
+
+Historical v40 command, retained only for provenance:
 
 ```bash
 pixi run -e gpu python scripts/level3_ppo_loop.py \
@@ -181,13 +186,16 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v40_sequence_memory_gru_phase_corridor_from_scratch
+v41_gru_v10_recurrent_wiring_audit_and_zero_update_parity
 ```
 
-It tests true GRU-256 sequence memory with the v10 phase/corridor/aperture
-local observation, fixed v39 gate-acquisition reward scale, 5M from-scratch
-screening, and 1M milestone evaluation. Final acceptance is still only hard
-eval on unchanged `config/level3.toml`.
+This is a diagnostic structural lane, not a long training lane. It follows the
+loop112/v40 failure where all 1M/2M/3M/4M/final milestones had `0%` success and
+`0.0` mean gates. Before any further GRU/v10 training, audit recurrent Actor
+zero-update parity, train/eval action-scale parity, hidden-state reset/carry
+parity, v10 observation numeric sanity, and recurrent PPO gradient/update
+sanity. Final acceptance is still only hard eval on unchanged
+`config/level3.toml`.
 
 ## Research-Guided Tuning
 
