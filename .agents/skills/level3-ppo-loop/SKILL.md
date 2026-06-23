@@ -110,14 +110,20 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   crash, and `7.064s` mean successful time. Teacher KL/MSE/agreement improved,
   so do not continue v47 as-is and do not start future training from loop117
   final.
+- loop118 tested
+  `v48_v5_contact_conversion_reward_structure_from_loop110_3m` and regressed:
+  best was the 1M checkpoint with `16%` success, `1.50` mean gates, `84%`
+  crash, and `6.516s` mean successful time. Do not continue v48, do not mature
+  it, and do not start future work from loop118 checkpoints.
 - The immediate next lane is
-  `v48_v5_contact_conversion_reward_structure_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop117_reject_v47_launch_v48_contact_conversion_reward_structure.md`.
-  It starts from loop110/v39 3M, keeps the v5 MLP Actor and unchanged
-  `config/level3.toml`, disables retention, and tests one bounded
-  contact/conversion reward-structure screen. After v48, run the analyzer,
-  exactly three subagent reviews, and a main-agent decision before any further
-  training.
+  `v49_v5_hidden512_mlp_warmstart_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop118_reject_v48_launch_v49_hidden512_baseline.md`.
+  It starts a hidden512 capacity-family baseline: loop110/v39 3M v5 MLP is
+  block-copy warm-started from hidden_dim `256` to `512`, v5 observation and
+  v39 reward numbers stay fixed, retention is disabled, and hard eval remains
+  unchanged `config/level3.toml`. If v49 does not clearly degrade, later
+  reward, observation, GRU, curriculum, or training-distribution lanes should
+  be written as hidden512-family successor lanes.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

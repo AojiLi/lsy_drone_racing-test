@@ -569,6 +569,14 @@ V48_CONTACT_CONVERSION_REWARD_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop117_reject_v47_launch_v48_contact_conversion_reward_structure.md"
 )
+V49_HIDDEN512_BASELINE_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-23_level3_v49_hidden512_baseline_loop_plan.md"
+)
+V49_HIDDEN512_BASELINE_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop118_reject_v48_launch_v49_hidden512_baseline.md"
+)
 V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
     "2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md"
@@ -7585,6 +7593,144 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "from loop110/v39 3M, drops retention, keeps the deployed v5 MLP "
             "Actor and unchanged Level3 track, and runs one bounded screen of "
             "a decoupled contact/conversion reward structure."
+        ),
+    },
+    "v49_v5_hidden512_mlp_warmstart_from_loop110_3m": {
+        "name": "v49_v5_hidden512_mlp_warmstart_from_loop110_3m",
+        "proposal_name": "structural_v49_v5_hidden512_mlp_warmstart_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+        "allow_hidden_dim_warmstart": True,
+        "allow_repeat_params": True,
+        "research_packet": V49_HIDDEN512_BASELINE_PACKET,
+        "approved_hypothesis_packet": V49_HIDDEN512_BASELINE_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "capacity_family": "hidden512",
+            "baseline_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+            "parent_failure": (
+                "loop118/v48 contact-conversion reward structure regressed to "
+                "16% success and 1.50 mean gates, so the next loop should "
+                "change capacity as the new baseline rather than keep tuning "
+                "contact reward numbers."
+            ),
+            "changed_training_numbers": [
+                "hidden_dim",
+                "allow_hidden_dim_warmstart",
+                "initial_checkpoint",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [],
+            "retention": {
+                "type": "none",
+                "reason": (
+                    "v45 and v47 showed active retention metrics without "
+                    "expanding the hard-eval frontier; v49 isolates capacity."
+                ),
+            },
+            "warmstart": {
+                "type": "block_copy_hidden_dim_expansion",
+                "source_hidden_dim": 256,
+                "target_hidden_dim": 512,
+                "source_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+                "support_flag": "allow_hidden_dim_warmstart",
+            },
+            "followup_loop_policy": {
+                "baseline_rule": (
+                    "If v49 does not clearly regress, treat the best v49 "
+                    "checkpoint as the hidden512 baseline for later reward, "
+                    "observation, curriculum, or GRU lanes."
+                ),
+                "allowed_hidden512_successors": [
+                    "hidden512_reward_or_ppo_number_followup",
+                    "hidden512_observation_variant",
+                    "hidden512_residual_gru_or_gru_transfer",
+                    "hidden512_curriculum_or_training_distribution",
+                ],
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 18 hidden512 baseline loop family",
+            "baseline": "loop110/v39 3M and loop107/v37 1M frontier",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can a wider 2x512 v5 MLP, warm-started from the loop110/v39 "
+                "3M feed-forward frontier and keeping v39 reward numbers, "
+                "become a stronger baseline for the next structural loop family?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.21, or success >= 0.21 with mean_gates above "
+                    "1.66 and crash <= 0.79, or success-seed expansion without "
+                    "losing the old frontier"
+                ),
+                "baseline_acceptance": (
+                    "If success remains near 0.20-0.21 but mean_gates/crash "
+                    "do not degrade, keep the best checkpoint as a hidden512 "
+                    "baseline for one follow-up lane rather than treating it "
+                    "as a final success."
+                ),
+                "rollback": (
+                    "Reject as the new baseline if success falls below 0.18, "
+                    "mean_gates falls below 1.55, crash rises above 0.83, or "
+                    "W&B shows lower passed-gate/finish conversion."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 67,
+            "hidden_dim": 512,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "v27_teacher_kl_beta": 0.0,
+            "reward_structure": "legacy_staged",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_plane_bonus": 0.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "The corrected Level3 loop has repeatedly plateaued around "
+            "19%-21% success with the v5 2x256 MLP, while v48's reward-structure "
+            "screen regressed. v49 starts a separate hidden512 loop family: "
+            "it block-copy warm-starts the loop110/v39 3M v5 MLP into a 2x512 "
+            "Actor/Critic, keeps v39 reward numbers and unchanged "
+            "config/level3.toml, then uses the best v49 checkpoint as the "
+            "capacity baseline for later structural follow-ups if it does not "
+            "degrade."
         ),
     },
 }

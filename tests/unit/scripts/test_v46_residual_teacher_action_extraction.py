@@ -109,6 +109,48 @@ def test_v48_contact_conversion_reward_structure_lane_is_runnable() -> None:
 
 
 @pytest.mark.unit
+def test_v49_hidden512_baseline_lane_is_runnable() -> None:
+    """v49 should start a hidden512 loop family without changing track or reward structure."""
+    hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v49_v5_hidden512_mlp_warmstart_from_loop110_3m"
+    ]
+
+    assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["observation_layout"] == (
+        level3_ppo_loop.LOCAL_OBSTACLE_OBSERVATION_LAYOUT
+    )
+    assert hypothesis["architecture"]["track_geometry_change"] == "forbidden"
+    assert hypothesis["architecture"]["capacity_family"] == "hidden512"
+    assert hypothesis["architecture"]["changed_reward_numbers"] == []
+    assert hypothesis["architecture"]["warmstart"]["source_hidden_dim"] == 256
+    assert hypothesis["architecture"]["warmstart"]["target_hidden_dim"] == 512
+    assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP110_V39_3M_CHECKPOINT
+    assert hypothesis["allow_hidden_dim_warmstart"] is True
+    assert hypothesis["approved_hypothesis_packet"] == (
+        level3_ppo_loop.V49_HIDDEN512_BASELINE_DECISION_PACKET
+    )
+    assert hypothesis["research_packet"] == level3_ppo_loop.V49_HIDDEN512_BASELINE_PACKET
+
+    params = hypothesis["params"]
+    assert params["policy_arch"] == "mlp_2x_tanh"
+    assert params["hidden_dim"] == 512
+    assert params["v27_teacher_kl_beta"] == 0.0
+    assert params["reward_structure"] == "legacy_staged"
+    assert params["gate_stage_coef"] == 13.0
+    assert params["gate_axis_coef"] == 24.0
+    assert params["gate_front_bonus"] == 5.0
+    assert params["gate_plane_bonus"] == 0.0
+    assert params["gate_bonus"] == 200.0
+    assert params["gate_back_bonus"] == 35.0
+    assert params["finish_bonus"] == 175.0
+    assert params["missed_gate_penalty"] == 0.0
+    assert params["gate_frame_pressure_coef"] == 0.0
+    assert params["time_penalty"] == 0.02
+    assert level3_ppo_loop.structural_hypothesis_runnable(hypothesis)
+
+
+@pytest.mark.unit
 def test_teacher_distribution_includes_residual_gru_branch() -> None:
     """Dataset extraction must not fall back to the MLP base actor for loop107."""
     torch.manual_seed(460)
