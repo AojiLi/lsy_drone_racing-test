@@ -66,10 +66,11 @@ Recommended order:
 The current lane is:
 
 ```text
-v35_competence_gated_gate_phase_curriculum_from_loop101
+v36_online_competence_gated_level_replay_from_loop101
 ```
 
-This lane is a bounded 10M training screen from the loop101/v33 final checkpoint.
+This lane is a bounded 10M training screen from the loop101/v33 final checkpoint
+after loop103/v35 failed to beat the frontier.
 
 It keeps:
 
@@ -80,17 +81,18 @@ It keeps:
 - `256 envs x 128 steps`;
 - no observation/return normalization.
 
-It keeps the default random Level3 track sampler and changes only the
-training-only gate-phase reset schedule:
+It keeps the default random Level3 track generator dominant and changes only
+training-time sampling:
 
-- max gate-phase reset probability remains `0.45`;
-- initial probability is `0.12`;
-- probability increases by `0.02` only when rollout pass/finish/crash
-  competence metrics are healthy;
+- train-pool-only level replay starts at `0.03`, may rise to `0.08`, and
+  increases only when rollout pass/finish/crash competence metrics are healthy;
+- gate-phase reset keeps the v35 competence-gated schedule: start `0.12`, max
+  `0.45`;
 - no dev_seen, validation_unseen, or final_locked seed replay is used.
 
 ## Deferred Work
 
-Online PLR, GRU, and reward-number changes remain valid next stages, but they
-should be separate named lanes with their own packets and hard-eval analysis.
-They should not be smuggled into v35.
+GRU and reward-number changes remain valid next stages, but they should be
+separate named lanes with their own packets and hard-eval analysis. They should
+not be smuggled into v36. If v36 fails, prefer a GRU transfer or
+memory-structure packet over replay-probability tuning.

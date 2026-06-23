@@ -60,6 +60,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     unpack_checkpoint,
 )
 from lsy_drone_racing.envs.race_core import obs as race_core_obs
+from lsy_drone_racing.envs.randomize import build_random_track_fn
 from lsy_drone_racing.utils import load_config
 
 TRACK_GENERATOR_PROFILES: dict[str, dict[str, Any]] = {
@@ -186,6 +187,44 @@ TRACK_GENERATOR_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 
+LEVEL_REPLAY_PROFILES: dict[str, dict[str, Any]] = {
+    "none": {},
+    "v36_train_pool_bounds_gate0_gate2": {
+        "replay_seeds": [
+            2114,
+            2115,
+            2120,
+            2121,
+            2126,
+            2128,
+            2131,
+            2135,
+            2142,
+            2143,
+            2146,
+            2149,
+            2151,
+            2153,
+            2161,
+            2162,
+            2167,
+            2168,
+            2172,
+            2179,
+            2181,
+            2189,
+            2193,
+            2195,
+            2200,
+            2202,
+            2203,
+            2207,
+            2211,
+        ],
+        "hard_case_probability": 0.0,
+    },
+}
+
 
 # region Arguments
 @dataclass
@@ -268,6 +307,22 @@ class Args:
     """reward structure used by the training wrapper"""
     track_generator_profile: str = "default"
     """training-only random-track generator profile"""
+    online_level_replay_profile: str = "none"
+    """training-only dynamic level-replay seed profile"""
+    online_level_replay_prob: float = 0.0
+    """maximum probability of replacing a reset track with a replay seed"""
+    online_level_replay_competence_enabled: bool = False
+    """adapt level-replay probability from rollout competence signals"""
+    online_level_replay_competence_start_prob: float = 0.03
+    """initial probability for competence-gated level replay"""
+    online_level_replay_competence_step_prob: float = 0.01
+    """probability increment when rollout competence gates pass"""
+    online_level_replay_competence_min_passed_gate_rate: float = 0.0065
+    """minimum rollout passed-gate rate before increasing replay pressure"""
+    online_level_replay_competence_min_finished_rate: float = 0.0005
+    """minimum rollout finish rate before increasing replay pressure"""
+    online_level_replay_competence_max_crashed_rate: float = 0.0082
+    """maximum rollout crash rate allowed before increasing replay pressure"""
     gate_phase_reset_prob: float = 0.0
     """training-only probability of resetting an episode near a target gate"""
     gate_phase_reset_x_min: float = -1.05
@@ -368,6 +423,54 @@ class Args:
                 f"Unsupported track_generator_profile={args.track_generator_profile!r}. "
                 f"Choices: {choices}."
             )
+        if args.online_level_replay_profile not in LEVEL_REPLAY_PROFILES:
+            choices = ", ".join(sorted(LEVEL_REPLAY_PROFILES))
+            raise ValueError(
+                f"Unsupported online_level_replay_profile={args.online_level_replay_profile!r}. "
+                f"Choices: {choices}."
+            )
+        if not 0.0 <= args.online_level_replay_prob <= 1.0:
+            raise ValueError("online_level_replay_prob must be in [0, 1].")
+        online_level_replay_enabled = args.online_level_replay_profile != "none"
+        if online_level_replay_enabled and args.online_level_replay_prob <= 0.0:
+            raise ValueError(
+                "online_level_replay_profile requires online_level_replay_prob > 0."
+            )
+        if args.online_level_replay_competence_enabled:
+            if not online_level_replay_enabled:
+                raise ValueError(
+                    "online_level_replay_competence_enabled requires "
+                    "online_level_replay_profile != 'none'."
+                )
+            if not (
+                0.0
+                <= args.online_level_replay_competence_start_prob
+                <= args.online_level_replay_prob
+            ):
+                raise ValueError(
+                    "online_level_replay_competence_start_prob must be in "
+                    "[0, online_level_replay_prob]."
+                )
+            if args.online_level_replay_competence_step_prob <= 0.0:
+                raise ValueError("online_level_replay_competence_step_prob must be positive.")
+            if args.online_level_replay_competence_step_prob > args.online_level_replay_prob:
+                raise ValueError(
+                    "online_level_replay_competence_step_prob must be <= "
+                    "online_level_replay_prob."
+                )
+            if args.online_level_replay_competence_min_passed_gate_rate < 0.0:
+                raise ValueError(
+                    "online_level_replay_competence_min_passed_gate_rate "
+                    "must be non-negative."
+                )
+            if args.online_level_replay_competence_min_finished_rate < 0.0:
+                raise ValueError(
+                    "online_level_replay_competence_min_finished_rate must be non-negative."
+                )
+            if args.online_level_replay_competence_max_crashed_rate < 0.0:
+                raise ValueError(
+                    "online_level_replay_competence_max_crashed_rate must be non-negative."
+                )
         if (
             args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
             and args.recurrent_sequence_len != args.num_steps
@@ -747,6 +850,189 @@ class ActionLatencyResponseLag(VectorWrapper):
         if done.ndim > 1:
             done = jp.any(done, axis=tuple(range(1, done.ndim)))
         return done
+
+
+class OnlineLevelReplayCurriculum(VectorWrapper):
+    """Training-only dynamic replay of audited train-pool track layouts."""
+
+    def __init__(
+        self,
+        env: VectorEnv,
+        *,
+        probability: float,
+        replay_seeds: list[int] | tuple[int, ...],
+        generator_kwargs: dict[str, Any] | None = None,
+        seed: int | None = None,
+    ):
+        """Initialize a replay wrapper without changing the target eval track."""
+        super().__init__(env)
+        self.level_replay_prob = float(probability)
+        self.replay_seeds = tuple(int(seed_value) for seed_value in replay_seeds)
+        self.generator_kwargs = {} if generator_kwargs is None else dict(generator_kwargs)
+        if not 0.0 <= self.level_replay_prob <= 1.0:
+            raise ValueError("level-replay probability must be in [0, 1].")
+        if not self.replay_seeds:
+            raise ValueError("level replay requires at least one replay seed.")
+        rng_seed = random.randrange(2**31) if seed is None or seed == -1 else int(seed) + 31_337
+        self._rng_key = jax.random.PRNGKey(rng_seed)
+        self._apply_level_replay_fn: Any | None = None
+
+    def set_probability(self, probability: float) -> None:
+        """Update training-only level replay probability for future resets."""
+        probability = float(probability)
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError("level-replay probability must be in [0, 1].")
+        self.level_replay_prob = probability
+
+    def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
+        """Reset the base environment, then optionally replay train-pool layouts."""
+        observations, infos = self.env.reset(seed=seed, options=options)
+        if seed is not None:
+            self._rng_key = jax.random.PRNGKey(int(seed) + 31_337)
+        if self.level_replay_prob <= 0.0:
+            return observations, infos
+        self._ensure_apply_fn(self.env.data)
+        mask = jp.ones((self.num_envs,), dtype=bool)
+        self.env.data, observations = self._apply_level_replay_fn(
+            self.env.data,
+            self._next_key(),
+            mask,
+            self.level_replay_prob,
+        )
+        return observations, infos
+
+    def step(self, actions: Array) -> tuple[dict, Array, Array, Array, dict]:
+        """Apply replay layouts to freshly autoreset vector slots."""
+        observations, rewards, terminations, truncations, infos = self.env.step(actions)
+        if self.level_replay_prob <= 0.0:
+            return observations, rewards, terminations, truncations, infos
+        self._ensure_apply_fn(self.env.data)
+        done = self._done_mask(terminations, truncations)
+        self.env.data, replay_observations = self._apply_level_replay_fn(
+            self.env.data,
+            self._next_key(),
+            done,
+            self.level_replay_prob,
+        )
+        observations = self._where_observations(done, replay_observations, observations)
+        if isinstance(infos, dict) and "reset_observations" in infos:
+            infos = dict(infos)
+            infos["reset_observations"] = self._where_observations(
+                done,
+                replay_observations,
+                infos["reset_observations"],
+            )
+        return observations, rewards, terminations, truncations, infos
+
+    def _ensure_apply_fn(self, data: Any) -> None:
+        if self._apply_level_replay_fn is not None:
+            return
+        gates_z = data.nominal_gates_pos[0, :, 2]
+        obstacles_z = data.nominal_obstacles_pos[0, :, 2]
+        generator_kwargs = {
+            **self.generator_kwargs,
+            "replay_seed_probability": 1.0,
+            "replay_seeds": self.replay_seeds,
+        }
+        generate = build_random_track_fn(
+            gates_z,
+            obstacles_z,
+            data.pos_limit_low,
+            data.pos_limit_high,
+            **generator_kwargs,
+        )
+        batched_generate = jax.vmap(generate)
+
+        @jax.jit
+        def apply_level_replay(
+            env_data: Any,
+            key: Array,
+            mask: Array,
+            probability: float,
+        ) -> tuple[Any, dict[str, Array]]:
+            n_envs = env_data.gates_pos.shape[0]
+            key_prob, key_track = jax.random.split(key)
+            replay_mask = mask & (
+                jax.random.uniform(key_prob, (n_envs,), dtype=jp.float32) < probability
+            )
+            keys = jax.random.split(key_track, n_envs)
+            gates_pos, gates_quat, obstacles_pos = batched_generate(keys)
+            track_mask = replay_mask[:, None, None]
+            replayed_gates_pos = jp.where(track_mask, gates_pos, env_data.gates_pos)
+            replayed_gates_quat = jp.where(track_mask, gates_quat, env_data.gates_quat)
+            replayed_obstacles_pos = jp.where(
+                track_mask,
+                obstacles_pos,
+                env_data.obstacles_pos,
+            )
+
+            drone_pos = env_data.sim_data.states.pos
+            d_gate = drone_pos[..., None, :2] - replayed_gates_pos[:, None, :, :2]
+            gates_visited = jp.linalg.norm(d_gate, axis=-1) < env_data.sensor_range
+            d_obstacle = drone_pos[..., None, :2] - replayed_obstacles_pos[:, None, :, :2]
+            obstacles_visited = jp.linalg.norm(d_obstacle, axis=-1) < env_data.sensor_range
+            flat_mask = replay_mask[:, None]
+            state_mask = replay_mask[:, None, None]
+            env_data = env_data.replace(
+                gates_pos=replayed_gates_pos,
+                gates_quat=replayed_gates_quat,
+                obstacles_pos=replayed_obstacles_pos,
+                nominal_gates_pos=jp.where(
+                    track_mask,
+                    gates_pos,
+                    env_data.nominal_gates_pos,
+                ),
+                nominal_gates_quat=jp.where(
+                    track_mask,
+                    gates_quat,
+                    env_data.nominal_gates_quat,
+                ),
+                nominal_obstacles_pos=jp.where(
+                    track_mask,
+                    obstacles_pos,
+                    env_data.nominal_obstacles_pos,
+                ),
+                target_gate=jp.where(flat_mask, 0, env_data.target_gate),
+                gates_visited=jp.where(state_mask, gates_visited, env_data.gates_visited),
+                obstacles_visited=jp.where(
+                    state_mask,
+                    obstacles_visited,
+                    env_data.obstacles_visited,
+                ),
+                disabled_drones=jp.where(flat_mask, False, env_data.disabled_drones),
+                steps=jp.where(replay_mask, 0, env_data.steps),
+                marked_for_reset=jp.where(replay_mask, False, env_data.marked_for_reset),
+            )
+            observations = race_core_obs(env_data)
+            return env_data, {key: value[:, 0] for key, value in observations.items()}
+
+        self._apply_level_replay_fn = apply_level_replay
+
+    def _next_key(self) -> Array:
+        self._rng_key, subkey = jax.random.split(self._rng_key)
+        return subkey
+
+    @staticmethod
+    def _done_mask(terminations: Array, truncations: Array) -> Array:
+        done = jp.asarray(terminations) | jp.asarray(truncations)
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        return done
+
+    @staticmethod
+    def _where_observations(
+        mask: Array,
+        selected: dict[str, Array],
+        fallback: dict[str, Array],
+    ) -> dict[str, Array]:
+        return {
+            key: jp.where(
+                mask.reshape((mask.shape[0],) + (1,) * (value.ndim - 1)),
+                value,
+                fallback[key],
+            )
+            for key, value in selected.items()
+        }
 
 
 class GatePhaseResetCurriculum(VectorWrapper):
@@ -2511,6 +2797,24 @@ def make_envs(
         seed=cfg.env.seed,
         device=jax_device,
     )
+    online_level_replay_profile = str(coefs.get("online_level_replay_profile", "none"))
+    if online_level_replay_profile not in LEVEL_REPLAY_PROFILES:
+        choices = ", ".join(sorted(LEVEL_REPLAY_PROFILES))
+        raise ValueError(
+            f"Unsupported online_level_replay_profile={online_level_replay_profile!r}. "
+            f"Choices: {choices}."
+        )
+    if online_level_replay_profile != "none":
+        replay_profile = LEVEL_REPLAY_PROFILES[online_level_replay_profile]
+        env = OnlineLevelReplayCurriculum(
+            env,
+            probability=float(coefs.get("online_level_replay_initial_prob", 0.0)),
+            replay_seeds=replay_profile["replay_seeds"],
+            generator_kwargs={
+                key: value for key, value in replay_profile.items() if key != "replay_seeds"
+            },
+            seed=cfg.env.seed,
+        )
     gate_phase_reset_max_prob = float(coefs.get("gate_phase_reset_prob", 0.0))
     gate_phase_reset_prob = float(
         coefs.get("gate_phase_reset_initial_prob", gate_phase_reset_max_prob)
@@ -3075,6 +3379,12 @@ def train_ppo(
         "action_lowpass_alpha": args.action_lowpass_alpha,
         "reward_structure": args.reward_structure,
         "track_generator_profile": args.track_generator_profile,
+        "online_level_replay_profile": args.online_level_replay_profile,
+        "online_level_replay_initial_prob": (
+            args.online_level_replay_competence_start_prob
+            if args.online_level_replay_competence_enabled
+            else args.online_level_replay_prob
+        ),
         "gate_phase_reset_prob": args.gate_phase_reset_prob,
         "gate_phase_reset_x_min": args.gate_phase_reset_x_min,
         "gate_phase_reset_x_max": args.gate_phase_reset_x_max,
@@ -3387,6 +3697,19 @@ def train_ppo(
     next_done = torch.zeros(args.num_envs).to(device)
     sum_rewards = torch.zeros((args.num_envs)).to(device)
     sum_rewards_hist = []
+    level_replay_curriculum = wrapped_instance(envs, OnlineLevelReplayCurriculum)
+    current_online_level_replay_prob = (
+        args.online_level_replay_competence_start_prob
+        if args.online_level_replay_competence_enabled
+        else args.online_level_replay_prob
+    )
+    if level_replay_curriculum is not None:
+        level_replay_curriculum.set_probability(current_online_level_replay_prob)
+    if args.online_level_replay_competence_enabled and level_replay_curriculum is None:
+        raise RuntimeError(
+            "online_level_replay_competence_enabled requires an "
+            "OnlineLevelReplayCurriculum wrapper."
+        )
     gate_phase_curriculum = wrapped_instance(envs, GatePhaseResetCurriculum)
     current_gate_phase_reset_prob = (
         args.gate_phase_reset_competence_start_prob
@@ -3405,7 +3728,11 @@ def train_ppo(
         reward_component_sums = dict.fromkeys(REWARD_COMPONENT_KEYS, 0.0)
         race_metric_sums = dict.fromkeys(RACE_METRIC_KEYS, 0.0)
         reward_component_batches = 0
-        collect_rollout_metrics = wandb_enabled or args.gate_phase_reset_competence_enabled
+        collect_rollout_metrics = (
+            wandb_enabled
+            or args.gate_phase_reset_competence_enabled
+            or args.online_level_replay_competence_enabled
+        )
         initial_recurrent_state = (
             next_recurrent_state.clone() if next_recurrent_state is not None else None
         )
@@ -3702,6 +4029,47 @@ def train_ppo(
                 reward_component_logs["reward_components/gate_bonus_rate"] = (
                     reward_component_logs["reward_components/gate_bonus"] / args.gate_bonus
                 )
+            if args.online_level_replay_competence_enabled:
+                passed_gate_rate = race_metric_sums["passed_gate_rate"] / reward_component_batches
+                finished_rate = race_metric_sums["finished_rate"] / reward_component_batches
+                crashed_rate = race_metric_sums["crashed_rate"] / reward_component_batches
+                replay_competence_gate_met = (
+                    passed_gate_rate >= args.online_level_replay_competence_min_passed_gate_rate
+                    and finished_rate >= args.online_level_replay_competence_min_finished_rate
+                    and crashed_rate <= args.online_level_replay_competence_max_crashed_rate
+                )
+                next_online_level_replay_prob = current_online_level_replay_prob
+                if replay_competence_gate_met:
+                    next_online_level_replay_prob = min(
+                        args.online_level_replay_prob,
+                        current_online_level_replay_prob
+                        + args.online_level_replay_competence_step_prob,
+                    )
+                if level_replay_curriculum is not None:
+                    level_replay_curriculum.set_probability(next_online_level_replay_prob)
+                curriculum_logs.update(
+                    {
+                        "curriculum/online_level_replay_prob": (
+                            current_online_level_replay_prob
+                        ),
+                        "curriculum/online_level_replay_next_prob": (
+                            next_online_level_replay_prob
+                        ),
+                        "curriculum/online_level_replay_competence_gate_met": float(
+                            replay_competence_gate_met
+                        ),
+                        "curriculum/online_level_replay_competence_passed_gate_rate": (
+                            passed_gate_rate
+                        ),
+                        "curriculum/online_level_replay_competence_finished_rate": (
+                            finished_rate
+                        ),
+                        "curriculum/online_level_replay_competence_crashed_rate": (
+                            crashed_rate
+                        ),
+                    }
+                )
+                current_online_level_replay_prob = next_online_level_replay_prob
             if args.gate_phase_reset_competence_enabled:
                 passed_gate_rate = race_metric_sums["passed_gate_rate"] / reward_component_batches
                 finished_rate = race_metric_sums["finished_rate"] / reward_component_batches
@@ -3720,14 +4088,16 @@ def train_ppo(
                     )
                 if gate_phase_curriculum is not None:
                     gate_phase_curriculum.set_probability(next_gate_phase_reset_prob)
-                curriculum_logs = {
-                    "curriculum/gate_phase_reset_prob": current_gate_phase_reset_prob,
-                    "curriculum/gate_phase_reset_next_prob": next_gate_phase_reset_prob,
-                    "curriculum/competence_gate_met": float(competence_gate_met),
-                    "curriculum/competence_passed_gate_rate": passed_gate_rate,
-                    "curriculum/competence_finished_rate": finished_rate,
-                    "curriculum/competence_crashed_rate": crashed_rate,
-                }
+                curriculum_logs.update(
+                    {
+                        "curriculum/gate_phase_reset_prob": current_gate_phase_reset_prob,
+                        "curriculum/gate_phase_reset_next_prob": next_gate_phase_reset_prob,
+                        "curriculum/competence_gate_met": float(competence_gate_met),
+                        "curriculum/competence_passed_gate_rate": passed_gate_rate,
+                        "curriculum/competence_finished_rate": finished_rate,
+                        "curriculum/competence_crashed_rate": crashed_rate,
+                    }
+                )
                 current_gate_phase_reset_prob = next_gate_phase_reset_prob
 
         if wandb_enabled:
@@ -3870,6 +4240,12 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
         "action_lowpass_alpha": args.action_lowpass_alpha,
         "reward_structure": args.reward_structure,
         "track_generator_profile": args.track_generator_profile,
+        "online_level_replay_profile": args.online_level_replay_profile,
+        "online_level_replay_initial_prob": (
+            args.online_level_replay_competence_start_prob
+            if args.online_level_replay_competence_enabled
+            else args.online_level_replay_prob
+        ),
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
@@ -4092,6 +4468,14 @@ def main(
     action_lowpass_alpha: float = 1.0,
     reward_structure: str = "legacy_staged",
     track_generator_profile: str = "default",
+    online_level_replay_profile: str = "none",
+    online_level_replay_prob: float = 0.0,
+    online_level_replay_competence_enabled: bool = False,
+    online_level_replay_competence_start_prob: float = 0.03,
+    online_level_replay_competence_step_prob: float = 0.01,
+    online_level_replay_competence_min_passed_gate_rate: float = 0.0065,
+    online_level_replay_competence_min_finished_rate: float = 0.0005,
+    online_level_replay_competence_max_crashed_rate: float = 0.0082,
     gate_phase_reset_prob: float = 0.0,
     gate_phase_reset_x_min: float = -1.05,
     gate_phase_reset_x_max: float = -0.18,
@@ -4186,6 +4570,22 @@ def main(
         action_lowpass_alpha=action_lowpass_alpha,
         reward_structure=reward_structure,
         track_generator_profile=track_generator_profile,
+        online_level_replay_profile=online_level_replay_profile,
+        online_level_replay_prob=online_level_replay_prob,
+        online_level_replay_competence_enabled=online_level_replay_competence_enabled,
+        online_level_replay_competence_start_prob=(
+            online_level_replay_competence_start_prob
+        ),
+        online_level_replay_competence_step_prob=online_level_replay_competence_step_prob,
+        online_level_replay_competence_min_passed_gate_rate=(
+            online_level_replay_competence_min_passed_gate_rate
+        ),
+        online_level_replay_competence_min_finished_rate=(
+            online_level_replay_competence_min_finished_rate
+        ),
+        online_level_replay_competence_max_crashed_rate=(
+            online_level_replay_competence_max_crashed_rate
+        ),
         gate_phase_reset_prob=gate_phase_reset_prob,
         gate_phase_reset_x_min=gate_phase_reset_x_min,
         gate_phase_reset_x_max=gate_phase_reset_x_max,

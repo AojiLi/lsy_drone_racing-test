@@ -469,6 +469,10 @@ V35_COMPETENCE_GATED_CURRICULUM_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop102_reject_v34_launch_v35_competence_gated_curriculum.md"
 )
+V36_ONLINE_LEVEL_REPLAY_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop103_reject_v35_launch_v36_online_level_replay.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -479,6 +483,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "gate_phase_reset_curriculum_support",
     "offline_train_pool_plr_support",
     "competence_gated_gate_phase_curriculum_support",
+    "online_competence_gated_level_replay_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -600,6 +605,14 @@ BASE_PARAMS: dict[str, Any] = {
     "action_lowpass_alpha": 1.0,
     "reward_structure": "legacy_staged",
     "track_generator_profile": "default",
+    "online_level_replay_profile": "none",
+    "online_level_replay_prob": 0.0,
+    "online_level_replay_competence_enabled": False,
+    "online_level_replay_competence_start_prob": 0.03,
+    "online_level_replay_competence_step_prob": 0.01,
+    "online_level_replay_competence_min_passed_gate_rate": 0.0065,
+    "online_level_replay_competence_min_finished_rate": 0.0005,
+    "online_level_replay_competence_max_crashed_rate": 0.0082,
     "gate_phase_reset_prob": 0.0,
     "gate_phase_reset_x_min": -1.05,
     "gate_phase_reset_x_max": -0.18,
@@ -729,6 +742,7 @@ BOOL_PARAM_KEYS = {
     "clip_vloss",
     "obs_norm_enabled",
     "return_norm_enabled",
+    "online_level_replay_competence_enabled",
     "gate_phase_reset_competence_enabled",
 }
 REWARD_STRUCTURE_CHOICES = {
@@ -750,10 +764,15 @@ TRACK_GENERATOR_PROFILE_CHOICES = {
     "v29_train_pool_success_churn_replay",
     "v34_lowprob_train_pool_bounds_plr",
 }
+ONLINE_LEVEL_REPLAY_PROFILE_CHOICES = {
+    "none",
+    "v36_train_pool_bounds_gate0_gate2",
+}
 STRING_PARAM_CHOICES = {
     "critic_observation_mode": CRITIC_OBSERVATION_MODE_CHOICES,
     "reward_structure": REWARD_STRUCTURE_CHOICES,
     "track_generator_profile": TRACK_GENERATOR_PROFILE_CHOICES,
+    "online_level_replay_profile": ONLINE_LEVEL_REPLAY_PROFILE_CHOICES,
 }
 STRING_PARAM_KEYS = set(STRING_PARAM_CHOICES)
 
@@ -5773,6 +5792,166 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "forgetting the base task."
         ),
     },
+    "v36_online_competence_gated_level_replay_from_loop101": {
+        "name": "v36_online_competence_gated_level_replay_from_loop101",
+        "proposal_name": "structural_v36_online_level_replay_loop101_10m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 10_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,5,8,10",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "online_competence_gated_level_replay_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V36_ONLINE_LEVEL_REPLAY_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "online_level_replay_profile",
+                "online_level_replay_prob",
+                "online_level_replay_competence_enabled",
+                "online_level_replay_competence_start_prob",
+                "online_level_replay_competence_step_prob",
+                "online_level_replay_competence_min_passed_gate_rate",
+                "online_level_replay_competence_min_finished_rate",
+                "online_level_replay_competence_max_crashed_rate",
+                "gate_phase_reset_prob",
+                "gate_phase_reset_x_min",
+                "gate_phase_reset_x_max",
+                "gate_phase_reset_yz_max",
+                "gate_phase_reset_speed_min",
+                "gate_phase_reset_speed_max",
+                "gate_phase_reset_competence_enabled",
+                "gate_phase_reset_competence_start_prob",
+                "gate_phase_reset_competence_step_prob",
+                "gate_phase_reset_competence_min_passed_gate_rate",
+                "gate_phase_reset_competence_min_finished_rate",
+                "gate_phase_reset_competence_max_crashed_rate",
+            ],
+            "changed_reward_numbers": [],
+            "online_level_replay": {
+                "training_only": True,
+                "profile": "v36_train_pool_bounds_gate0_gate2",
+                "replay_probability_initial": 0.03,
+                "replay_probability_max": 0.08,
+                "replay_probability_increment": 0.01,
+                "source": (
+                    "audited train_pool bounds-or-ground failures from the v28 "
+                    "failure-correction probe; excludes dev_seen, "
+                    "validation_unseen, and final_locked seeds"
+                ),
+                "competence_gate": {
+                    "min_passed_gate_rate": 0.0065,
+                    "min_finished_rate": 0.0005,
+                    "max_crashed_rate": 0.0082,
+                    "source": "rollout race metrics, updated once per PPO iteration",
+                },
+                "normal_random_track_probability_initial": 0.97,
+                "normal_random_track_probability_min": 0.92,
+            },
+            "curriculum": {
+                "training_only": True,
+                "normal_reset_probability_initial": 0.88,
+                "normal_reset_probability_min": 0.55,
+                "gate_phase_reset_probability_initial": 0.12,
+                "gate_phase_reset_probability_max": 0.45,
+                "gate_phase_reset_increment": 0.02,
+                "competence_gate": {
+                    "min_passed_gate_rate": 0.0068,
+                    "min_finished_rate": 0.0007,
+                    "max_crashed_rate": 0.0082,
+                    "source": "rollout race metrics, updated once per PPO iteration",
+                },
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 6b online competence-gated level replay",
+            "baseline": "loop101/v33 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "validation_seed_leakage": "forbidden",
+            "primary_question": (
+                "Can a train-pool-only level replay wrapper improve the 20% "
+                "validation-unseen frontier if replay pressure starts at 3% "
+                "and only rises toward the old v34 8% ceiling when rollout "
+                "competence is healthy?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.20, or mean_gates > 1.69 with crash <= 0.80 "
+                    "and no late-checkpoint collapse"
+                ),
+                "rollback": (
+                    "If the 10M screen is <=0.20 success with mean_gates <=1.69 "
+                    "or crash >=0.81, reject v36 and write a GRU transfer or "
+                    "memory-structure packet instead of replay-probability tuning."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 53,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "online_level_replay_profile": "v36_train_pool_bounds_gate0_gate2",
+            "online_level_replay_prob": 0.08,
+            "online_level_replay_competence_enabled": True,
+            "online_level_replay_competence_start_prob": 0.03,
+            "online_level_replay_competence_step_prob": 0.01,
+            "online_level_replay_competence_min_passed_gate_rate": 0.0065,
+            "online_level_replay_competence_min_finished_rate": 0.0005,
+            "online_level_replay_competence_max_crashed_rate": 0.0082,
+            "gate_phase_reset_prob": 0.45,
+            "gate_phase_reset_x_min": -1.05,
+            "gate_phase_reset_x_max": -0.18,
+            "gate_phase_reset_yz_max": 0.16,
+            "gate_phase_reset_speed_min": 0.15,
+            "gate_phase_reset_speed_max": 1.20,
+            "gate_phase_reset_competence_enabled": True,
+            "gate_phase_reset_competence_start_prob": 0.12,
+            "gate_phase_reset_competence_step_prob": 0.02,
+            "gate_phase_reset_competence_min_passed_gate_rate": 0.0068,
+            "gate_phase_reset_competence_min_finished_rate": 0.0007,
+            "gate_phase_reset_competence_max_crashed_rate": 0.0082,
+        },
+        "rationale": (
+            "loop103/v35 did not beat the loop101 frontier and its gate-phase "
+            "competence gate never opened, while loop102/v34 showed that a "
+            "static 8% train-pool replay sampler caused negative transfer. "
+            "v36 therefore keeps the loop101 checkpoint, v5 Actor observation, "
+            "MLP policy, reward numbers, PPO numbers, default random Level3 "
+            "track generator, and unchanged config/level3.toml hard eval. It "
+            "adds only a training-time replay wrapper whose train-pool seed "
+            "pressure starts below v34 and is increased online only when rollout "
+            "pass/finish/crash metrics are healthy."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -5799,6 +5978,14 @@ FIRE_PARAM_KEYS = [
     "action_lowpass_alpha",
     "reward_structure",
     "track_generator_profile",
+    "online_level_replay_profile",
+    "online_level_replay_prob",
+    "online_level_replay_competence_enabled",
+    "online_level_replay_competence_start_prob",
+    "online_level_replay_competence_step_prob",
+    "online_level_replay_competence_min_passed_gate_rate",
+    "online_level_replay_competence_min_finished_rate",
+    "online_level_replay_competence_max_crashed_rate",
     "gate_phase_reset_prob",
     "gate_phase_reset_x_min",
     "gate_phase_reset_x_max",
