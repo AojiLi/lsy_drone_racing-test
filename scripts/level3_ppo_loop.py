@@ -481,6 +481,15 @@ V37_GRU_TRANSFER_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
     "2026-06-23_v37_residual_gru_transfer_preflight.md"
 )
+V37B_LOOP107_1M_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop107_continue_v37b_from_1m.md"
+)
+LOOP107_V37_1M_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight/"
+    "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight_step_001000000.ckpt"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -6072,6 +6081,103 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "moves to the next roadmap mechanism, recurrent memory, but it is "
             "held before training until explicit MLP-to-GRU transfer and reset "
             "parity support exists."
+        ),
+    },
+    "v37b_residual_gru_maturation_from_loop107_1m": {
+        "name": "v37b_residual_gru_maturation_from_loop107_1m",
+        "proposal_name": "structural_v37b_residual_gru_mature_loop107_1m_2m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 2_000_000,
+        "checkpoint_interval": 500_000,
+        "max_eval_checkpoints": 4,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "0.5,1,1.5,2",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP107_V37_1M_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "mlp_to_gru_transfer_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V37B_LOOP107_1M_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_residual_recurrent_actor_gru256",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "train_timesteps",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [],
+            "transfer": {
+                "source_checkpoint": LOOP107_V37_1M_CHECKPOINT,
+                "source_policy_arch": "mlp_residual_recurrent_actor_gru256",
+                "target_policy_arch": "mlp_residual_recurrent_actor_gru256",
+                "preflight_packet": V37_GRU_TRANSFER_PREFLIGHT_PACKET,
+                "decision_packet": V37B_LOOP107_1M_DECISION_PACKET,
+                "reason": (
+                    "loop107 showed a small hard-eval signal at 1M, followed "
+                    "by drift. v37b tests whether that 1M checkpoint can be "
+                    "stabilized over a short continuation with dense milestone "
+                    "evaluation."
+                ),
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "sequence_len": 128,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP107_V37_1M_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 7b residual-GRU 1M maturation",
+            "baseline": "loop107/v37 1M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can the only promising residual-GRU checkpoint, loop107 1M, "
+                "be stabilized or improved without drifting into the later "
+                "loop107 failures?"
+            ),
+            "rollback": (
+                "If this short continuation does not reproduce or improve "
+                "21% success and 1.66 mean gates, retire plain v37 and propose "
+                "a named retention/distillation GRU lane."
+            ),
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 55,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_residual_recurrent_actor_gru256",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 128,
+        },
+        "rationale": (
+            "loop107/v37 produced the current corrected-loop success best at "
+            "1M with 21% success and 79% crash, but later checkpoints drifted "
+            "down to 15%, 12%, 12%, and 17% success. The three post-run "
+            "reviewers agreed not to continue from final and not to tune reward "
+            "numbers immediately. v37b therefore starts from loop107 1M and "
+            "runs only a dense 2M continuation to test whether the early signal "
+            "is stable before escalating to retention/distillation."
         ),
     },
 }

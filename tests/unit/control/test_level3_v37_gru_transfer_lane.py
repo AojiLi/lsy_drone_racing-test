@@ -63,6 +63,40 @@ def test_loop_registers_v37_residual_gru_transfer_lane() -> None:
 
 
 @pytest.mark.unit
+def test_loop_registers_v37b_from_loop107_1m_not_final() -> None:
+    """v37b must continue only from the useful loop107 1M checkpoint."""
+    hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v37b_residual_gru_maturation_from_loop107_1m"
+    ]
+
+    assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["observation_layout"] == LOCAL_OBSTACLE_OBSERVATION_LAYOUT
+    assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP107_V37_1M_CHECKPOINT
+    assert "final" not in hypothesis["initial_checkpoint"]
+    assert hypothesis["train_timesteps"] == 2_000_000
+    assert hypothesis["checkpoint_interval"] == 500_000
+    assert hypothesis["eval_milestones_m"] == "0.5,1,1.5,2"
+    assert hypothesis["approved_hypothesis_packet"] == (
+        level3_ppo_loop.V37B_LOOP107_1M_DECISION_PACKET
+    )
+
+    architecture = hypothesis["architecture"]
+    assert architecture["track_geometry_change"] == "forbidden"
+    assert architecture["policy_arch"] == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256
+    assert architecture["transfer"]["source_checkpoint"] == (
+        level3_ppo_loop.LOOP107_V37_1M_CHECKPOINT
+    )
+
+    params = hypothesis["params"]
+    assert params["policy_arch"] == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256
+    assert params["critic_observation_mode"] == CRITIC_OBSERVATION_SAME_AS_ACTOR
+    assert params["track_generator_profile"] == "default"
+    assert params["recurrent_hidden_dim"] == 256
+    assert params["recurrent_sequence_len"] == hypothesis["num_steps"]
+
+
+@pytest.mark.unit
 def test_residual_gru_transfer_preserves_mlp_deterministic_policy() -> None:
     """Zero residual init should preserve the source MLP action mean and value."""
     torch.manual_seed(37)

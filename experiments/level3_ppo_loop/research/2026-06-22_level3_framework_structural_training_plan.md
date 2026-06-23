@@ -55,8 +55,10 @@ curriculum. loop103 did not beat the loop101 frontier: best was `19/100`,
 loop106 then tested online competence-gated level replay from loop101 and also
 failed to improve the frontier: its best checkpoint tied `20/100` success but
 fell to `1.63` mean gates and `7.744s`, while final collapsed to `14/100`,
-`1.41` mean gates, and `86%` crash. The next lane should reject replay tuning
-and move to a GRU transfer / memory-structure preflight from loop101.
+`1.41` mean gates, and `86%` crash. loop107 tested residual-GRU transfer from
+loop101; its 1M checkpoint reached the current corrected-loop success best at
+`21/100`, `1.66` mean gates, and `79%` crash, but later checkpoints drifted
+down to `15/100`, `12/100`, `12/100`, and `17/100`.
 
 ## Framework Priorities
 
@@ -77,17 +79,15 @@ and move to a GRU transfer / memory-structure preflight from loop101.
 The immediate step is:
 
 ```text
-v37_gru_transfer_memory_structure_from_loop101
+v37b_residual_gru_maturation_from_loop107_1m
 ```
 
-This is now a bounded 5M screening command. It keeps v5 Actor observation,
-loop052 reward/PPO numbers, corrected v30 semantics, default random track
-generation, and hard eval on unchanged `config/level3.toml`, but changes the
-Actor structure to `mlp_residual_recurrent_actor_gru256`. Because the old
-from-scratch GRU lane failed, the implementation preserves loop101's MLP
-Actor/Critic exactly and adds a zero-initialized GRU residual branch. The
-support/preflight gate passed in
-`experiments/level3_ppo_loop/parity/2026-06-23_v37_residual_gru_transfer_preflight.md`.
+This is a short 2M continuation from the only useful v37 checkpoint, loop107
+1M. It keeps v5 Actor observation, loop052 reward/PPO numbers, corrected v30
+semantics, default random track generation, hard eval on unchanged
+`config/level3.toml`, and `mlp_residual_recurrent_actor_gru256`. It uses dense
+0.5M/1M/1.5M/2M milestone evals to test whether the early 21% success signal is
+stable before escalating to retention/distillation.
 
 ## Not Yet Implemented
 

@@ -44,10 +44,13 @@ did not reduce crash below `80/100`. loop106 then tested online
 competence-gated level replay from loop101 and did not improve the frontier:
 the best checkpoint only tied `20/100` success with lower `1.63` mean gates and
 slower `7.744s` successful time, while final collapsed to `14/100`, `1.41`
-mean gates, and `86%` crash. Therefore the loop should stop treating
-reward-number tuning, longer-rollout-only continuation, privileged-Critic
-maturation, v33 reset curriculum, or MLP replay as the main bottleneck. The
-next bottleneck is likely memory / partial observability.
+mean gates, and `86%` crash. loop107 then tested residual-GRU transfer; its 1M
+checkpoint reached `21/100` success, `1.66` mean gates, and `79%` crash, but
+later checkpoints drifted down to `15/100`, `12/100`, `12/100`, and `17/100`.
+Therefore the loop should stop treating reward-number tuning,
+longer-rollout-only continuation, privileged-Critic maturation, v33 reset
+curriculum, or MLP replay as the main bottleneck. The next bottleneck is likely
+memory / partial observability plus retention against early-checkpoint drift.
 
 ## Structural Priority
 
@@ -70,11 +73,11 @@ Recommended order:
 The current lane is:
 
 ```text
-v37_gru_transfer_memory_structure_from_loop101
+v37b_residual_gru_maturation_from_loop107_1m
 ```
 
-This lane is a transfer and memory-structure screen from the loop101/v33 final
-checkpoint after loop106/v36 failed to beat the frontier.
+This lane is a short maturation screen from the loop107/v37 1M checkpoint
+after the rest of loop107 drifted downward.
 
 It keeps:
 
@@ -85,17 +88,14 @@ It keeps:
 - `256 envs x 128 steps`;
 - no observation/return normalization.
 
-It changes the Actor structure to
-`mlp_residual_recurrent_actor_gru256`: loop101's MLP Actor/Critic are copied
-exactly and a zero-initialized GRU residual branch is added. The support gate
-passed in
-`experiments/level3_ppo_loop/parity/2026-06-23_v37_residual_gru_transfer_preflight.md`,
-so the next allowed action is one bounded 5M v37 screen. Do not repeat the old
+It keeps the `mlp_residual_recurrent_actor_gru256` Actor structure and starts
+from loop107 1M, not loop107 final. The next allowed action is a bounded 2M
+screen with 0.5M/1M/1.5M/2M milestone evals. Do not repeat the old
 from-scratch GRU lane.
 
 ## Deferred Work
 
 Reward-number changes remain valid later stages, but they should not be
-smuggled into v37. If residual-GRU transfer preserves loop101 parity but fails
-to convert into evaluator progress, hold for a GRU distillation or
-memory-pretraining packet instead of tuning this lane blindly.
+smuggled into v37b. If loop107 1M maturation cannot reproduce or improve the
+21% / 1.66 frontier, hold for a named GRU retention/distillation packet instead
+of tuning this lane blindly.

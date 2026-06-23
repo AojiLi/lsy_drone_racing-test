@@ -68,15 +68,18 @@
   1.63 mean gates / 80% crash / 7.744s, and final collapsed to 14% success /
   1.41 mean gates / 86% crash. Do not continue v36, tune replay probability,
   or start future training from loop106 checkpoints.
+- loop107 tested `v37_gru_transfer_memory_structure_from_loop101` for 5M. Its
+  best checkpoint was the 1M checkpoint with 21% success / 1.66 mean gates /
+  79% crash / 7.578s; later checkpoints drifted down to 15%, 12%, 12%, and
+  17% success. Do not continue v37 from loop107 final.
 - The immediate next lane is
-  `v37_gru_transfer_memory_structure_from_loop101`. Its support/preflight gate
-  has passed in
-  `experiments/level3_ppo_loop/parity/2026-06-23_v37_residual_gru_transfer_preflight.md`.
-  It uses `mlp_residual_recurrent_actor_gru256`: loop101's MLP Actor/Critic are
-  copied exactly and a zero-initialized GRU residual branch is added. The next
-  allowed action is one bounded 5M W&B-tracked loop107 screen, followed by
-  analyzer, exactly three reviews, a main-agent decision packet, commit, and
-  push. Do not repeat the old from-scratch GRU lane, which had already failed.
+  `v37b_residual_gru_maturation_from_loop107_1m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop107_continue_v37b_from_1m.md`.
+  It starts from loop107 1M, runs only a 2M W&B-tracked continuation with dense
+  0.5M/1M/1.5M/2M milestone evals, and keeps unchanged `config/level3.toml`.
+  If it cannot reproduce or improve the 21% / 1.66 frontier, retire plain v37
+  and propose a named retention/distillation GRU lane rather than tuning reward
+  numbers blindly.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
