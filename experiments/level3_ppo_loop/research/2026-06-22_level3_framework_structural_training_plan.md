@@ -80,14 +80,14 @@ The immediate step is:
 v37_gru_transfer_memory_structure_from_loop101
 ```
 
-This is not a long training command yet. It keeps v5 Actor observation,
+This is now a bounded 5M screening command. It keeps v5 Actor observation,
 loop052 reward/PPO numbers, corrected v30 semantics, default random track
 generation, and hard eval on unchanged `config/level3.toml`, but changes the
-Actor structure to a GRU-256 memory lane. Because the old from-scratch GRU lane
-failed, the next step must first implement and verify MLP-to-GRU transfer from
-loop101 final, hidden-state reset checks, sequence rollout/BPTT behavior,
-checkpoint metadata, inference recurrent-state reset, and a bounded
-zero-update or deterministic parity packet where meaningful.
+Actor structure to `mlp_residual_recurrent_actor_gru256`. Because the old
+from-scratch GRU lane failed, the implementation preserves loop101's MLP
+Actor/Critic exactly and adds a zero-initialized GRU residual branch. The
+support/preflight gate passed in
+`experiments/level3_ppo_loop/parity/2026-06-23_v37_residual_gru_transfer_preflight.md`.
 
 ## Not Yet Implemented
 
@@ -96,7 +96,8 @@ These framework pieces require code support before training:
 - separate actor/critic RunningMeanStd if normalization is combined with
   asymmetric Critic later;
 - tanh-squashed Gaussian PPO log-prob parity;
-- MLP-to-GRU transfer from loop101 with full hidden-state reset checks.
+- broader GRU distillation or memory pretraining if v37 residual-GRU transfer
+  fails to convert loop101 parity into evaluator progress.
 
 Do not mark a lane as one of these until the trainer/evaluator support exists
 and focused tests or dry-runs prove it.

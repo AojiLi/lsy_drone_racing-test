@@ -66,12 +66,14 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   1.41 mean gates / 86% crash. Do not continue v36, tune replay probability,
   or start future training from loop106 checkpoints.
 - The immediate next lane is
-  `v37_gru_transfer_memory_structure_from_loop101`. This is not a direct long
-  training command yet. First implement and verify MLP-to-GRU transfer from
-  loop101 final, hidden-state reset on episode boundaries, sequence
-  rollout/BPTT behavior, checkpoint metadata, inference hidden-state reset, and
-  a bounded zero-update or deterministic parity packet where meaningful. Do not
-  repeat the old from-scratch GRU lane, which had already failed.
+  `v37_gru_transfer_memory_structure_from_loop101`. Its support/preflight gate
+  has passed in
+  `experiments/level3_ppo_loop/parity/2026-06-23_v37_residual_gru_transfer_preflight.md`.
+  It uses `mlp_residual_recurrent_actor_gru256`: loop101's MLP Actor/Critic are
+  copied exactly and a zero-initialized GRU residual branch is added. The next
+  allowed action is one bounded 5M W&B-tracked loop107 screen, followed by
+  analyzer, exactly three reviews, a main-agent decision packet, commit, and
+  push. Do not repeat the old from-scratch GRU lane, which had already failed.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

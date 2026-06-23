@@ -477,6 +477,10 @@ V37_GRU_TRANSFER_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop106_reject_v36_prepare_v37_gru_transfer.md"
 )
+V37_GRU_TRANSFER_PREFLIGHT_PACKET = (
+    "experiments/level3_ppo_loop/parity/"
+    "2026-06-23_v37_residual_gru_transfer_preflight.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -488,6 +492,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "offline_train_pool_plr_support",
     "competence_gated_gate_phase_curriculum_support",
     "online_competence_gated_level_replay_support",
+    "mlp_to_gru_transfer_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -5977,7 +5982,7 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
         "approved_hypothesis_packet": V37_GRU_TRANSFER_DECISION_PACKET,
         "architecture": {
             "deployment_policy": "end_to_end_ppo_actor",
-            "policy_arch": "recurrent_actor_gru256",
+            "policy_arch": "mlp_residual_recurrent_actor_gru256",
             "policy_distribution": "legacy_normal_action_for_A_control",
             "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
             "actor_output": "roll_pitch_yaw_thrust",
@@ -5995,7 +6000,8 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "transfer": {
                 "source_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
                 "source_policy_arch": "mlp_2x_tanh",
-                "target_policy_arch": "recurrent_actor_gru256",
+                "target_policy_arch": "mlp_residual_recurrent_actor_gru256",
+                "preflight_packet": V37_GRU_TRANSFER_PREFLIGHT_PACKET,
                 "required_before_training": [
                     "MLP-to-GRU initialization support",
                     "hidden-state reset checks on episode boundaries",
@@ -6053,7 +6059,7 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "return_norm_enabled": False,
             "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
             "track_generator_profile": "default",
-            "policy_arch": "recurrent_actor_gru256",
+            "policy_arch": "mlp_residual_recurrent_actor_gru256",
             "recurrent_hidden_dim": 256,
             "recurrent_sequence_len": 128,
         },

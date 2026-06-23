@@ -41,6 +41,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUT,
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
     POLICY_ARCH_MLP,
+    POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
     POLICY_ARCH_RECURRENT_ACTOR_GRU256,
     SUPPORTED_OBSERVATION_LAYOUTS,
     WORLD_HISTORY_OBSERVATION_LAYOUT,
@@ -57,6 +58,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     normalize_action_rp_limit_deg,
     normalize_critic_observation_mode,
     normalize_policy_arch,
+    policy_arch_uses_recurrent_state,
     unpack_checkpoint,
 )
 from lsy_drone_racing.envs.race_core import obs as race_core_obs
@@ -471,9 +473,8 @@ class Args:
                 raise ValueError(
                     "online_level_replay_competence_max_crashed_rate must be non-negative."
                 )
-        if (
-            args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
-            and args.recurrent_sequence_len != args.num_steps
+        if policy_arch_uses_recurrent_state(args.policy_arch) and (
+            args.recurrent_sequence_len != args.num_steps
         ):
             raise ValueError(
                 "recurrent_sequence_len must equal num_steps for the first "
@@ -3108,12 +3109,149 @@ class RecurrentActorAgent(nn.Module):
         )
 
 
+class MLPResidualRecurrentActorAgent(nn.Module):
+    """PPO agent that preserves an MLP Actor and learns a recurrent residual."""
+
+    def __init__(
+        self,
+        obs_shape: tuple,
+        action_shape: tuple,
+        hidden_dim: int = 256,
+        recurrent_hidden_dim: int = 256,
+    ):
+        """Initialize MLP base Actor, GRU residual Actor, and same-observation Critic."""
+        super().__init__()
+        if hidden_dim <= 0:
+            raise ValueError(f"hidden_dim must be positive, got {hidden_dim}.")
+        if recurrent_hidden_dim <= 0:
+            raise ValueError(
+                f"recurrent_hidden_dim must be positive, got {recurrent_hidden_dim}."
+            )
+        obs_dim = int(torch.tensor(obs_shape).prod())
+        action_dim = int(torch.tensor(action_shape).prod())
+        self.hidden_dim = hidden_dim
+        self.recurrent_hidden_dim = recurrent_hidden_dim
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, 1), std=1.0),
+        )
+        self.actor_mean = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, action_dim), std=0.01),
+            nn.Tanh(),
+        )
+        self.actor_pre = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, 128)),
+            nn.Tanh(),
+            layer_init(nn.Linear(128, 128)),
+            nn.Tanh(),
+        )
+        self.actor_gru = nn.GRU(128, recurrent_hidden_dim)
+        for name, param in self.actor_gru.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0.0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, np.sqrt(2))
+        self.actor_residual_head = nn.Linear(recurrent_hidden_dim, action_dim)
+        nn.init.zeros_(self.actor_residual_head.weight)
+        nn.init.zeros_(self.actor_residual_head.bias)
+        self.actor_logstd = nn.Parameter(
+            torch.tensor([[-1.2, -1.2, -2.0, -0.7]], dtype=torch.float32)
+        )
+
+    def get_initial_state(self, batch_size: int, device: torch.device) -> Tensor:
+        """Return zero GRU state shaped [num_layers, batch, hidden]."""
+        return torch.zeros((1, batch_size, self.recurrent_hidden_dim), device=device)
+
+    def get_value(self, x: Tensor) -> Tensor:
+        """Value estimation from same observation as the Actor."""
+        return self.critic(x.reshape(-1, x.shape[-1]))
+
+    def _residual(
+        self,
+        x: Tensor,
+        hidden_state: Tensor,
+        done: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Run the GRU residual branch over a batch or time-major sequence."""
+        if x.dim() == 2:
+            done = done.float().view(1, x.shape[0], 1)
+            hidden_state = hidden_state * (1.0 - done)
+            features = self.actor_pre(x).unsqueeze(0)
+            output, next_hidden_state = self.actor_gru(features, hidden_state)
+            return self.actor_residual_head(output.squeeze(0)), next_hidden_state
+
+        if x.dim() != 3:
+            raise ValueError(f"Expected recurrent Actor input rank 2 or 3, got {x.dim()}.")
+
+        seq_len, batch_size, obs_dim = x.shape
+        done = done.float().view(seq_len, batch_size)
+        features = self.actor_pre(x.reshape(seq_len * batch_size, obs_dim)).view(
+            seq_len, batch_size, -1
+        )
+        outputs = []
+        next_hidden_state = hidden_state
+        for t in range(seq_len):
+            mask = (1.0 - done[t]).view(1, batch_size, 1)
+            next_hidden_state = next_hidden_state * mask
+            output, next_hidden_state = self.actor_gru(
+                features[t : t + 1],
+                next_hidden_state,
+            )
+            outputs.append(output)
+        recurrent_output = torch.cat(outputs, dim=0).reshape(seq_len * batch_size, -1)
+        return self.actor_residual_head(recurrent_output), next_hidden_state
+
+    def _actor_mean(
+        self,
+        x: Tensor,
+        hidden_state: Tensor,
+        done: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Return MLP base action plus bounded recurrent residual."""
+        base_action = self.actor_mean(x.reshape(-1, x.shape[-1]))
+        residual, next_hidden_state = self._residual(x, hidden_state, done)
+        return torch.clamp(base_action + residual, -1.0, 1.0), next_hidden_state
+
+    def get_action_and_value(
+        self,
+        x: Tensor,
+        hidden_state: Tensor,
+        done: Tensor,
+        action: Tensor | None = None,
+        deterministic: bool = False,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """Return action, log-probability, entropy, value, and next GRU state."""
+        action_mean, next_hidden_state = self._actor_mean(x, hidden_state, done)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        if action is None:
+            action = probs.sample() if not deterministic else action_mean
+        else:
+            action = action.reshape_as(action_mean)
+        values = self.get_value(x)
+        return (
+            action,
+            probs.log_prob(action).sum(1),
+            probs.entropy().sum(1),
+            values,
+            next_hidden_state,
+        )
+
+
 def make_agent(
     obs_shape: tuple,
     action_shape: tuple,
     args: Args,
     critic_obs_shape: tuple | None = None,
-) -> Agent | RecurrentActorAgent:
+) -> Agent | RecurrentActorAgent | MLPResidualRecurrentActorAgent:
     """Build the requested PPO policy architecture."""
     policy_arch = normalize_policy_arch(args.policy_arch)
     if critic_obs_shape is not None and critic_obs_shape != obs_shape and policy_arch != POLICY_ARCH_MLP:
@@ -3125,7 +3263,51 @@ def make_agent(
             hidden_dim=args.hidden_dim,
             recurrent_hidden_dim=args.recurrent_hidden_dim,
         )
-    return Agent(obs_shape, action_shape, hidden_dim=args.hidden_dim, critic_obs_shape=critic_obs_shape)
+    if policy_arch == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256:
+        return MLPResidualRecurrentActorAgent(
+            obs_shape,
+            action_shape,
+            hidden_dim=args.hidden_dim,
+            recurrent_hidden_dim=args.recurrent_hidden_dim,
+        )
+    return Agent(
+        obs_shape,
+        action_shape,
+        hidden_dim=args.hidden_dim,
+        critic_obs_shape=critic_obs_shape,
+    )
+
+
+def transfer_mlp_checkpoint_to_residual_gru(
+    model_state_dict: dict[str, Tensor],
+    target_agent: MLPResidualRecurrentActorAgent,
+) -> dict[str, Tensor]:
+    """Copy MLP actor/critic weights into the residual-GRU target agent."""
+    target_state = {
+        key: value.detach().clone() for key, value in target_agent.state_dict().items()
+    }
+    copied_prefixes = ("actor_mean.", "critic.")
+    copied_exact = ("actor_logstd",)
+    for key, target_tensor in target_state.items():
+        should_copy = key in copied_exact or any(
+            key.startswith(prefix) for prefix in copied_prefixes
+        )
+        if not should_copy:
+            continue
+        if key not in model_state_dict:
+            raise ValueError(f"Source MLP checkpoint is missing PPO parameter {key!r}.")
+        source_tensor = model_state_dict[key]
+        if source_tensor.shape != target_tensor.shape:
+            raise ValueError(
+                f"Cannot transfer PPO parameter {key!r}: "
+                f"source shape {tuple(source_tensor.shape)} != "
+                f"target shape {tuple(target_tensor.shape)}."
+            )
+        target_state[key] = source_tensor.detach().clone()
+
+    target_state["actor_residual_head.weight"].zero_()
+    target_state["actor_residual_head.bias"].zero_()
+    return target_state
 
 
 def expand_checkpoint_input_dim(
@@ -3471,12 +3653,66 @@ def train_ppo(
         initial_checkpoint = torch.load(initial_model_path, map_location=device)
         model_state_dict, observation_layout = unpack_checkpoint(initial_checkpoint)
         initial_policy_arch = checkpoint_policy_arch(initial_checkpoint, model_state_dict)
-        if initial_policy_arch != args.policy_arch:
+        mlp_to_residual_gru_transfer = (
+            initial_policy_arch == POLICY_ARCH_MLP
+            and args.policy_arch == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256
+        )
+        if initial_policy_arch != args.policy_arch and not mlp_to_residual_gru_transfer:
             raise ValueError(
                 f"Cannot initialize policy_arch={args.policy_arch} training from a "
                 f"policy_arch={initial_policy_arch} checkpoint."
             )
-        if args.policy_arch != POLICY_ARCH_MLP:
+        if mlp_to_residual_gru_transfer:
+            if not isinstance(agent, MLPResidualRecurrentActorAgent):
+                raise TypeError("MLP-to-residual-GRU transfer requires residual-GRU agent.")
+            if observation_layout != args.observation_layout:
+                raise ValueError(
+                    f"Cannot initialize {args.observation_layout} residual-GRU training "
+                    f"from checkpoint layout {observation_layout}."
+                )
+            initial_hidden_dim = checkpoint_hidden_dim(initial_checkpoint, model_state_dict)
+            if initial_hidden_dim != args.hidden_dim:
+                raise ValueError(
+                    f"Cannot initialize hidden_dim={args.hidden_dim} residual-GRU training "
+                    f"from hidden_dim={initial_hidden_dim} checkpoint."
+                )
+            initial_critic_mode = checkpoint_critic_observation_mode(initial_checkpoint)
+            if initial_critic_mode != CRITIC_OBSERVATION_SAME_AS_ACTOR:
+                raise ValueError(
+                    "Cannot initialize residual-GRU transfer from a privileged Critic "
+                    "checkpoint; use a same-observation MLP source checkpoint."
+                )
+            if args.critic_observation_mode != CRITIC_OBSERVATION_SAME_AS_ACTOR:
+                raise ValueError(
+                    "MLP-to-residual-GRU transfer currently supports only "
+                    "critic_observation_mode=same_as_actor."
+                )
+            initial_action_rp_limit_deg = checkpoint_action_rp_limit_deg(initial_checkpoint)
+            if round(initial_action_rp_limit_deg, 6) != round(args.action_rp_limit_deg, 6):
+                print(
+                    "initialized checkpoint action_rp_limit_deg="
+                    f"{initial_action_rp_limit_deg}; training with "
+                    f"action_rp_limit_deg={args.action_rp_limit_deg}"
+                )
+            initial_action_lowpass_alpha = checkpoint_action_lowpass_alpha(initial_checkpoint)
+            if round(initial_action_lowpass_alpha, 6) != round(args.action_lowpass_alpha, 6):
+                print(
+                    "initialized checkpoint action_lowpass_alpha="
+                    f"{initial_action_lowpass_alpha}; training with "
+                    f"action_lowpass_alpha={args.action_lowpass_alpha}"
+                )
+            model_state_dict = transfer_mlp_checkpoint_to_residual_gru(
+                model_state_dict,
+                agent,
+            )
+            agent.load_state_dict(model_state_dict)
+            print(
+                "initialized residual-GRU agent from MLP checkpoint "
+                f"{initial_model_path}; Actor/Critic copied, residual head zeroed, "
+                "optimizer starts fresh"
+            )
+            model_state_dict = None
+        if model_state_dict is not None and args.policy_arch != POLICY_ARCH_MLP:
             if observation_layout != args.observation_layout:
                 raise ValueError(
                     f"Cannot initialize {args.observation_layout} recurrent training "
@@ -3691,7 +3927,7 @@ def train_ppo(
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
     raw_values = torch.zeros((args.num_steps, args.num_envs)).to(device)
-    recurrent_enabled = args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
+    recurrent_enabled = policy_arch_uses_recurrent_state(args.policy_arch)
     next_recurrent_state = (
         agent.get_initial_state(args.num_envs, device)
         if recurrent_enabled
@@ -4340,14 +4576,14 @@ def evaluate_ppo(args: Args, n_eval: int, model_path: Path) -> tuple[float, floa
             done = torch.zeros(1, dtype=bool, device=device)
             recurrent_state = (
                 agent.get_initial_state(1, device)
-                if policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
+                if policy_arch_uses_recurrent_state(policy_arch)
                 else None
             )
             episode_reward = 0
             steps = 0
             while not done.any():
                 policy_input = eval_policy_obs(obs)
-                if policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+                if policy_arch_uses_recurrent_state(policy_arch):
                     act, _, _, _, recurrent_state = agent.get_action_and_value(
                         policy_input,
                         recurrent_state,

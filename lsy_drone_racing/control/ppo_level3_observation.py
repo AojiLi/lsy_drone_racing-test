@@ -26,7 +26,12 @@ DEFAULT_ACTION_RP_LIMIT_DEG = 90.0
 DEFAULT_ACTION_LOWPASS_ALPHA = 1.0
 POLICY_ARCH_MLP = "mlp_2x_tanh"
 POLICY_ARCH_RECURRENT_ACTOR_GRU256 = "recurrent_actor_gru256"
-SUPPORTED_POLICY_ARCHS = (POLICY_ARCH_MLP, POLICY_ARCH_RECURRENT_ACTOR_GRU256)
+POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256 = "mlp_residual_recurrent_actor_gru256"
+SUPPORTED_POLICY_ARCHS = (
+    POLICY_ARCH_MLP,
+    POLICY_ARCH_RECURRENT_ACTOR_GRU256,
+    POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
+)
 CRITIC_OBSERVATION_SAME_AS_ACTOR = "same_as_actor"
 CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1 = "level3_full_state_v1"
 SUPPORTED_CRITIC_OBSERVATION_MODES = (
@@ -77,6 +82,12 @@ LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS = (
 
 def infer_policy_arch(model_state_dict: dict[str, Any]) -> str:
     """Infer policy architecture from checkpoint parameter names."""
+    if (
+        "actor_gru.weight_ih_l0" in model_state_dict
+        and "actor_mean.0.weight" in model_state_dict
+        and "actor_residual_head.weight" in model_state_dict
+    ):
+        return POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256
     if "actor_gru.weight_ih_l0" in model_state_dict:
         return POLICY_ARCH_RECURRENT_ACTOR_GRU256
     if "actor_mean.0.weight" in model_state_dict:
@@ -92,6 +103,15 @@ def normalize_policy_arch(value: Any = POLICY_ARCH_MLP) -> str:
     return policy_arch
 
 
+def policy_arch_uses_recurrent_state(value: Any) -> bool:
+    """Return whether the policy architecture carries Actor recurrent state."""
+    policy_arch = normalize_policy_arch(value)
+    return policy_arch in (
+        POLICY_ARCH_RECURRENT_ACTOR_GRU256,
+        POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
+    )
+
+
 def normalize_critic_observation_mode(value: Any = CRITIC_OBSERVATION_SAME_AS_ACTOR) -> str:
     """Return a validated critic observation mode name."""
     mode = CRITIC_OBSERVATION_SAME_AS_ACTOR if value is None else str(value)
@@ -103,7 +123,12 @@ def normalize_critic_observation_mode(value: Any = CRITIC_OBSERVATION_SAME_AS_AC
 def infer_hidden_dim(model_state_dict: dict[str, Any], policy_arch: str | None = None) -> int:
     """Infer the critic/shared hidden width from PPO weights."""
     policy_arch = normalize_policy_arch(policy_arch or infer_policy_arch(model_state_dict))
-    key = "actor_mean.0.weight" if policy_arch == POLICY_ARCH_MLP else "critic.0.weight"
+    key = (
+        "actor_mean.0.weight"
+        if policy_arch
+        in (POLICY_ARCH_MLP, POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256)
+        else "critic.0.weight"
+    )
     try:
         hidden_dim = int(model_state_dict[key].shape[0])
     except (AttributeError, KeyError, TypeError, ValueError) as exc:

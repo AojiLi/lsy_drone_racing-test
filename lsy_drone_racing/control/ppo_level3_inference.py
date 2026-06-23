@@ -14,16 +14,17 @@ from torch.distributions.normal import Normal
 
 from lsy_drone_racing.control import Controller
 from lsy_drone_racing.control.ppo_level3_observation import (
+    CRITIC_OBSERVATION_SAME_AS_ACTOR,
     LEGACY_OBSERVATION_LAYOUT,
-    LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS,
     LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS,
+    LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS,
     LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_NEXT_GATE_OBSERVATION_LAYOUTS,
     LOCAL_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
     POLICY_ARCH_MLP,
+    POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
     POLICY_ARCH_RECURRENT_ACTOR_GRU256,
-    CRITIC_OBSERVATION_SAME_AS_ACTOR,
     WORLD_HISTORY_OBSERVATION_LAYOUT,
     checkpoint_action_lowpass_alpha,
     checkpoint_action_rp_limit_deg,
@@ -34,6 +35,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     checkpoint_recurrent_hidden_dim,
     normalize_action_lowpass_alpha,
     normalize_action_rp_limit_deg,
+    policy_arch_uses_recurrent_state,
     unpack_checkpoint,
 )
 
@@ -194,6 +196,98 @@ class RecurrentPPOAgent(nn.Module):
         )
 
 
+class ResidualRecurrentPPOAgent(nn.Module):
+    """Inference network for MLP base Actor plus GRU residual Actor."""
+
+    def __init__(
+        self,
+        obs_shape: tuple[int, ...],
+        action_shape: tuple[int, ...],
+        hidden_dim: int = 256,
+        recurrent_hidden_dim: int = 256,
+    ):
+        """Build residual recurrent Actor and feed-forward Critic."""
+        super().__init__()
+        if hidden_dim <= 0:
+            raise ValueError(f"hidden_dim must be positive, got {hidden_dim}.")
+        if recurrent_hidden_dim <= 0:
+            raise ValueError(
+                f"recurrent_hidden_dim must be positive, got {recurrent_hidden_dim}."
+            )
+        obs_dim = int(torch.tensor(obs_shape).prod())
+        action_dim = int(torch.tensor(action_shape).prod())
+        self.hidden_dim = hidden_dim
+        self.recurrent_hidden_dim = recurrent_hidden_dim
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, 1), std=1.0),
+        )
+        self.actor_mean = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, action_dim), std=0.01),
+            nn.Tanh(),
+        )
+        self.actor_pre = nn.Sequential(
+            layer_init(nn.Linear(obs_dim, 128)),
+            nn.Tanh(),
+            layer_init(nn.Linear(128, 128)),
+            nn.Tanh(),
+        )
+        self.actor_gru = nn.GRU(128, recurrent_hidden_dim)
+        self.actor_residual_head = nn.Linear(recurrent_hidden_dim, action_dim)
+        nn.init.zeros_(self.actor_residual_head.weight)
+        nn.init.zeros_(self.actor_residual_head.bias)
+        self.actor_logstd = nn.Parameter(
+            torch.tensor([[-1.2, -1.2, -2.0, -0.7]], dtype=torch.float32)
+        )
+
+    def get_initial_state(self, batch_size: int, device: torch.device) -> Tensor:
+        """Return zero GRU state shaped [num_layers, batch, hidden]."""
+        return torch.zeros((1, batch_size, self.recurrent_hidden_dim), device=device)
+
+    def _actor_mean(
+        self,
+        x: Tensor,
+        hidden_state: Tensor,
+        done: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Return MLP base action plus bounded recurrent residual."""
+        hidden_state = hidden_state * (1.0 - done.float().view(1, x.shape[0], 1))
+        features = self.actor_pre(x).unsqueeze(0)
+        output, next_hidden_state = self.actor_gru(features, hidden_state)
+        residual = self.actor_residual_head(output.squeeze(0))
+        return torch.clamp(self.actor_mean(x) + residual, -1.0, 1.0), next_hidden_state
+
+    def get_action_and_value(
+        self,
+        x: Tensor,
+        hidden_state: Tensor,
+        done: Tensor,
+        action: Tensor | None = None,
+        deterministic: bool = False,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """Return action, log-probability, entropy, value, and next hidden state."""
+        action_mean, next_hidden_state = self._actor_mean(x, hidden_state, done)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        if action is None:
+            action = action_mean if deterministic else probs.sample()
+        return (
+            action,
+            probs.log_prob(action).sum(1),
+            probs.entropy().sum(1),
+            self.critic(x),
+            next_hidden_state,
+        )
+
+
 class PPOLevel2Inference(Controller):
     """Run the trained direct level2 PPO policy as an attitude controller."""
 
@@ -283,7 +377,11 @@ class PPOLevel2Inference(Controller):
             )
         else:
             self.obs_dim = int(model_state_dict["actor_mean.0.weight"].shape[1])
-            self.recurrent_hidden_dim = None
+            self.recurrent_hidden_dim = (
+                checkpoint_recurrent_hidden_dim(checkpoint, model_state_dict)
+                if policy_arch_uses_recurrent_state(self.policy_arch)
+                else None
+            )
         self._include_prev_gate = not self._use_local_obstacles and self.obs_dim == current_obs_dim
         supported_obs_dims = (current_obs_dim,) if self._use_local_obstacles else (
             current_obs_dim,
@@ -296,6 +394,13 @@ class PPOLevel2Inference(Controller):
             )
         if self.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
             self.agent = RecurrentPPOAgent(
+                (self.obs_dim,),
+                (self.action_dim,),
+                hidden_dim=self.hidden_dim,
+                recurrent_hidden_dim=int(self.recurrent_hidden_dim or self.hidden_dim),
+            ).to(self.device)
+        elif self.policy_arch == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256:
+            self.agent = ResidualRecurrentPPOAgent(
                 (self.obs_dim,),
                 (self.action_dim,),
                 hidden_dim=self.hidden_dim,
@@ -323,7 +428,7 @@ class PPOLevel2Inference(Controller):
         self._last_action_norm = np.zeros(self.action_dim, dtype=np.float32)
         self._recurrent_hidden_state = (
             self.agent.get_initial_state(1, self.device)
-            if self.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256
+            if policy_arch_uses_recurrent_state(self.policy_arch)
             else None
         )
         self._finished = False
@@ -332,7 +437,7 @@ class PPOLevel2Inference(Controller):
         """Reset inference-only state at the start of an episode."""
         self._history = np.repeat(self._basic_history(obs)[None, :], N_HISTORY, axis=0)
         self._last_action_norm = np.zeros(self.action_dim, dtype=np.float32)
-        if self.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+        if policy_arch_uses_recurrent_state(self.policy_arch):
             self._recurrent_hidden_state = self.agent.get_initial_state(1, self.device)
         self._finished = False
 
@@ -348,7 +453,7 @@ class PPOLevel2Inference(Controller):
         obs_rl = self._normalize_obs(obs_rl)
         obs_tensor = torch.tensor(obs_rl, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.no_grad():
-            if self.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+            if policy_arch_uses_recurrent_state(self.policy_arch):
                 done = torch.zeros(1, dtype=torch.float32, device=self.device)
                 action_norm, _, _, _, self._recurrent_hidden_state = (
                     self.agent.get_action_and_value(

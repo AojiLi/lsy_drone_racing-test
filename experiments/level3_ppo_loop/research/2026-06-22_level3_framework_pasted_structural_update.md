@@ -73,8 +73,8 @@ The current lane is:
 v37_gru_transfer_memory_structure_from_loop101
 ```
 
-This lane is a transfer and memory-structure preflight from the loop101/v33
-final checkpoint after loop106/v36 failed to beat the frontier.
+This lane is a transfer and memory-structure screen from the loop101/v33 final
+checkpoint after loop106/v36 failed to beat the frontier.
 
 It keeps:
 
@@ -85,14 +85,17 @@ It keeps:
 - `256 envs x 128 steps`;
 - no observation/return normalization.
 
-It changes the Actor structure to a GRU-256 memory lane, but training must not
-launch until MLP-to-GRU transfer, hidden-state reset, sequence rollout/BPTT,
-checkpoint metadata, inference recurrent-state reset, and parity/preflight
-tests pass. Do not repeat the old from-scratch GRU lane.
+It changes the Actor structure to
+`mlp_residual_recurrent_actor_gru256`: loop101's MLP Actor/Critic are copied
+exactly and a zero-initialized GRU residual branch is added. The support gate
+passed in
+`experiments/level3_ppo_loop/parity/2026-06-23_v37_residual_gru_transfer_preflight.md`,
+so the next allowed action is one bounded 5M v37 screen. Do not repeat the old
+from-scratch GRU lane.
 
 ## Deferred Work
 
 Reward-number changes remain valid later stages, but they should not be
-smuggled into v37. If MLP-to-GRU transfer cannot preserve useful loop101
-behavior, hold for a GRU distillation or memory-pretraining packet instead of
-launching training.
+smuggled into v37. If residual-GRU transfer preserves loop101 parity but fails
+to convert into evaluator progress, hold for a GRU distillation or
+memory-pretraining packet instead of tuning this lane blindly.
