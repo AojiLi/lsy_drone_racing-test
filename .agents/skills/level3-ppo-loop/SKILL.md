@@ -47,14 +47,20 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   passed. The first v32 training screen, `loop099`, reached 19% success /
   1.66 mean gates / 81% crash at its 3M checkpoint on `config/level3.toml`,
   close to but not better than the loop097 global best of 20% / 1.66 / 80%.
+- loop100 matured v32 from loop099 3M to about 18M and still did not beat
+  loop097: best loop100 was 19% success / 1.65 mean gates / 81% crash on
+  unchanged `config/level3.toml`. Do not continue v32 privileged-Critic
+  maturation without a new explicit decision packet.
 - The immediate next lane is
-  `v32_asymmetric_privileged_critic_maturation_from_loop099_3m_to_18m`: a
-  bounded same-hypothesis continuation from the loop099 3M best checkpoint.
+  `v33_gate_phase_reset_curriculum_from_loop097_12m`: a 10M training-only
+  reset-curriculum screen from the loop097/v31d 12M global-best checkpoint.
   It keeps the deployed v5 Actor path, reward numbers, PPO numbers, rollout
-  geometry, disabled normalization, privileged Critic mode, and unchanged
-  `config/level3.toml` hard eval fixed. If it does not beat 20% success or
-  materially expand mean gates beyond 1.66, stop v32 and move to a named
-  v33 gate-phase reset/curriculum or other training-distribution support lane.
+  geometry, disabled normalization, and unchanged `config/level3.toml` hard
+  eval fixed. It changes only the training reset distribution: 45% of episodes
+  start near randomized target-gate approach phases and 55% keep normal Level3
+  starts. If it does not beat 20% success or materially expand mean gates with
+  lower crash/new seeds, stop v33 and write a new named PLR/GRU/structural
+  packet.
 - The rejected previous lane was
   `v31d_longer_rollout_maturation_from_loop097_12m_to_30m`. It reached only
   19% success / 1.63 mean gates / 81% crash at its best loop098 checkpoint,

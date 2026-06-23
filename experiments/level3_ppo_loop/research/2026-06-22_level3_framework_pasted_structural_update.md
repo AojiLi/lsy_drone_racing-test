@@ -33,9 +33,15 @@ that the old checkpoint family has only about 30/100 theoretical seed-union
 coverage. Local loop098 evidence agrees with that diagnosis: continued v31d
 maturation did not beat loop097's 20% success frontier.
 
-Therefore the loop should stop treating reward-number tuning and seed replay as
-the main bottleneck. The next bottleneck is likely noisy value/advantage
-estimation under partial Actor observability.
+v32 then tested the noisy-value hypothesis with an asymmetric privileged Critic.
+Parity passed, but loop099 and loop100 did not beat loop097 on unchanged
+`config/level3.toml`. loop100's best was only `19/100`, `1.65` mean gates, and
+`81%` crash.
+
+Therefore the loop should stop treating reward-number tuning, seed replay,
+longer-rollout-only continuation, and privileged-Critic maturation as the main
+bottleneck. The next bottleneck is likely training distribution: the policy
+does not see enough useful gate approach/pass/exit states.
 
 ## Structural Priority
 
@@ -58,31 +64,10 @@ Recommended order:
 The current lane is:
 
 ```text
-v32_asymmetric_privileged_critic_support_parity
+v33_gate_phase_reset_curriculum_from_loop097_12m
 ```
 
-This lane is implementation plus parity only. It does not approve training by
-itself.
-
-Required support:
-
-- Actor observes exactly the deployed v5 observation/history prefix.
-- Critic may receive a training-only privileged tail containing full-track state.
-- Checkpoints record `critic_observation_mode`, `actor_observation_dim`, and
-  `critic_observation_dim`.
-- Inference ignores Critic-only privileged weights and loads the Actor path
-  exactly as before.
-- A zero-update v32 checkpoint generated from loop097/v31d 12M must reproduce
-  deterministic `validation_unseen_101_200` hard-eval behavior before any v32
-  training launch.
-
-## First Training Lane After Parity
-
-After parity passes, the bounded first training lane is:
-
-```text
-v32_asymmetric_privileged_critic_clean_ppo_5m
-```
+This lane is a bounded 10M training screen from the loop097/v31d 12M checkpoint.
 
 It keeps:
 
@@ -91,14 +76,15 @@ It keeps:
 - loop052 reward/PPO numbers;
 - corrected v30 episode/reset/finish semantics;
 - `256 envs x 128 steps`;
-- no observation/return normalization in the first asymmetric Critic pass.
+- no observation/return normalization.
 
-It changes only:
+It changes only the training reset distribution:
 
-- Critic input mode from `same_as_actor` to `level3_full_state_v1`.
+- 45% of episodes reset near randomized target-gate approach phases;
+- 55% of episodes keep normal Level3 starts.
 
 ## Deferred Work
 
-Gate-phase resets, curriculum, PLR, GRU, and reward-number changes remain valid
+Competence-gated curriculum, PLR, GRU, and reward-number changes remain valid
 next stages, but they should be separate named lanes with their own packets and
-hard-eval analysis. They should not be smuggled into v32.
+hard-eval analysis. They should not be smuggled into v33.

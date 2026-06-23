@@ -452,6 +452,10 @@ V32_MATURATION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop099_continue_v32_privileged_critic_maturation.md"
 )
+V33_GATE_PHASE_RESET_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop100_reject_v32_launch_v33_gate_phase_reset_curriculum.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -459,6 +463,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "v30_episode_semantics",
     "observation_return_normalization_support",
     "asymmetric_privileged_critic_support",
+    "gate_phase_reset_curriculum_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -580,6 +585,12 @@ BASE_PARAMS: dict[str, Any] = {
     "action_lowpass_alpha": 1.0,
     "reward_structure": "legacy_staged",
     "track_generator_profile": "default",
+    "gate_phase_reset_prob": 0.0,
+    "gate_phase_reset_x_min": -1.05,
+    "gate_phase_reset_x_max": -0.18,
+    "gate_phase_reset_yz_max": 0.16,
+    "gate_phase_reset_speed_min": 0.15,
+    "gate_phase_reset_speed_max": 1.20,
     "obs_norm_enabled": False,
     "obs_norm_clip": 10.0,
     "return_norm_enabled": False,
@@ -5375,6 +5386,117 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "v32 and move to a named gate-phase reset/curriculum support lane."
         ),
     },
+    "v33_gate_phase_reset_curriculum_from_loop097_12m": {
+        "name": "v33_gate_phase_reset_curriculum_from_loop097_12m",
+        "proposal_name": "structural_v33_gate_phase_reset_curriculum_loop097_12m_10m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 10_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,5,8,10",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP097_BEST_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "gate_phase_reset_curriculum_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V33_GATE_PHASE_RESET_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "gate_phase_reset_prob",
+                "gate_phase_reset_x_min",
+                "gate_phase_reset_x_max",
+                "gate_phase_reset_yz_max",
+                "gate_phase_reset_speed_min",
+                "gate_phase_reset_speed_max",
+            ],
+            "changed_reward_numbers": [],
+            "curriculum": {
+                "training_only": True,
+                "normal_reset_probability": 0.55,
+                "gate_phase_reset_probability": 0.45,
+                "local_gate_x_range_m": [-1.05, -0.18],
+                "local_gate_yz_abs_max_m": 0.16,
+                "forward_speed_range_mps": [0.15, 1.20],
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP097_BEST_CHECKPOINT,
+            },
+            "deferred_support": [
+                "prioritized_level_replay",
+                "recurrent_actor_gru256",
+                "reward_number_search",
+                "speed_optimization",
+            ],
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 5 gate-phase reset curriculum",
+            "baseline": "loop097/v31d 12M",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Does exposing 45% of training episodes to randomized target-gate "
+                "approach states improve gate acquisition and crash conversion "
+                "after v32 privileged-Critic maturation failed to expand the "
+                "loop097 hard-eval frontier?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.20, or mean_gates materially above 1.66 with "
+                    "lower crash rate or new validation success seeds"
+                ),
+                "rollback": (
+                    "If hard eval stays <=0.20 success with crash around 80% and "
+                    "no stable mean-gate expansion, stop v33 and consider PLR or "
+                    "GRU only through a new named packet."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 50,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "gate_phase_reset_prob": 0.45,
+            "gate_phase_reset_x_min": -1.05,
+            "gate_phase_reset_x_max": -0.18,
+            "gate_phase_reset_yz_max": 0.16,
+            "gate_phase_reset_speed_min": 0.15,
+            "gate_phase_reset_speed_max": 1.20,
+        },
+        "rationale": (
+            "loop100 rejected further v32 maturation: the best checkpoint reached "
+            "only 19% success and did not beat the loop097 20% / 1.66-gate "
+            "frontier. All three post-run reviewers recommended launching a "
+            "named training-distribution lane rather than continuing v32, reward "
+            "numbers, or W&B-reward-led tuning. This v33 screen keeps the "
+            "deployed v5 Actor, reward numbers, PPO numbers, rollout geometry, "
+            "and unchanged config/level3.toml hard eval fixed, but trains with "
+            "a mixed reset distribution: most episodes still start normally, "
+            "while 45% begin near randomized gate approach phases so the Actor "
+            "gets more direct practice on acquire/pass/exit behavior."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -5401,6 +5523,12 @@ FIRE_PARAM_KEYS = [
     "action_lowpass_alpha",
     "reward_structure",
     "track_generator_profile",
+    "gate_phase_reset_prob",
+    "gate_phase_reset_x_min",
+    "gate_phase_reset_x_max",
+    "gate_phase_reset_yz_max",
+    "gate_phase_reset_speed_min",
+    "gate_phase_reset_speed_max",
     "v27_teacher_kl_beta",
     "v27_teacher_model_name",
     "v27_teacher_observation_layout",

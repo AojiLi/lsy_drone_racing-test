@@ -14,7 +14,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import wandb
 from gymnasium import spaces
 from gymnasium.vector import VectorEnv, VectorObservationWrapper, VectorRewardWrapper, VectorWrapper
 from gymnasium.vector.utils import batch_space
@@ -24,14 +23,15 @@ from ml_collections import ConfigDict
 from torch import Tensor
 from torch.distributions.normal import Normal
 
+import wandb
 from lsy_drone_racing.control.ppo_level3_observation import (
     CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1,
     CRITIC_OBSERVATION_SAME_AS_ACTOR,
+    LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS,
     LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUT,
     LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS,
-    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
-    LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS,
     LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUT,
+    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
     LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUT,
     LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_NEXT_GATE_OBSERVATION_LAYOUT,
@@ -53,14 +53,14 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     checkpoint_recurrent_hidden_dim,
     checkpoint_return_normalization,
     make_checkpoint,
-    normalize_critic_observation_mode,
     normalize_action_lowpass_alpha,
     normalize_action_rp_limit_deg,
+    normalize_critic_observation_mode,
     normalize_policy_arch,
     unpack_checkpoint,
 )
+from lsy_drone_racing.envs.race_core import obs as race_core_obs
 from lsy_drone_racing.utils import load_config
-
 
 TRACK_GENERATOR_PROFILES: dict[str, dict[str, Any]] = {
     "default": {},
@@ -233,6 +233,18 @@ class Args:
     """reward structure used by the training wrapper"""
     track_generator_profile: str = "default"
     """training-only random-track generator profile"""
+    gate_phase_reset_prob: float = 0.0
+    """training-only probability of resetting an episode near a target gate"""
+    gate_phase_reset_x_min: float = -1.05
+    """minimum local gate-frame x offset for gate-phase curriculum resets"""
+    gate_phase_reset_x_max: float = -0.18
+    """maximum local gate-frame x offset for gate-phase curriculum resets"""
+    gate_phase_reset_yz_max: float = 0.16
+    """maximum absolute local gate-frame y/z offset for gate-phase curriculum resets"""
+    gate_phase_reset_speed_min: float = 0.15
+    """minimum initial forward speed for gate-phase curriculum resets"""
+    gate_phase_reset_speed_max: float = 1.20
+    """maximum initial forward speed for gate-phase curriculum resets"""
     v27_teacher_kl_beta: float = 0.0
     """v27 teacher-retention KL coefficient; beta=0 is the control arm."""
     v27_teacher_model_name: str | None = None
@@ -353,6 +365,16 @@ class Args:
             raise ValueError("obs_norm_clip must be positive.")
         if args.return_norm_clip <= 0.0:
             raise ValueError("return_norm_clip must be positive.")
+        if not 0.0 <= args.gate_phase_reset_prob <= 1.0:
+            raise ValueError("gate_phase_reset_prob must be in [0, 1].")
+        if args.gate_phase_reset_x_min >= args.gate_phase_reset_x_max:
+            raise ValueError("gate_phase_reset_x_min must be < gate_phase_reset_x_max.")
+        if args.gate_phase_reset_yz_max < 0.0:
+            raise ValueError("gate_phase_reset_yz_max must be non-negative.")
+        if args.gate_phase_reset_speed_min < 0.0:
+            raise ValueError("gate_phase_reset_speed_min must be non-negative.")
+        if args.gate_phase_reset_speed_min > args.gate_phase_reset_speed_max:
+            raise ValueError("gate_phase_reset_speed_min must be <= gate_phase_reset_speed_max.")
         args.batch_size = int(args.num_envs * args.num_steps)
         args.minibatch_size = int(args.batch_size // args.num_minibatches)
         args.num_iterations = args.total_timesteps // args.batch_size
@@ -650,6 +672,213 @@ class ActionLatencyResponseLag(VectorWrapper):
         if done.ndim > 1:
             done = jp.any(done, axis=tuple(range(1, done.ndim)))
         return done
+
+
+class GatePhaseResetCurriculum(VectorWrapper):
+    """Training-only reset curriculum that starts episodes near gate approach phases."""
+
+    def __init__(
+        self,
+        env: VectorEnv,
+        *,
+        probability: float,
+        x_min: float,
+        x_max: float,
+        yz_max: float,
+        speed_min: float,
+        speed_max: float,
+        seed: int | None = None,
+    ):
+        """Initialize a reset-state curriculum without changing the track geometry."""
+        super().__init__(env)
+        self.gate_phase_reset_prob = float(probability)
+        self.x_min = float(x_min)
+        self.x_max = float(x_max)
+        self.yz_max = float(yz_max)
+        self.speed_min = float(speed_min)
+        self.speed_max = float(speed_max)
+        if not 0.0 <= self.gate_phase_reset_prob <= 1.0:
+            raise ValueError("gate-phase reset probability must be in [0, 1].")
+        if self.x_min >= self.x_max:
+            raise ValueError("gate-phase reset x_min must be < x_max.")
+        if self.yz_max < 0.0:
+            raise ValueError("gate-phase reset yz_max must be non-negative.")
+        if self.speed_min < 0.0 or self.speed_min > self.speed_max:
+            raise ValueError("invalid gate-phase reset speed range.")
+        rng_seed = random.randrange(2**31) if seed is None or seed == -1 else int(seed) + 20_033
+        self._rng_key = jax.random.PRNGKey(rng_seed)
+
+    def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
+        """Reset the base environment, then optionally move slots to gate-phase states."""
+        observations, infos = self.env.reset(seed=seed, options=options)
+        if seed is not None:
+            self._rng_key = jax.random.PRNGKey(int(seed) + 20_033)
+        if self.gate_phase_reset_prob <= 0.0:
+            return observations, infos
+        mask = jp.ones((self.num_envs,), dtype=bool)
+        self.env.data, observations = self._apply_curriculum(
+            self.env.data,
+            self._next_key(),
+            mask,
+            self.gate_phase_reset_prob,
+            self.x_min,
+            self.x_max,
+            self.yz_max,
+            self.speed_min,
+            self.speed_max,
+        )
+        return observations, infos
+
+    def step(self, actions: Array) -> tuple[dict, Array, Array, Array, dict]:
+        """Apply curriculum to freshly autoreset vector slots after terminal transitions."""
+        observations, rewards, terminations, truncations, infos = self.env.step(actions)
+        if self.gate_phase_reset_prob <= 0.0:
+            return observations, rewards, terminations, truncations, infos
+        done = self._done_mask(terminations, truncations)
+        self.env.data, curriculum_observations = self._apply_curriculum(
+            self.env.data,
+            self._next_key(),
+            done,
+            self.gate_phase_reset_prob,
+            self.x_min,
+            self.x_max,
+            self.yz_max,
+            self.speed_min,
+            self.speed_max,
+        )
+        observations = self._where_observations(done, curriculum_observations, observations)
+        if isinstance(infos, dict) and "reset_observations" in infos:
+            infos = dict(infos)
+            infos["reset_observations"] = self._where_observations(
+                done,
+                curriculum_observations,
+                infos["reset_observations"],
+            )
+        return observations, rewards, terminations, truncations, infos
+
+    def _next_key(self) -> Array:
+        self._rng_key, subkey = jax.random.split(self._rng_key)
+        return subkey
+
+    @staticmethod
+    def _where_observations(
+        mask: Array,
+        selected: dict[str, Array],
+        fallback: dict[str, Array],
+    ) -> dict[str, Array]:
+        return {
+            key: jp.where(
+                mask.reshape((mask.shape[0],) + (1,) * (value.ndim - 1)),
+                value,
+                fallback[key],
+            )
+            for key, value in selected.items()
+        }
+
+    @staticmethod
+    def _done_mask(terminations: Array, truncations: Array) -> Array:
+        done = jp.asarray(terminations) | jp.asarray(truncations)
+        if done.ndim > 1:
+            done = jp.any(done, axis=tuple(range(1, done.ndim)))
+        return done
+
+    @staticmethod
+    @jax.jit
+    def _apply_curriculum(
+        data: Any,
+        key: Array,
+        mask: Array,
+        probability: float,
+        x_min: float,
+        x_max: float,
+        yz_max: float,
+        speed_min: float,
+        speed_max: float,
+    ) -> tuple[Any, dict[str, Array]]:
+        n_envs = data.steps.shape[0]
+        n_gates = data.gates_pos.shape[1]
+        env_idx = jp.arange(n_envs)
+        key_prob, key_gate, key_pos, key_speed = jax.random.split(key, 4)
+        curriculum_mask = mask & (
+            jax.random.uniform(key_prob, (n_envs,), dtype=jp.float32) < probability
+        )
+        gate_idx = jax.random.randint(key_gate, (n_envs,), minval=0, maxval=n_gates)
+        local_xyz = jax.random.uniform(
+            key_pos,
+            (n_envs, 3),
+            minval=jp.array([x_min, -yz_max, -yz_max], dtype=jp.float32),
+            maxval=jp.array([x_max, yz_max, yz_max], dtype=jp.float32),
+        )
+        speed = jax.random.uniform(
+            key_speed,
+            (n_envs,),
+            minval=speed_min,
+            maxval=speed_max,
+            dtype=jp.float32,
+        )
+        gate_pos = data.gates_pos[env_idx, gate_idx]
+        gate_quat = data.gates_quat[env_idx, gate_idx]
+        gate_rot = GatePhaseResetCurriculum._quat_to_rotmat(gate_quat)
+        pos = gate_pos + jp.einsum("nij,nj->ni", gate_rot, local_xyz)
+        pos = pos.at[:, 2].set(jp.clip(pos[:, 2], 0.30, 2.20))
+        vel = gate_rot[:, :, 0] * speed[:, None]
+        quat = gate_quat
+        ang_vel = jp.zeros_like(vel)
+        state_mask = curriculum_mask[:, None, None]
+        flat_state_mask = curriculum_mask[:, None]
+        states = data.sim_data.states
+        states = states.replace(
+            pos=jp.where(state_mask, pos[:, None, :], states.pos),
+            quat=jp.where(state_mask, quat[:, None, :], states.quat),
+            vel=jp.where(state_mask, vel[:, None, :], states.vel),
+            ang_vel=jp.where(state_mask, ang_vel[:, None, :], states.ang_vel),
+        )
+        sim_data = data.sim_data.replace(states=states)
+        gate_order = jp.arange(n_gates)[None, None, :]
+        previous_or_current_gate = gate_order <= gate_idx[:, None, None]
+        d_gate = pos[:, None, None, :2] - data.gates_pos[:, None, :, :2]
+        gates_in_range = jp.linalg.norm(d_gate, axis=-1) < data.sensor_range
+        new_gates_visited = previous_or_current_gate | gates_in_range
+        d_obstacle = pos[:, None, None, :2] - data.obstacles_pos[:, None, :, :2]
+        new_obstacles_visited = jp.linalg.norm(d_obstacle, axis=-1) < data.sensor_range
+        target_gate = gate_idx[:, None]
+        data = data.replace(
+            sim_data=sim_data,
+            target_gate=jp.where(flat_state_mask, target_gate, data.target_gate),
+            last_drone_pos=jp.where(state_mask, pos[:, None, :], data.last_drone_pos),
+            disabled_drones=jp.where(flat_state_mask, False, data.disabled_drones),
+            gates_visited=jp.where(
+                curriculum_mask[:, None, None],
+                new_gates_visited,
+                data.gates_visited,
+            ),
+            obstacles_visited=jp.where(
+                curriculum_mask[:, None, None],
+                new_obstacles_visited,
+                data.obstacles_visited,
+            ),
+            steps=jp.where(curriculum_mask, 0, data.steps),
+            takeoff_pos=jp.where(state_mask, pos[:, None, :], data.takeoff_pos),
+            marked_for_reset=jp.where(curriculum_mask, False, data.marked_for_reset),
+        )
+        observations = race_core_obs(data)
+        return data, {key: value[:, 0] for key, value in observations.items()}
+
+    @staticmethod
+    def _quat_to_rotmat(quat: Array) -> Array:
+        """Convert xyzw quaternions to rotation matrices."""
+        x, y, z, w = jp.moveaxis(quat, -1, 0)
+        xx, yy, zz = x * x, y * y, z * z
+        xy, xz, yz = x * y, x * z, y * z
+        wx, wy, wz = w * x, w * y, w * z
+        return jp.stack(
+            [
+                jp.stack([1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy)], axis=-1),
+                jp.stack([2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)], axis=-1),
+                jp.stack([2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy)], axis=-1),
+            ],
+            axis=-2,
+        )
 
 
 class Level2RaceReward(VectorRewardWrapper):
@@ -2187,6 +2416,18 @@ def make_envs(
         seed=cfg.env.seed,
         device=jax_device,
     )
+    gate_phase_reset_prob = float(coefs.get("gate_phase_reset_prob", 0.0))
+    if gate_phase_reset_prob > 0.0:
+        env = GatePhaseResetCurriculum(
+            env,
+            probability=gate_phase_reset_prob,
+            x_min=float(coefs.get("gate_phase_reset_x_min", -1.05)),
+            x_max=float(coefs.get("gate_phase_reset_x_max", -0.18)),
+            yz_max=float(coefs.get("gate_phase_reset_yz_max", 0.16)),
+            speed_min=float(coefs.get("gate_phase_reset_speed_min", 0.15)),
+            speed_max=float(coefs.get("gate_phase_reset_speed_max", 1.20)),
+            seed=cfg.env.seed,
+        )
     if thrust_disturbance is not None:
         env = ThrustScaleBatterySag(
             env,
@@ -2736,6 +2977,12 @@ def train_ppo(
         "action_lowpass_alpha": args.action_lowpass_alpha,
         "reward_structure": args.reward_structure,
         "track_generator_profile": args.track_generator_profile,
+        "gate_phase_reset_prob": args.gate_phase_reset_prob,
+        "gate_phase_reset_x_min": args.gate_phase_reset_x_min,
+        "gate_phase_reset_x_max": args.gate_phase_reset_x_max,
+        "gate_phase_reset_yz_max": args.gate_phase_reset_yz_max,
+        "gate_phase_reset_speed_min": args.gate_phase_reset_speed_min,
+        "gate_phase_reset_speed_max": args.gate_phase_reset_speed_max,
         "rpy_coef": args.rpy_coef,
         "tilt_limit_deg": args.tilt_limit_deg,
         "tilt_excess_coef": args.tilt_excess_coef,
@@ -3698,6 +3945,12 @@ def main(
     action_lowpass_alpha: float = 1.0,
     reward_structure: str = "legacy_staged",
     track_generator_profile: str = "default",
+    gate_phase_reset_prob: float = 0.0,
+    gate_phase_reset_x_min: float = -1.05,
+    gate_phase_reset_x_max: float = -0.18,
+    gate_phase_reset_yz_max: float = 0.16,
+    gate_phase_reset_speed_min: float = 0.15,
+    gate_phase_reset_speed_max: float = 1.20,
     v27_teacher_kl_beta: float = 0.0,
     v27_teacher_model_name: str | None = None,
     v27_teacher_observation_layout: str | None = None,
@@ -3780,6 +4033,12 @@ def main(
         action_lowpass_alpha=action_lowpass_alpha,
         reward_structure=reward_structure,
         track_generator_profile=track_generator_profile,
+        gate_phase_reset_prob=gate_phase_reset_prob,
+        gate_phase_reset_x_min=gate_phase_reset_x_min,
+        gate_phase_reset_x_max=gate_phase_reset_x_max,
+        gate_phase_reset_yz_max=gate_phase_reset_yz_max,
+        gate_phase_reset_speed_min=gate_phase_reset_speed_min,
+        gate_phase_reset_speed_max=gate_phase_reset_speed_max,
         v27_teacher_kl_beta=v27_teacher_kl_beta,
         v27_teacher_model_name=v27_teacher_model_name,
         v27_teacher_observation_layout=v27_teacher_observation_layout,

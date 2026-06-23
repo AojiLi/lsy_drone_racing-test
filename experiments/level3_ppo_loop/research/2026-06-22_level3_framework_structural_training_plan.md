@@ -36,9 +36,16 @@ to `19/100`; loop097/v31d matured that branch to `20/100` at its 12M checkpoint.
 Loop098 then continued the same branch toward a 30M-style horizon but regressed
 to `19/100`, mean gates `1.63`, and crash rate `81%`.
 
+v32 asymmetric privileged Critic support and parity passed, but its bounded
+training evidence did not expand the frontier. loop099 reached `19/100`,
+`1.66` mean gates, and `81%` crash; loop100 matured from the loop099 3M best
+to about 18M and still reached only `19/100`, `1.65` mean gates, and `81%`
+crash on unchanged `config/level3.toml`.
+
 This means the next loop should not continue local reward-number, fixed-seed
-replay, or longer-rollout-only tweaks. It should move to the next named
-structural support lane: asymmetric privileged Critic with strict Actor parity.
+replay, longer-rollout-only tweaks, or v32 privileged-Critic maturation. It
+should move to the next named training-distribution lane: gate-phase reset
+curriculum.
 
 ## Framework Priorities
 
@@ -56,32 +63,23 @@ structural support lane: asymmetric privileged Critic with strict Actor parity.
 
 ## Immediate Executable Lane
 
-The immediate executable step is
-`v32_asymmetric_privileged_critic_support_parity`.
-
-This is not a training launch. It implements and validates support for:
-
-- deployed Actor input: unchanged v5 observation/history prefix;
-- deployed Actor output: unchanged roll/pitch/yaw/thrust PPO controller;
-- training Critic input: Actor prefix plus training-only full-track state;
-- checkpoint metadata: `critic_observation_mode`, `actor_observation_dim`, and
-  `critic_observation_dim`;
-- inference behavior: ignore Critic-only privileged weights and load Actor
-  weights exactly as before.
-
-Before any v32 training, the loop must generate a zero-update v32 checkpoint
-from the loop097/v31d 12M best checkpoint and prove deterministic parity on
-`validation_unseen_101_200` under `config/level3.toml`.
-
-After that parity passes, the first training lane may be:
+The immediate executable step is:
 
 ```text
-v32_asymmetric_privileged_critic_clean_ppo_5m
+v33_gate_phase_reset_curriculum_from_loop097_12m
 ```
 
-It keeps v5 Actor observation, loop052 reward/PPO numbers, `256 envs x 128`
-rollout geometry, corrected v30 semantics, and hard eval on
-`config/level3.toml`. It changes only the training Critic input.
+This is a training-only reset curriculum screen. It keeps v5 Actor
+observation, loop052 reward/PPO numbers, `256 envs x 128` rollout geometry,
+corrected v30 semantics, and hard eval on unchanged `config/level3.toml`.
+It changes only the training reset distribution:
+
+- 55% of episodes keep normal Level3 starts;
+- 45% of episodes reset near randomized target-gate approach phases;
+- the target race track geometry and final hard-eval protocol stay unchanged.
+
+The first screen should train 10M from the loop097/v31d 12M checkpoint and
+evaluate 1M/2M/3M/5M/8M/10M milestones on `validation_unseen`.
 
 ## Not Yet Implemented
 
@@ -89,7 +87,6 @@ These framework pieces require code support before training:
 
 - separate actor/critic RunningMeanStd if normalization is combined with
   asymmetric Critic later;
-- gate-phase reset buffer with physically consistent state resets;
 - competence-gated curriculum stages;
 - prioritized level replay over train track seeds;
 - tanh-squashed Gaussian PPO log-prob parity;
