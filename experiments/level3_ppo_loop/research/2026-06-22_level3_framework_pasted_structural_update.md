@@ -47,6 +47,8 @@ slower `7.744s` successful time, while final collapsed to `14/100`, `1.41`
 mean gates, and `86%` crash. loop107 then tested residual-GRU transfer; its 1M
 checkpoint reached `21/100` success, `1.66` mean gates, and `79%` crash, but
 later checkpoints drifted down to `15/100`, `12/100`, `12/100`, and `17/100`.
+loop108 then continued from loop107 1M and failed to reproduce the early
+signal: best was only `18/100`, `1.58` mean gates, and `82%` crash.
 Therefore the loop should stop treating reward-number tuning,
 longer-rollout-only continuation, privileged-Critic maturation, v33 reset
 curriculum, or MLP replay as the main bottleneck. The next bottleneck is likely
@@ -73,11 +75,11 @@ Recommended order:
 The current lane is:
 
 ```text
-v37b_residual_gru_maturation_from_loop107_1m
+v38_gru_teacher_retention_distillation_from_loop107_1m
 ```
 
-This lane is a short maturation screen from the loop107/v37 1M checkpoint
-after the rest of loop107 drifted downward.
+This lane is a support/preflight packet for explicit teacher retention or
+distillation after plain v37/v37b failed to stabilize loop107 1M.
 
 It keeps:
 
@@ -88,14 +90,15 @@ It keeps:
 - `256 envs x 128 steps`;
 - no observation/return normalization.
 
-It keeps the `mlp_residual_recurrent_actor_gru256` Actor structure and starts
-from loop107 1M, not loop107 final. The next allowed action is a bounded 2M
-screen with 0.5M/1M/1.5M/2M milestone evals. Do not repeat the old
-from-scratch GRU lane.
+It keeps the `mlp_residual_recurrent_actor_gru256` Actor structure and would
+start from loop107 1M, not loop107 final. Do not launch training yet: v38 is
+held until retention/distillation is implemented and tests prove nonzero
+sampling plus finite teacher KL/action MSE/agreement logging. Do not repeat the
+old from-scratch GRU lane.
 
 ## Deferred Work
 
 Reward-number changes remain valid later stages, but they should not be
-smuggled into v37b. If loop107 1M maturation cannot reproduce or improve the
-21% / 1.66 frontier, hold for a named GRU retention/distillation packet instead
-of tuning this lane blindly.
+smuggled into v38. If retention/distillation cannot reproduce or improve the
+21% / 1.66 frontier after support passes, retire GRU memory and move to a new
+named structural direction rather than tuning this lane blindly.

@@ -485,6 +485,10 @@ V37B_LOOP107_1M_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop107_continue_v37b_from_1m.md"
 )
+V38_RETENTION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop108_reject_plain_v37_prepare_v38_retention.md"
+)
 LOOP107_V37_1M_CHECKPOINT = (
     "lsy_drone_racing/control/checkpoints/"
     "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight/"
@@ -6180,6 +6184,110 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "is stable before escalating to retention/distillation."
         ),
     },
+    "v38_gru_teacher_retention_distillation_from_loop107_1m": {
+        "name": "v38_gru_teacher_retention_distillation_from_loop107_1m",
+        "proposal_name": "structural_v38_gru_teacher_retention_loop107_1m_preflight",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 2_000_000,
+        "checkpoint_interval": 500_000,
+        "max_eval_checkpoints": 4,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "0.5,1,1.5,2",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP107_V37_1M_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "residual_gru_teacher_retention_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V38_RETENTION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_residual_recurrent_actor_gru256",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "teacher_retention_distillation",
+                "initial_checkpoint",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [],
+            "teacher_retention": {
+                "student_start_checkpoint": LOOP107_V37_1M_CHECKPOINT,
+                "teacher_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+                "teacher_policy_arch": "mlp_2x_tanh",
+                "student_policy_arch": "mlp_residual_recurrent_actor_gru256",
+                "required_before_training": [
+                    "teacher-retention dataset or online teacher sampling",
+                    "residual-GRU recurrent minibatch retention loss",
+                    "metadata recording teacher checkpoint and observation layout",
+                    "nonzero retention/sampled_batch_size logging",
+                    "finite teacher_kl, teacher_action_mse, and teacher_agreement logging",
+                    "zero-update or deterministic preflight packet",
+                ],
+                "reason": (
+                    "loop108 failed to reproduce loop107 1M and retention "
+                    "metrics were inactive, so v38 must prove retention is "
+                    "actually sampled and logged before training."
+                ),
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "sequence_len": 128,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP107_V37_1M_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 8 GRU teacher retention preflight",
+            "baseline": "loop107/v37 1M",
+            "teacher": "loop101/v33 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can explicit teacher retention prevent the residual-GRU "
+                "student from drifting below the loop107 1M hard-eval frontier?"
+            ),
+            "preflight_gate": (
+                "Do not launch training until tests prove retention is "
+                "sampled, logged, and compatible with recurrent PPO updates."
+            ),
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 56,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_residual_recurrent_actor_gru256",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 128,
+            "v27_teacher_kl_beta": 0.08,
+            "v27_teacher_model_name": LOOP101_V33_BEST_CHECKPOINT,
+            "v27_teacher_observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        },
+        "rationale": (
+            "loop108/v37b failed the explicit reproduction test: best hard "
+            "eval was only 18% success, 1.58 mean gates, and 82% crash, below "
+            "both loop107 1M and the loop101 gate frontier. Reviewers agreed "
+            "plain residual-GRU continuation should stop and the next step "
+            "should be a held v38 preflight for explicit teacher retention or "
+            "distillation from the stable frontier."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -7393,6 +7501,16 @@ def build_training_structure_hold(
             "ppo_level3_inference recurrent hidden-state reset checks, and a "
             "bounded zero-update or deterministic parity packet before "
             "launching this lane"
+        )
+    elif missing_support == "residual_gru_teacher_retention_support":
+        support_steps = (
+            "implement residual-GRU teacher-retention or distillation support "
+            "before launching this lane: build retention data or online teacher "
+            "sampling for recurrent students, wire retention loss into sequence "
+            "minibatches, record teacher checkpoint/layout metadata, log "
+            "nonzero retention/sampled_batch_size plus finite teacher_kl, "
+            "teacher_action_mse, and teacher_agreement metrics, and write a "
+            "zero-update or deterministic preflight packet"
         )
     else:
         support_steps = (

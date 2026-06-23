@@ -97,6 +97,45 @@ def test_loop_registers_v37b_from_loop107_1m_not_final() -> None:
 
 
 @pytest.mark.unit
+def test_loop_registers_v38_teacher_retention_as_support_hold() -> None:
+    """v38 must be explicit and held until retention support exists."""
+    hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v38_gru_teacher_retention_distillation_from_loop107_1m"
+    ]
+
+    assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["observation_layout"] == LOCAL_OBSTACLE_OBSERVATION_LAYOUT
+    assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP107_V37_1M_CHECKPOINT
+    assert hypothesis["approved_hypothesis_packet"] == (
+        level3_ppo_loop.V38_RETENTION_DECISION_PACKET
+    )
+    assert hypothesis["requires_training_support"] == (
+        "residual_gru_teacher_retention_support"
+    )
+    assert "residual_gru_teacher_retention_support" not in (
+        level3_ppo_loop.SUPPORTED_TRAINING_STRUCTURES
+    )
+
+    architecture = hypothesis["architecture"]
+    assert architecture["track_geometry_change"] == "forbidden"
+    assert architecture["policy_arch"] == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256
+    assert architecture["teacher_retention"]["student_start_checkpoint"] == (
+        level3_ppo_loop.LOOP107_V37_1M_CHECKPOINT
+    )
+    assert architecture["teacher_retention"]["teacher_checkpoint"] == (
+        level3_ppo_loop.LOOP101_V33_BEST_CHECKPOINT
+    )
+
+    params = hypothesis["params"]
+    assert params["policy_arch"] == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256
+    assert params["critic_observation_mode"] == CRITIC_OBSERVATION_SAME_AS_ACTOR
+    assert params["track_generator_profile"] == "default"
+    assert params["v27_teacher_kl_beta"] > 0.0
+    assert params["v27_teacher_model_name"] == level3_ppo_loop.LOOP101_V33_BEST_CHECKPOINT
+
+
+@pytest.mark.unit
 def test_residual_gru_transfer_preserves_mlp_deterministic_policy() -> None:
     """Zero residual init should preserve the source MLP action mean and value."""
     torch.manual_seed(37)

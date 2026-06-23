@@ -58,7 +58,9 @@ fell to `1.63` mean gates and `7.744s`, while final collapsed to `14/100`,
 `1.41` mean gates, and `86%` crash. loop107 tested residual-GRU transfer from
 loop101; its 1M checkpoint reached the current corrected-loop success best at
 `21/100`, `1.66` mean gates, and `79%` crash, but later checkpoints drifted
-down to `15/100`, `12/100`, `12/100`, and `17/100`.
+down to `15/100`, `12/100`, `12/100`, and `17/100`. loop108 then tested a
+short continuation from loop107 1M and failed to reproduce it: best was only
+`18/100`, `1.58` mean gates, and `82%` crash.
 
 ## Framework Priorities
 
@@ -79,15 +81,16 @@ down to `15/100`, `12/100`, `12/100`, and `17/100`.
 The immediate step is:
 
 ```text
-v37b_residual_gru_maturation_from_loop107_1m
+v38_gru_teacher_retention_distillation_from_loop107_1m
 ```
 
-This is a short 2M continuation from the only useful v37 checkpoint, loop107
-1M. It keeps v5 Actor observation, loop052 reward/PPO numbers, corrected v30
-semantics, default random track generation, hard eval on unchanged
-`config/level3.toml`, and `mlp_residual_recurrent_actor_gru256`. It uses dense
-0.5M/1M/1.5M/2M milestone evals to test whether the early 21% success signal is
-stable before escalating to retention/distillation.
+This is not a training command yet. It is a support/preflight lane for explicit
+teacher retention or distillation from loop107 1M, with a stable feed-forward
+frontier checkpoint such as loop101 final as teacher/reference. It must keep
+unchanged `config/level3.toml`, v5 Actor observation, and Actor-only
+deployment. Do not launch v38 training until tests prove nonzero retention
+sampling and finite teacher KL/action MSE/agreement logging for recurrent
+students.
 
 ## Not Yet Implemented
 
@@ -96,8 +99,7 @@ These framework pieces require code support before training:
 - separate actor/critic RunningMeanStd if normalization is combined with
   asymmetric Critic later;
 - tanh-squashed Gaussian PPO log-prob parity;
-- broader GRU distillation or memory pretraining if v37 residual-GRU transfer
-  fails to convert loop101 parity into evaluator progress.
+- residual-GRU teacher retention/distillation support for recurrent students.
 
 Do not mark a lane as one of these until the trainer/evaluator support exists
 and focused tests or dry-runs prove it.

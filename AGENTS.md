@@ -73,13 +73,13 @@
   79% crash / 7.578s; later checkpoints drifted down to 15%, 12%, 12%, and
   17% success. Do not continue v37 from loop107 final.
 - The immediate next lane is
-  `v37b_residual_gru_maturation_from_loop107_1m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop107_continue_v37b_from_1m.md`.
-  It starts from loop107 1M, runs only a 2M W&B-tracked continuation with dense
-  0.5M/1M/1.5M/2M milestone evals, and keeps unchanged `config/level3.toml`.
-  If it cannot reproduce or improve the 21% / 1.66 frontier, retire plain v37
-  and propose a named retention/distillation GRU lane rather than tuning reward
-  numbers blindly.
+  `v38_gru_teacher_retention_distillation_from_loop107_1m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop108_reject_plain_v37_prepare_v38_retention.md`.
+  This is not a training command yet. It is held until residual-GRU teacher
+  retention/distillation support is implemented and tested. The support must
+  prove nonzero retention sampling and finite teacher KL/action MSE/agreement
+  metrics before any v38 training starts. Do not continue plain v37/v37b or
+  start from loop108 checkpoints.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
