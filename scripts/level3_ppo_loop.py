@@ -545,6 +545,14 @@ V45_FRONTIER_UNION_RETENTION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop115_reject_v44_prepare_v45_v5_frontier_union_retention.md"
 )
+V46_RESIDUAL_FRONTIER_RETENTION_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-23_level3_v46_residual_frontier_teacher_action_retention_plan.md"
+)
+V46_RESIDUAL_FRONTIER_RETENTION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop116_reject_v45_prepare_v46_residual_frontier_teacher_action_retention.md"
+)
 V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
     "2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md"
@@ -7195,6 +7203,126 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "deployed controller or the unchanged Level3 track."
         ),
     },
+    "v46_v5_residual_frontier_teacher_action_retention_preflight": {
+        "name": "v46_v5_residual_frontier_teacher_action_retention_preflight",
+        "proposal_name": "structural_v46_residual_frontier_teacher_action_preflight",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": (
+            "residual_frontier_teacher_action_extraction_preflight_support"
+        ),
+        "research_packet": V46_RESIDUAL_FRONTIER_RETENTION_PACKET,
+        "approved_hypothesis_packet": V46_RESIDUAL_FRONTIER_RETENTION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "parent_failure": (
+                "loop116/v45 proved flat MLP retention was active, but stayed "
+                "inside the 18%-21% validation plateau instead of beating the "
+                "loop107/loop110 frontier."
+            ),
+            "changed_training_numbers": [
+                "teacher_action_extraction_preflight",
+                "v27_retention_dataset_path",
+                "v27_retention_batch_size",
+                "initial_checkpoint",
+            ],
+            "changed_reward_numbers": [],
+            "retention": {
+                "type": "residual_frontier_teacher_action_preflight",
+                "future_dataset": (
+                    "union of loop107/v37 residual-GRU teacher successes plus "
+                    "compatible loop101/loop110 v5 MLP teacher successes"
+                ),
+                "required_teacher": "loop107/v37 1M residual-GRU frontier",
+                "student_start": "loop110/v39 3M",
+                "batch_size": 512,
+                "beta": 0.03,
+                "inference_policy": "PPO Actor only; no teacher, planner, or shield",
+                "required_before_training": [
+                    "extract residual-GRU teacher actions with hidden-state carry",
+                    "prove episode-boundary hidden-state reset",
+                    "compare extracted actions against ppo_level3_inference",
+                    "verify finite teacher_kl/action_mse/agreement on a real dataset",
+                    "write a parity packet before PPO training",
+                ],
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 15 residual frontier teacher retention",
+            "baseline": "loop110/v39 3M MLP and loop107/v37 1M frontier",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can loop107/v37 1M, the actual global frontier, be used as a "
+                "training-only residual-GRU teacher without corrupting action "
+                "labels or recurrent hidden-state semantics?"
+            ),
+            "preflight_gate": (
+                "Do not launch PPO training until residual-GRU teacher action "
+                "extraction parity passes and a parity packet is written."
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.21, or success >= 0.21 with mean_gates above "
+                    "1.66/1.69 and crash <= 0.79-0.80, or clear broader "
+                    "solved-seed coverage without losing the old frontier"
+                ),
+                "rollback": (
+                    "Reject if hard eval stays in the 18%-22% plateau, merely "
+                    "reshuffles solved seeds, or shows healthy retention metrics "
+                    "without evaluator progress."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 64,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "v27_teacher_kl_beta": 0.03,
+            "v27_retention_batch_size": 512,
+            "v27_lane_name": "v46_residual_frontier_teacher_action_preflight",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "v45 proved MLP retention was active but stayed in the old "
+            "18%-21% seed-reshuffle band. The missing frontier teacher is "
+            "loop107/v37 1M, which uses a residual-GRU policy. v46 therefore "
+            "holds before training and requires residual-GRU teacher action "
+            "extraction parity before any PPO chunk can use loop107 as a "
+            "training-only retention teacher."
+        ),
+    },
 }
 
 FIRE_PARAM_KEYS = [
@@ -8418,6 +8546,17 @@ def build_training_structure_hold(
             "nonzero retention/sampled_batch_size plus finite teacher_kl, "
             "teacher_action_mse, and teacher_agreement metrics, and write a "
             "zero-update or deterministic preflight packet"
+        )
+    elif missing_support == "residual_frontier_teacher_action_extraction_preflight_support":
+        support_steps = (
+            "implement the v46 residual-frontier teacher action preflight first: "
+            "extract loop107/v37 residual-GRU teacher actions with hidden-state "
+            "carry, prove episode-boundary hidden-state reset, compare extracted "
+            "actions against direct ppo_level3_inference actions on ordered "
+            "trajectories, build a diagnostic retention dataset on disjoint "
+            "train-pool seeds, verify finite teacher_kl/action_mse/agreement "
+            "against the v5 MLP student, and write a parity packet before "
+            "launching PPO training"
         )
     else:
         support_steps = (

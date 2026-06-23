@@ -35,11 +35,13 @@ for an explicitly accepted blind run without analysis.
 
 For the user's unattended Codex-supervised loop, run one train/evaluate chunk at
 a time and let the Codex main agent do the analysis/subagent/research decision
-between invocations. The latest completed chunk, loop115/v44, proved active
-recurrent sequence retention but still failed hard eval with `0%` success and
-at most `0.17` mean gates. Do not continue v44 or start from loop115
-checkpoints. The immediate next step is the v45 v5-frontier union-retention
-preflight, not another GRU/v10 run.
+between invocations. The latest completed chunk, loop116/v45, proved active
+flat v5 MLP retention but stayed inside the old plateau: best checkpoint 4M
+had `20%` success, `1.60` mean gates, `80%` crash, and `6.941s` mean successful
+time. Do not continue v45 as-is or start from loop116 final. The immediate
+next step is the held v46 residual-frontier teacher-action preflight: prove
+loop107/v37 residual-GRU action extraction parity before any training uses that
+teacher.
 
 Historical v40 command, retained only for provenance:
 
@@ -187,17 +189,16 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m
+v46_v5_residual_frontier_teacher_action_retention_preflight
 ```
 
-v40/v42/v43/v44 now form a negative GRU/v10 sequence: wiring is clean and v44
-retention was active, but normal-start hard-eval gate acquisition did not
-emerge. loop115/v44 reached `0%` success at every milestone and only `0.17`
-mean gates at final. The next immediate action is v45 preflight/support work:
-return to the stronger v5 MLP frontier, build a compatible train-pool union
-retention dataset from loop101/loop110 style MLP teachers, verify active flat
-MLP retention, then run only one bounded W&B-tracked train/evaluate chunk if
-the preflight passes.
+v45 confirmed that flat MLP retention is active, but loop101/loop110 teacher
+coverage was not enough to beat the frontier. The next immediate action is not
+another long run. First audit residual-GRU teacher action extraction from
+loop107/v37 1M, prove hidden-state reset/carry and action parity against direct
+inference, build a diagnostic train-pool retention dataset, and write a parity
+packet. Only after that preflight passes should the loop run a bounded
+W&B-tracked PPO screen, still hard-evaluated on unchanged `config/level3.toml`.
 
 ## Research-Guided Tuning
 

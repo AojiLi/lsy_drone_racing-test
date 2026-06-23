@@ -97,13 +97,20 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   2M with `0.06` mean gates, and the final checkpoint reached only `0.17` mean
   gates with `95%` crash. Do not continue v44 as-is and do not start future
   training from loop115 checkpoints.
+- loop116 tested
+  `v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m` and proved flat
+  v5 MLP retention was active, but did not beat the frontier. Best was the 4M
+  checkpoint with `20%` success, `1.60` mean gates, `80%` crash, and `6.941s`
+  mean successful time; final was `19%` success and `1.59` mean gates. Do not
+  continue v45 as-is and do not start future training from loop116 final.
 - The immediate next lane is
-  `v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop115_reject_v44_prepare_v45_v5_frontier_union_retention.md`.
-  This is a v5/frontier MLP support lane: build or audit a disjoint train-pool
-  union retention dataset from compatible v5 MLP teachers, verify active flat
-  MLP retention, then run only one bounded W&B-tracked chunk if preflight
-  passes. Keep hard eval on unchanged `config/level3.toml`.
+  `v46_v5_residual_frontier_teacher_action_retention_preflight`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop116_reject_v45_prepare_v46_residual_frontier_teacher_action_retention.md`.
+  This is a held preflight lane, not a training lane yet: implement/audit
+  residual-GRU teacher action extraction from loop107/v37 1M, prove hidden-state
+  reset/carry and action parity against direct inference, build a diagnostic
+  train-pool retention dataset, and write a parity packet before any PPO
+  training. Keep hard eval on unchanged `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
