@@ -90,13 +90,20 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   mean-gates milestone was only `0.06`, below the BC-only diagnostic's `0.15`.
   Do not continue v43 as-is and do not start future training from loop114
   checkpoints.
+- loop115 tested
+  `v44_sequence_success_retention_failure_correction_gru_v10` and proved
+  recurrent sequence retention was active, but did not convert it into hard-eval
+  progress. All milestones had `0%` success; the best analyzer checkpoint was
+  2M with `0.06` mean gates, and the final checkpoint reached only `0.17` mean
+  gates with `95%` crash. Do not continue v44 as-is and do not start future
+  training from loop115 checkpoints.
 - The immediate next lane is
-  `v44_sequence_success_retention_failure_correction_gru_v10`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop114_reject_v43_prepare_v44_sequence_retention.md`.
-  This is a preflight/support lane: implement or verify active recurrent
-  sequence retention during PPO, prove nonzero retention sampling and finite
-  KL/MSE/agreement before training, and keep hard eval on unchanged
-  `config/level3.toml`.
+  `v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop115_reject_v44_prepare_v45_v5_frontier_union_retention.md`.
+  This is a v5/frontier MLP support lane: build or audit a disjoint train-pool
+  union retention dataset from compatible v5 MLP teachers, verify active flat
+  MLP retention, then run only one bounded W&B-tracked chunk if preflight
+  passes. Keep hard eval on unchanged `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

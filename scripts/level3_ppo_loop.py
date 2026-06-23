@@ -376,6 +376,10 @@ V44_SUCCESS24_RETENTION_DATASET_PATH = (
     "experiments/level3_ppo_loop/retention_datasets/"
     "v44_loop110_train_pool_success24_v5_teacher_v10_student.npz"
 )
+V45_FRONTIER_UNION_RETENTION_DATASET_PATH = (
+    "experiments/level3_ppo_loop/retention_datasets/"
+    "v45_loop101_loop110_frontier_success_union_v5.npz"
+)
 V28_FAILURE_TRAJECTORY_DATASET_PATH = (
     "experiments/level3_ppo_loop/failure_datasets/"
     "v28_loop087_train_pool_selected_bounds_failure_trajectories.npz"
@@ -532,6 +536,14 @@ V43_SUCCESS_TRAJECTORY_IMITATION_DECISION_PACKET = (
 V44_SEQUENCE_RETENTION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop114_reject_v43_prepare_v44_sequence_retention.md"
+)
+V45_FRONTIER_UNION_RETENTION_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-23_level3_v45_v5_frontier_union_retention_plan.md"
+)
+V45_FRONTIER_UNION_RETENTION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop115_reject_v44_prepare_v45_v5_frontier_union_retention.md"
 )
 V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
@@ -7068,6 +7080,119 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "deployment and unchanged Level3 track, but adds active sequence "
             "dataset retention during PPO so the GRU/v10 Actor rehearses "
             "successful teacher trajectories while learning from online rewards."
+        ),
+    },
+    "v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m": {
+        "name": "v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m",
+        "proposal_name": "structural_v45_v5_frontier_union_retention_mlp_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "teacher_retention_kl",
+        "research_packet": V45_FRONTIER_UNION_RETENTION_PACKET,
+        "approved_hypothesis_packet": V45_FRONTIER_UNION_RETENTION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "parent_failure": (
+                "loop115/v44 proved recurrent retention was active, but v10/GRU "
+                "still produced 0% hard-eval success and only 0.17 mean gates."
+            ),
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "v27_teacher_kl_beta",
+                "v27_retention_dataset_path",
+                "v27_retention_batch_size",
+            ],
+            "changed_reward_numbers": [],
+            "retention": {
+                "type": "flat_dataset_teacher_retention",
+                "dataset": V45_FRONTIER_UNION_RETENTION_DATASET_PATH,
+                "teachers": [
+                    "loop110/v39 3M MLP frontier",
+                    "loop101/v33 final MLP frontier",
+                ],
+                "student_start": "loop110/v39 3M",
+                "batch_size": 512,
+                "beta": 0.03,
+                "inference_policy": "PPO Actor only; no teacher, planner, or shield",
+                "note": (
+                    "loop107/v37 is a residual-GRU frontier and is not used as "
+                    "a dataset teacher until residual-action extraction is "
+                    "separately preflighted."
+                ),
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 14 v5 frontier union retention",
+            "baseline": "loop110/v39 3M and loop107/v37 1M frontier",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can flat retention over compatible v5 MLP frontier-success "
+                "states preserve known behavior while PPO from loop110 3M "
+                "searches for broader validation seed coverage?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.21, or success >= 0.21 with mean_gates above "
+                    "1.66/1.69 and crash <= 0.79-0.80, or clear broader "
+                    "solved-seed coverage without losing the old frontier"
+                ),
+                "rollback": (
+                    "Reject if hard eval stays in the 18%-22% plateau, merely "
+                    "reshuffles solved seeds, or shows healthy retention metrics "
+                    "without evaluator progress."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 63,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "v27_teacher_kl_beta": 0.03,
+            "v27_retention_dataset_path": V45_FRONTIER_UNION_RETENTION_DATASET_PATH,
+            "v27_retention_batch_size": 512,
+            "v27_lane_name": "v45_v5_frontier_union_retention_mlp",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "v40/v42/v43/v44 now make GRU/v10 a negative sequence: wiring and "
+            "retention work, but validation gate acquisition does not emerge. "
+            "v45 steps back to the stronger v5 MLP frontier, starts from "
+            "loop110/v39 3M, and adds a training-only retention anchor built "
+            "from compatible v5 MLP frontier successes. This tests whether "
+            "retention can reduce seed-coverage churn without changing the "
+            "deployed controller or the unchanged Level3 track."
         ),
     },
 }

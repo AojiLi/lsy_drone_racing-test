@@ -35,11 +35,11 @@ for an explicitly accepted blind run without analysis.
 
 For the user's unattended Codex-supervised loop, run one train/evaluate chunk at
 a time and let the Codex main agent do the analysis/subagent/research decision
-between invocations. The latest completed chunk, loop113/v42, failed all hard
-eval milestones with `0%` success and at most `0.01` mean gates, so do not
-continue v42 or start from loop113 checkpoints. The immediate next step is the
-v43 success-trajectory imitation warmstart preflight, not another reward-only
-or from-scratch GRU/v10 run.
+between invocations. The latest completed chunk, loop115/v44, proved active
+recurrent sequence retention but still failed hard eval with `0%` success and
+at most `0.17` mean gates. Do not continue v44 or start from loop115
+checkpoints. The immediate next step is the v45 v5-frontier union-retention
+preflight, not another GRU/v10 run.
 
 Historical v40 command, retained only for provenance:
 
@@ -187,20 +187,17 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v44_sequence_success_retention_failure_correction_gru_v10
+v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m
 ```
 
-v42 showed that from-scratch GRU/v10 plus training-only gate-phase reset still
-does not acquire normal-start gate progress. v43 then proved the GRU/v10 Actor
-can imitate successful train-pool trajectories, but loop114 showed that
-unanchored PPO fine-tuning erases that small BC signal: best loop114 was `0%`
-success and `0.01` mean gates, while the highest milestone mean gates was only
-`0.06`, below the BC-only diagnostic's `0.15`.
-
-The next immediate action is v44 preflight/support work: implement or verify
-active recurrent sequence retention during PPO, prove nonzero retention
-sampling and finite KL/MSE/agreement, then run only one bounded W&B-tracked
-train/evaluate chunk if the preflight passes.
+v40/v42/v43/v44 now form a negative GRU/v10 sequence: wiring is clean and v44
+retention was active, but normal-start hard-eval gate acquisition did not
+emerge. loop115/v44 reached `0%` success at every milestone and only `0.17`
+mean gates at final. The next immediate action is v45 preflight/support work:
+return to the stronger v5 MLP frontier, build a compatible train-pool union
+retention dataset from loop101/loop110 style MLP teachers, verify active flat
+MLP retention, then run only one bounded W&B-tracked train/evaluate chunk if
+the preflight passes.
 
 ## Research-Guided Tuning
 
