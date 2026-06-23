@@ -507,6 +507,12 @@ class Args:
                         "v27_teacher_kl_beta > 0 with MLP policy requires a real "
                         "v27_retention_dataset_path."
                     )
+            elif args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+                if not has_real_retention_dataset:
+                    raise ValueError(
+                        "v27_teacher_kl_beta > 0 with recurrent Actor policy requires "
+                        "a real v27_retention_dataset_path."
+                    )
             elif args.policy_arch == POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256:
                 if has_real_retention_dataset:
                     raise NotImplementedError(
@@ -519,8 +525,9 @@ class Args:
                     )
             else:
                 raise NotImplementedError(
-                    "v27 teacher-retention KL currently supports only MLP dataset "
-                    "retention and residual-GRU online teacher retention."
+                    "v27 teacher-retention KL currently supports MLP dataset retention, "
+                    "true-GRU sequence dataset retention, and residual-GRU online "
+                    "teacher retention."
                 )
             if args.v27_retention_batch_size <= 0:
                 raise ValueError("v27_retention_batch_size must be positive.")
@@ -3425,11 +3432,17 @@ class V27RetentionDataset:
     student_obs: Tensor
     teacher_action_mean: Tensor
     teacher_action_logstd: Tensor
+    sequence_indices: tuple[Tensor, ...] = ()
 
     @property
     def num_samples(self) -> int:
         """Return the number of retained states."""
         return int(self.student_obs.shape[0])
+
+    @property
+    def num_sequences(self) -> int:
+        """Return the number of retained episode sequences."""
+        return len(self.sequence_indices)
 
 
 @dataclass
@@ -3472,8 +3485,10 @@ def load_v27_retention_dataset(
         return None
     if str(args.v27_retention_dataset_path) == "disabled_control_arm":
         return None
-    if args.policy_arch != POLICY_ARCH_MLP:
-        raise NotImplementedError("v27 retention KL currently supports only MLP policies.")
+    if args.policy_arch not in (POLICY_ARCH_MLP, POLICY_ARCH_RECURRENT_ACTOR_GRU256):
+        raise NotImplementedError(
+            "v27 dataset retention supports only MLP and true recurrent Actor policies."
+        )
 
     dataset_path = Path(args.v27_retention_dataset_path)
     if not dataset_path.is_absolute():
@@ -3518,6 +3533,33 @@ def load_v27_retention_dataset(
         if not np.isfinite(array).all():
             raise ValueError(f"v27 retention dataset contains non-finite {name} values.")
 
+    sequence_indices: tuple[Tensor, ...] = ()
+    if args.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+        missing_sequence = [key for key in ("seed", "episode_step") if key not in data.files]
+        if missing_sequence:
+            raise ValueError(
+                "recurrent v27 retention dataset is missing sequence arrays: "
+                f"{missing_sequence}"
+            )
+        seeds = np.asarray(data["seed"], dtype=np.int64)
+        episode_steps = np.asarray(data["episode_step"], dtype=np.int64)
+        if seeds.shape != (student_obs_np.shape[0],) or episode_steps.shape != seeds.shape:
+            raise ValueError(
+                "recurrent v27 retention seed/episode_step shape mismatch: "
+                f"seed={seeds.shape}, episode_step={episode_steps.shape}, "
+                f"samples={student_obs_np.shape[0]}."
+            )
+        sequences: list[Tensor] = []
+        for seed in np.unique(seeds):
+            indices = np.where(seeds == seed)[0]
+            order = np.argsort(episode_steps[indices], kind="stable")
+            ordered = indices[order]
+            if ordered.size >= 2:
+                sequences.append(torch.as_tensor(ordered, dtype=torch.long, device=device))
+        if not sequences:
+            raise ValueError("recurrent v27 retention dataset has no usable sequences.")
+        sequence_indices = tuple(sequences)
+
     dataset = V27RetentionDataset(
         student_obs=torch.as_tensor(student_obs_np, dtype=torch.float32, device=device),
         teacher_action_mean=torch.as_tensor(teacher_mean_np, dtype=torch.float32, device=device),
@@ -3526,6 +3568,7 @@ def load_v27_retention_dataset(
             dtype=torch.float32,
             device=device,
         ),
+        sequence_indices=sequence_indices,
     )
     print(f"loaded v27 retention dataset: {dataset_path} ({dataset.num_samples} samples)")
     if wandb.run is not None:
@@ -3533,6 +3576,7 @@ def load_v27_retention_dataset(
             {
                 "v27_retention_dataset_resolved": str(dataset_path),
                 "v27_retention_dataset_samples": dataset.num_samples,
+                "v27_retention_dataset_sequences": dataset.num_sequences,
             },
             allow_val_change=True,
         )
@@ -3674,6 +3718,56 @@ def v27_teacher_retention_loss(
         )
     )
     return teacher_kl, teacher_action_mse, teacher_agreement, sample_size
+
+
+def v27_recurrent_dataset_retention_loss(
+    agent: RecurrentActorAgent,
+    dataset: V27RetentionDataset,
+    sequence_len: int,
+    batch_size: int,
+) -> tuple[Tensor, Tensor, Tensor, int]:
+    """Return sequence-aware dataset retention loss for a recurrent Actor."""
+    if dataset.num_sequences <= 0:
+        raise ValueError("recurrent retention dataset has no episode sequences.")
+    if sequence_len <= 0:
+        raise ValueError("recurrent retention sequence_len must be positive.")
+    sequence_batch_size = max(1, int(batch_size) // int(sequence_len))
+    device = dataset.student_obs.device
+    obs_dim = dataset.student_obs.shape[1]
+    action_dim = dataset.teacher_action_mean.shape[1]
+    obs_batch = torch.empty((sequence_len, sequence_batch_size, obs_dim), device=device)
+    teacher_mean_batch = torch.empty(
+        (sequence_len, sequence_batch_size, action_dim),
+        device=device,
+    )
+    teacher_logstd_batch = torch.empty_like(teacher_mean_batch)
+    done_batch = torch.zeros((sequence_len, sequence_batch_size), device=device)
+    done_batch[0, :] = 1.0
+
+    for batch_idx in range(sequence_batch_size):
+        seq = dataset.sequence_indices[
+            int(torch.randint(dataset.num_sequences, (1,), device=device).item())
+        ]
+        if seq.numel() >= sequence_len:
+            start = int(torch.randint(seq.numel() - sequence_len + 1, (1,), device=device).item())
+            indices = seq[start : start + sequence_len]
+        else:
+            pad = seq[-1:].repeat(sequence_len - seq.numel())
+            indices = torch.cat((seq, pad), dim=0)
+        obs_batch[:, batch_idx] = dataset.student_obs[indices]
+        teacher_mean_batch[:, batch_idx] = dataset.teacher_action_mean[indices]
+        teacher_logstd_batch[:, batch_idx] = dataset.teacher_action_logstd[indices]
+
+    hidden_state = agent.get_initial_state(sequence_batch_size, device)
+    student_mean, _ = agent._actor_mean(obs_batch, hidden_state, done_batch)
+    student_logstd = agent.actor_logstd.expand_as(student_mean)
+    teacher_kl, teacher_action_mse, teacher_agreement = v27_distribution_retention_metrics(
+        student_mean,
+        student_logstd,
+        teacher_mean_batch.reshape_as(student_mean),
+        teacher_logstd_batch.reshape_as(student_mean),
+    )
+    return teacher_kl, teacher_action_mse, teacher_agreement, sequence_len * sequence_batch_size
 
 
 def v27_online_teacher_retention_loss(
@@ -4282,8 +4376,6 @@ def train_ppo(
         teacher_agreement_values: list[float] = []
         retention_batch_sizes: list[float] = []
         if recurrent_enabled:
-            if retention_dataset is not None:
-                raise NotImplementedError("v27 retention KL is not wired for recurrent PPO.")
             b_values_raw = raw_values.reshape(-1)
             b_returns = returns.reshape(-1)
             env_inds = np.arange(args.num_envs)
@@ -4355,6 +4447,31 @@ def train_ppo(
                             obs[:, mb_env_inds],
                             initial_recurrent_state[:, mb_env_inds],
                             dones[:, mb_env_inds],
+                            args.v27_retention_batch_size,
+                        )
+                        loss = loss + args.v27_teacher_kl_beta * teacher_kl_loss
+                        teacher_kl_values.append(float(teacher_kl_loss.detach().cpu().item()))
+                        teacher_action_mse_values.append(
+                            float(teacher_action_mse.detach().cpu().item())
+                        )
+                        teacher_agreement_values.append(
+                            float(teacher_agreement.detach().cpu().item())
+                        )
+                        retention_batch_sizes.append(float(retention_batch_size))
+                    if retention_dataset is not None:
+                        if not isinstance(agent, RecurrentActorAgent):
+                            raise TypeError(
+                                "dataset sequence retention requires true recurrent Actor."
+                            )
+                        (
+                            teacher_kl_loss,
+                            teacher_action_mse,
+                            teacher_agreement,
+                            retention_batch_size,
+                        ) = v27_recurrent_dataset_retention_loss(
+                            agent,
+                            retention_dataset,
+                            args.recurrent_sequence_len,
                             args.v27_retention_batch_size,
                         )
                         loss = loss + args.v27_teacher_kl_beta * teacher_kl_loss

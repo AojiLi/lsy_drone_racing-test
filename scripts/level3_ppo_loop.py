@@ -372,6 +372,10 @@ V28_SUCCESS24_RETENTION_DATASET_PATH = (
     "experiments/level3_ppo_loop/retention_datasets/"
     "v27_loop052_train_pool_success24_v5_teacher_v8_student.npz"
 )
+V44_SUCCESS24_RETENTION_DATASET_PATH = (
+    "experiments/level3_ppo_loop/retention_datasets/"
+    "v44_loop110_train_pool_success24_v5_teacher_v10_student.npz"
+)
 V28_FAILURE_TRAJECTORY_DATASET_PATH = (
     "experiments/level3_ppo_loop/failure_datasets/"
     "v28_loop087_train_pool_selected_bounds_failure_trajectories.npz"
@@ -525,6 +529,10 @@ V43_SUCCESS_TRAJECTORY_IMITATION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_v43_bc_preflight_launch_v43_ppo_finetune.md"
 )
+V44_SEQUENCE_RETENTION_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop114_reject_v43_prepare_v44_sequence_retention.md"
+)
 V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
     "2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md"
@@ -558,6 +566,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_to_gru_transfer_support",
     "residual_gru_teacher_retention_support",
     "success_trajectory_imitation_warmstart_support",
+    "recurrent_sequence_retention_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -6938,6 +6947,127 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "This is not sufficient as a controller, but it is a concrete "
             "normal-start signal above v42's 0.01 mean_gates and justifies one "
             "bounded PPO fine-tune screen."
+        ),
+    },
+    "v44_sequence_success_retention_failure_correction_gru_v10": {
+        "name": "v44_sequence_success_retention_failure_correction_gru_v10",
+        "proposal_name": "structural_v44_sequence_success_retention_gru_v10_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": V43_SUCCESS_TRAJECTORY_BC_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "recurrent_sequence_retention_support",
+        "research_packet": V43_SUCCESS_TRAJECTORY_IMITATION_PACKET,
+        "approved_hypothesis_packet": V44_SEQUENCE_RETENTION_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "recurrent_actor_gru256",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "parent_failure": (
+                "loop114/v43 PPO erased BC first-gate signal; active retention "
+                "was off with retention/sampled_batch_size=0."
+            ),
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "policy_arch",
+                "observation_layout",
+                "recurrent_hidden_dim",
+                "recurrent_sequence_len",
+                "train_timesteps",
+                "checkpoint_interval",
+                "v27_teacher_kl_beta",
+                "v27_retention_dataset_path",
+                "v27_retention_batch_size",
+            ],
+            "retention": {
+                "type": "sequence_dataset_teacher_retention",
+                "dataset": V44_SUCCESS24_RETENTION_DATASET_PATH,
+                "teacher": "loop110/v39 3M feed-forward policy",
+                "student_observation_layout": (
+                    LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT
+                ),
+                "batch_size": 512,
+                "beta": 0.03,
+                "sample_shape": "time_major_episode_sequences",
+                "hidden_reset": "done[0]=1 for sampled sequences",
+                "inference_policy": "PPO Actor only; no teacher, planner, or shield",
+            },
+            "memory_structure": {
+                "actor": "FC128, FC128, GRU256, FC192, FC96, action_mean4",
+                "sequence_len": 128,
+                "reset_hidden_on_done": True,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 13 active sequence retention during PPO",
+            "baseline": "loop114/v43 erased one-shot BC warmstart signal",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can active recurrent sequence retention preserve the successful "
+                "train-pool behavior learned during BC while PPO searches for "
+                "normal-start improvements on unchanged Level3?"
+            ),
+            "promotion_gate": {
+                "short_screen": (
+                    "Promote only if hard eval beats the BC-only 0.15 mean-gates "
+                    "diagnostic, reaches at least 0.5 mean gates, produces "
+                    "nonzero success, or shows retention metrics converting into "
+                    "validation_unseen gate progress."
+                ),
+                "anti_drift": (
+                    "Reject if retention batches are not sampled, teacher KL/MSE "
+                    "remain inactive, or PPO still erases first-gate behavior."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 62,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "recurrent_actor_gru256",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 128,
+            "v27_teacher_kl_beta": 0.03,
+            "v27_retention_dataset_path": V44_SUCCESS24_RETENTION_DATASET_PATH,
+            "v27_retention_batch_size": 512,
+            "v27_lane_name": "v44_sequence_success_retention_gru_v10",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "loop114 showed that one-shot BC warmstart is not enough: PPO "
+            "fine-tuning reduced the BC-only 0.15 mean-gates diagnostic to at "
+            "most 0.06 mean gates and never produced success. The W&B review "
+            "showed retention was inactive. v44 keeps the same PPO Actor-only "
+            "deployment and unchanged Level3 track, but adds active sequence "
+            "dataset retention during PPO so the GRU/v10 Actor rehearses "
+            "successful teacher trajectories while learning from online rewards."
         ),
     },
 }
