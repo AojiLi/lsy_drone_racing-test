@@ -505,6 +505,18 @@ V40_SEQUENCE_MEMORY_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_launch_v40_sequence_memory_gru_phase_corridor.md"
 )
+V41_GRU_V10_WIRING_AUDIT_PACKET = (
+    "experiments/level3_ppo_loop/parity/"
+    "2026-06-23_v41_gru_v10_wiring_audit.md"
+)
+V42_GRU_V10_GATE_PHASE_CURRICULUM_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-23_level3_v42_gru_v10_gate_phase_curriculum_plan.md"
+)
+V42_GRU_V10_GATE_PHASE_CURRICULUM_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_v41_clean_launch_v42_gru_v10_gate_phase_curriculum.md"
+)
 LOOP107_V37_1M_CHECKPOINT = (
     "lsy_drone_racing/control/checkpoints/"
     "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight/"
@@ -6647,6 +6659,142 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "sequence-memory lane: from-scratch GRU-256 Actor, explicit "
             "phase/corridor/aperture local observation, fixed v39 gate-acquisition "
             "reward scale, dense milestone evaluation, and unchanged "
+            "config/level3.toml hard eval."
+        ),
+    },
+    "v42_gru_v10_gate_phase_reset_curriculum_from_scratch": {
+        "name": "v42_gru_v10_gate_phase_reset_curriculum_from_scratch",
+        "proposal_name": "structural_v42_gru_v10_gate_phase_reset_curriculum_10m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+        "train_timesteps": 10_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 7,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5,8,10",
+        "num_envs": 256,
+        "num_steps": 128,
+        "from_scratch": True,
+        "allow_repeat_params": True,
+        "requires_training_support": "gate_phase_reset_curriculum_support",
+        "research_packet": V42_GRU_V10_GATE_PHASE_CURRICULUM_PACKET,
+        "approved_hypothesis_packet": V42_GRU_V10_GATE_PHASE_CURRICULUM_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "recurrent_actor_gru256",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "diagnostic_precondition": V41_GRU_V10_WIRING_AUDIT_PACKET,
+            "changed_training_numbers": [
+                "from_scratch",
+                "policy_arch",
+                "observation_layout",
+                "recurrent_hidden_dim",
+                "recurrent_sequence_len",
+                "train_timesteps",
+                "checkpoint_interval",
+                "eval_milestones_m",
+                "gate_phase_reset_prob",
+                "gate_phase_reset_x_min",
+                "gate_phase_reset_x_max",
+                "gate_phase_reset_yz_max",
+                "gate_phase_reset_speed_min",
+                "gate_phase_reset_speed_max",
+            ],
+            "changed_reward_numbers": [
+                "gate_stage_coef",
+                "gate_axis_coef",
+                "gate_front_bonus",
+                "gate_bonus",
+                "gate_back_bonus",
+                "finish_bonus",
+                "time_penalty",
+            ],
+            "curriculum": {
+                "type": "training_only_gate_phase_reset",
+                "probability": 0.45,
+                "x_range_m": [-1.05, -0.18],
+                "yz_max_m": 0.16,
+                "speed_range_mps": [0.15, 1.20],
+                "reason": (
+                    "v40 wiring is clean but from-scratch GRU/v10 never acquired "
+                    "gate 0. Expose the same policy to near-gate approach states "
+                    "during training without changing hard eval."
+                ),
+            },
+            "memory_structure": {
+                "actor": "FC128, FC128, GRU256, FC192, FC96, action_mean4",
+                "sequence_len": 128,
+                "reset_hidden_on_done": True,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": (
+                "Experiment 11 sequence memory plus gate-phase curriculum"
+            ),
+            "baseline": "loop112/v40 clean wiring but 0 gates",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "If GRU/v10 wiring is correct, can a training-only gate-phase "
+                "reset curriculum bootstrap first-gate acquisition and produce "
+                "nonzero hard-eval gate progress on unchanged Level3?"
+            ),
+            "promotion_gate": {
+                "short_screen": (
+                    "Promote only if hard eval shows nonzero success, mean gates "
+                    "above 0.5, a clear passed-gate conversion signal, or crash "
+                    "reduction without replacing crashes with zero-gate timeouts."
+                ),
+                "anti_drift": (
+                    "Use milestone best, not final by default. Reject if all "
+                    "milestones remain 0 gates or simply reproduce v40 timeout "
+                    "behavior."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 60,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "recurrent_actor_gru256",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 128,
+            "gate_phase_reset_prob": 0.45,
+            "gate_phase_reset_x_min": -1.05,
+            "gate_phase_reset_x_max": -0.18,
+            "gate_phase_reset_yz_max": 0.16,
+            "gate_phase_reset_speed_min": 0.15,
+            "gate_phase_reset_speed_max": 1.20,
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "The v41 audit found the v40 GRU/v10 wiring clean: observation "
+            "parity, action scaling, recurrent train/inference parity, hidden "
+            "reset/carry, zero-update save/reload, and recurrent PPO gradients "
+            "all passed. Therefore loop112's zero-gate result is more likely a "
+            "from-scratch exploration/curriculum failure than an implementation "
+            "bug. v42 keeps the clean GRU/v10 architecture and v39 gate "
+            "motivation, but adds a training-only gate-phase reset curriculum "
+            "to bootstrap gate acquisition while preserving unchanged "
             "config/level3.toml hard eval."
         ),
     },

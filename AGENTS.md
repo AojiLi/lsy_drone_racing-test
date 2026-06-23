@@ -77,13 +77,19 @@
   every 1M/2M/3M/4M/final milestone had `0%` success and `0.0` mean gates, with
   all failures at gate 0. Do not continue v40 as-is, do not mature it to a long
   run, and do not start future training from loop112 checkpoints.
-- The immediate next lane is the diagnostic packet
-  `v41_gru_v10_recurrent_wiring_audit_and_zero_update_parity`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop112_reject_v40_launch_v41_gru_v10_wiring_audit.md`.
-  This is not a long training lane. Before any further GRU/v10 training, audit
-  recurrent Actor zero-update parity, train/eval action-scale parity,
-  hidden-state reset/carry parity, v10 observation numeric sanity, and
-  recurrent PPO gradient/update sanity.
+- v41 audited GRU/v10 wiring after loop112 and passed: recurrent Actor
+  zero-update parity, train/eval action-scale parity, hidden-state reset/carry
+  parity, v10 observation parity/sanity, and recurrent PPO gradient/update
+  sanity were all clean. This rules out an obvious wiring bug as the cause of
+  v40's zero-gate failure.
+- The immediate next train/evaluate lane is
+  `v42_gru_v10_gate_phase_reset_curriculum_from_scratch`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_v41_clean_launch_v42_gru_v10_gate_phase_curriculum.md`
+  and sourced by
+  `experiments/level3_ppo_loop/research/2026-06-23_level3_v42_gru_v10_gate_phase_curriculum_plan.md`.
+  It keeps GRU/v10 and v39 gate-acquisition rewards, starts from scratch, adds
+  the training-only v33-style gate-phase reset curriculum, and hard-evals only
+  on unchanged `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

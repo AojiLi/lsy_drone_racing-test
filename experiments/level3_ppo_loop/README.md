@@ -186,16 +186,14 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v41_gru_v10_recurrent_wiring_audit_and_zero_update_parity
+v42_gru_v10_gate_phase_reset_curriculum_from_scratch
 ```
 
-This is a diagnostic structural lane, not a long training lane. It follows the
-loop112/v40 failure where all 1M/2M/3M/4M/final milestones had `0%` success and
-`0.0` mean gates. Before any further GRU/v10 training, audit recurrent Actor
-zero-update parity, train/eval action-scale parity, hidden-state reset/carry
-parity, v10 observation numeric sanity, and recurrent PPO gradient/update
-sanity. Final acceptance is still only hard eval on unchanged
-`config/level3.toml`.
+v41 passed the GRU/v10 wiring audit, so the next bounded train/evaluate lane is
+v42: keep GRU/v10 and v39 gate-acquisition rewards, start from scratch, add the
+training-only v33-style gate-phase reset curriculum, and hard-eval only on
+unchanged `config/level3.toml`. The goal of v42 is first-gate acquisition and
+nonzero normal-start hard-eval gate progress, not speed optimization.
 
 ## Research-Guided Tuning
 

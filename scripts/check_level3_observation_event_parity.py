@@ -19,6 +19,10 @@ from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 
 from lsy_drone_racing.control import ppo_level3_inference
 from lsy_drone_racing.control.ppo_level3_observation import (
+    CRITIC_OBSERVATION_SAME_AS_ACTOR,
+    LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS,
+    LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS,
+    LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_NEXT_GATE_OBSERVATION_LAYOUTS,
     LOCAL_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
@@ -55,6 +59,7 @@ def make_training_obs_probe(
     probe.n_history = n_history
     probe.debug_obs = False
     probe.observation_layout = observation_layout
+    probe.critic_observation_mode = CRITIC_OBSERVATION_SAME_AS_ACTOR
     probe.action_lowpass_alpha = action_lowpass_alpha
     probe._printed_obs_debug = False
     probe.n_gates = int(np.asarray(obs["gates_pos"]).shape[0])
@@ -64,6 +69,15 @@ def make_training_obs_probe(
     probe._use_local_obstacles = observation_layout in LOCAL_OBSTACLE_OBSERVATION_LAYOUTS
     probe._use_local_next_gate = observation_layout in LOCAL_NEXT_GATE_OBSERVATION_LAYOUTS
     probe._use_local_phase_progress = observation_layout in LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS
+    probe._use_local_gate_corridor_obstacles = (
+        observation_layout in LOCAL_GATE_CORRIDOR_OBSTACLE_OBSERVATION_LAYOUTS
+    )
+    probe._use_local_gate_aperture_margin = (
+        observation_layout in LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUTS
+    )
+    probe._use_local_gate_aperture_margin_minimal = (
+        observation_layout in LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS
+    )
     probe.history_dim = (
         RaceObservation.LOCAL_HISTORY_DIM
         if probe._use_local_obstacles
