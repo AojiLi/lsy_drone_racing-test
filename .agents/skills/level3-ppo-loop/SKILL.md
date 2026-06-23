@@ -106,11 +106,14 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
 - The immediate next lane is
   `v46_v5_residual_frontier_teacher_action_retention_preflight`, approved by
   `experiments/level3_ppo_loop/decisions/2026-06-23_loop116_reject_v45_prepare_v46_residual_frontier_teacher_action_retention.md`.
-  This is a held preflight lane, not a training lane yet: implement/audit
-  residual-GRU teacher action extraction from loop107/v37 1M, prove hidden-state
-  reset/carry and action parity against direct inference, build a diagnostic
-  train-pool retention dataset, and write a parity packet before any PPO
-  training. Keep hard eval on unchanged `config/level3.toml`.
+  Its diagnostic preflight has passed in
+  `experiments/level3_ppo_loop/parity/2026-06-23_v46_residual_frontier_teacher_action_preflight.md`:
+  residual-GRU teacher action extraction from loop107/v37 1M matches direct
+  inference with `0.0` action diff and `0.0` hidden-state diff, and the
+  diagnostic dataset has finite KL/MSE/agreement. It is still not a blind
+  training lane: first write or consume the next decision packet for the
+  production residual-frontier retention dataset/training screen. Keep hard eval
+  on unchanged `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

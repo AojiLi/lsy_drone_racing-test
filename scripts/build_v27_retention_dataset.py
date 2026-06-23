@@ -21,9 +21,7 @@ import numpy as np
 import torch
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 
-from lsy_drone_racing.control.ppo_level3_observation import (
-    POLICY_ARCH_RECURRENT_ACTOR_GRU256,
-)
+from lsy_drone_racing.control.ppo_level3_observation import policy_arch_uses_recurrent_state
 from lsy_drone_racing.utils import load_config
 
 ROOT = Path(__file__).parents[1]
@@ -116,7 +114,12 @@ def teacher_distribution_and_action(
         0
     )
     with torch.no_grad():
-        if controller.policy_arch == POLICY_ARCH_RECURRENT_ACTOR_GRU256:
+        if policy_arch_uses_recurrent_state(controller.policy_arch):
+            if controller._recurrent_hidden_state is None:  # noqa: SLF001
+                controller._recurrent_hidden_state = controller.agent.get_initial_state(  # noqa: SLF001
+                    1,
+                    controller.device,
+                )
             done = torch.zeros(1, dtype=torch.float32, device=controller.device)
             action_mean, _, _, _, controller._recurrent_hidden_state = (  # noqa: SLF001
                 controller.agent.get_action_and_value(
@@ -298,6 +301,8 @@ def build_dataset(args: argparse.Namespace) -> dict[str, Any]:
         "student_checkpoint": repo_rel(student_checkpoint),
         "teacher_observation_layout": getattr(teacher, "observation_layout", None),
         "student_observation_layout": getattr(student_observer, "observation_layout", None),
+        "teacher_policy_arch": getattr(teacher, "policy_arch", None),
+        "student_policy_arch": getattr(student_observer, "policy_arch", None),
         "excluded_seed_ranges": args.exclude_seed_ranges,
         "seed_start": args.seed_start,
         "max_seeds": args.max_seeds,

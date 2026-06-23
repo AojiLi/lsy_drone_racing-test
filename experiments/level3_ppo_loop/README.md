@@ -38,10 +38,12 @@ a time and let the Codex main agent do the analysis/subagent/research decision
 between invocations. The latest completed chunk, loop116/v45, proved active
 flat v5 MLP retention but stayed inside the old plateau: best checkpoint 4M
 had `20%` success, `1.60` mean gates, `80%` crash, and `6.941s` mean successful
-time. Do not continue v45 as-is or start from loop116 final. The immediate
-next step is the held v46 residual-frontier teacher-action preflight: prove
-loop107/v37 residual-GRU action extraction parity before any training uses that
-teacher.
+time. Do not continue v45 as-is or start from loop116 final. The held v46
+residual-frontier teacher-action preflight has passed: loop107/v37 residual-GRU
+action extraction matches direct inference with `0.0` action diff and `0.0`
+hidden-state diff on unchanged `config/level3.toml`. The next step is to use
+that parity packet to decide/build the production residual-frontier retention
+lane before any PPO training.
 
 Historical v40 command, retained only for provenance:
 
@@ -193,11 +195,13 @@ v46_v5_residual_frontier_teacher_action_retention_preflight
 ```
 
 v45 confirmed that flat MLP retention is active, but loop101/loop110 teacher
-coverage was not enough to beat the frontier. The next immediate action is not
-another long run. First audit residual-GRU teacher action extraction from
-loop107/v37 1M, prove hidden-state reset/carry and action parity against direct
-inference, build a diagnostic train-pool retention dataset, and write a parity
-packet. Only after that preflight passes should the loop run a bounded
+coverage was not enough to beat the frontier. The v46 diagnostic preflight now
+proves loop107/v37 1M residual-GRU teacher action extraction includes the
+residual branch and matches direct inference exactly on the checked trajectory.
+The diagnostic dataset produced finite student-vs-teacher metrics
+(`KL=0.1525`, `MSE=0.04085`, agreement `0.7086`). The next immediate action is
+not another blind long run: use the parity packet to create the production
+residual-frontier retention decision/data lane, then run at most one bounded
 W&B-tracked PPO screen, still hard-evaluated on unchanged `config/level3.toml`.
 
 ## Research-Guided Tuning
