@@ -561,6 +561,14 @@ V47_RESIDUAL_FRONTIER_UNION_RETENTION_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_v46_preflight_passed_launch_v47_residual_frontier_union_retention.md"
 )
+V48_CONTACT_CONVERSION_REWARD_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-23_level3_v48_contact_conversion_reward_structure_plan.md"
+)
+V48_CONTACT_CONVERSION_REWARD_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop117_reject_v47_launch_v48_contact_conversion_reward_structure.md"
+)
 V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
     "2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md"
@@ -7446,6 +7454,137 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "to the v39 gate-acquisition scale, and tests whether a broader "
             "72-trajectory train-pool union retention anchor can reduce "
             "success-seed churn without changing the Level3 track."
+        ),
+    },
+    "v48_v5_contact_conversion_reward_structure_from_loop110_3m": {
+        "name": "v48_v5_contact_conversion_reward_structure_from_loop110_3m",
+        "proposal_name": "structural_v48_v5_contact_conversion_reward_structure_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+        "allow_repeat_params": True,
+        "research_packet": V48_CONTACT_CONVERSION_REWARD_PACKET,
+        "approved_hypothesis_packet": V48_CONTACT_CONVERSION_REWARD_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "parent_failure": (
+                "loop117/v47 proved residual-frontier union retention was "
+                "mechanically active, but did not convert to hard-eval progress."
+            ),
+            "changed_training_numbers": [
+                "initial_checkpoint",
+                "v27_teacher_kl_beta",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [
+                "reward_structure",
+                "gate_axis_coef",
+                "gate_front_bonus",
+                "gate_plane_bonus",
+                "gate_bonus",
+                "missed_gate_penalty",
+                "gate_frame_pressure_coef",
+                "wrong_side_penalty",
+            ],
+            "retention": {
+                "type": "none",
+                "reason": (
+                    "v45 and v47 both had active retention metrics without "
+                    "expanding validation success, so v48 removes the teacher "
+                    "anchor and tests reward-structure conversion directly."
+                ),
+            },
+            "reward_structure_test": {
+                "type": "decoupled_frame_clearance",
+                "goal": (
+                    "separate gate-frame/contact pressure from missed-gate "
+                    "penalty while keeping the v39 gate-acquisition scale"
+                ),
+                "diagnostic_metrics": [
+                    "success_rate",
+                    "mean_gates",
+                    "crash_rate",
+                    "cmd_tilt_over_limit_frac",
+                    "gate_frame_pressure",
+                    "wrong_side_gate_rate",
+                    "passed_gate_rate",
+                    "finished_rate",
+                ],
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 17 contact/conversion reward structure",
+            "baseline": "loop110/v39 3M and loop107/v37 1M frontier",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can a centerline/contact-aware reward structure reduce the "
+                "gate-frame and wrong-side crashes that dominate the 20%-21% "
+                "plateau, without lowering gate acquisition?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.21, or success >= 0.21 with mean_gates above "
+                    "1.66 and crash <= 0.79, or lower crash/tilt with no loss "
+                    "of mean gates"
+                ),
+                "rollback": (
+                    "Reject if success stays <= 0.21, mean_gates stay <= 1.66, "
+                    "crash remains near 0.79-0.80, or frame pressure merely "
+                    "reduces gate acquisition."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 66,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "v27_teacher_kl_beta": 0.0,
+            "reward_structure": "decoupled_frame_clearance",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 22.0,
+            "gate_front_bonus": 8.0,
+            "gate_plane_bonus": 28.0,
+            "gate_bonus": 190.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "missed_gate_penalty": 8.0,
+            "gate_frame_pressure_coef": 2.5,
+            "wrong_side_penalty": 12.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "loop117/v47 rejected retention as the next lever: teacher KL, "
+            "MSE, and agreement improved, but the best hard eval stayed at "
+            "20% success, 1.58 mean gates, and 80% crash. Failures remain "
+            "contact-heavy at gate 0 and gate 2. v48 therefore starts again "
+            "from loop110/v39 3M, drops retention, keeps the deployed v5 MLP "
+            "Actor and unchanged Level3 track, and runs one bounded screen of "
+            "a decoupled contact/conversion reward structure."
         ),
     },
 }

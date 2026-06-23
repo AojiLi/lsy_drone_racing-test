@@ -103,18 +103,21 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   checkpoint with `20%` success, `1.60` mean gates, `80%` crash, and `6.941s`
   mean successful time; final was `19%` success and `1.59` mean gates. Do not
   continue v45 as-is and do not start future training from loop116 final.
+- loop117 tested
+  `v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m` and proved
+  residual-frontier union retention was active, but did not beat the frontier.
+  Best was the 3M checkpoint with `20%` success, `1.58` mean gates, `80%`
+  crash, and `7.064s` mean successful time. Teacher KL/MSE/agreement improved,
+  so do not continue v47 as-is and do not start future training from loop117
+  final.
 - The immediate next lane is
-  `v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_v46_preflight_passed_launch_v47_residual_frontier_union_retention.md`.
-  The v46 diagnostic preflight passed in
-  `experiments/level3_ppo_loop/parity/2026-06-23_v46_residual_frontier_teacher_action_preflight.md`:
-  residual-GRU teacher action extraction from loop107/v37 1M matches direct
-  inference with `0.0` action diff and `0.0` hidden-state diff. The v47
-  production union dataset has `72` train-pool success trajectories, `24388`
-  samples, no excluded seed overlap, and audit metrics `KL=0.083788`,
-  `MSE=0.017196`, agreement `0.830296`. Run at most one bounded W&B-tracked
-  v47 screen before analysis and the next decision. Keep hard eval on unchanged
-  `config/level3.toml`.
+  `v48_v5_contact_conversion_reward_structure_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop117_reject_v47_launch_v48_contact_conversion_reward_structure.md`.
+  It starts from loop110/v39 3M, keeps the v5 MLP Actor and unchanged
+  `config/level3.toml`, disables retention, and tests one bounded
+  contact/conversion reward-structure screen. After v48, run the analyzer,
+  exactly three subagent reviews, and a main-agent decision before any further
+  training.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
@@ -190,6 +193,9 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
    chooses exactly one of: `stop_target_met`, `hold_for_more_analysis`,
    `continue_same_hypothesis`, `change_reward_or_training_numbers`, or
    `launch_named_structural_lane`.
+   The user's current loop is repeated structural search, so a rejected
+   structural lane should normally lead to a newly named structural lane or an
+   explicit hold, not to silently repeating the same failed lane.
 9. The next training command after analysis must attach both provenance files:
    `--analysis-packet <analysis.md>` and
    `--approved-hypothesis-packet <decision.md>`.

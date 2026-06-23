@@ -85,6 +85,30 @@ def test_v47_residual_frontier_union_retention_lane_is_runnable() -> None:
 
 
 @pytest.mark.unit
+def test_v48_contact_conversion_reward_structure_lane_is_runnable() -> None:
+    """v48 should be a named structural screen, not a track or retention change."""
+    hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
+        "v48_v5_contact_conversion_reward_structure_from_loop110_3m"
+    ]
+
+    assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
+    assert hypothesis["architecture"]["track_geometry_change"] == "forbidden"
+    assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP110_V39_3M_CHECKPOINT
+    assert hypothesis["approved_hypothesis_packet"] == (
+        level3_ppo_loop.V48_CONTACT_CONVERSION_REWARD_DECISION_PACKET
+    )
+    assert hypothesis["research_packet"] == level3_ppo_loop.V48_CONTACT_CONVERSION_REWARD_PACKET
+    assert hypothesis["params"]["policy_arch"] == "mlp_2x_tanh"
+    assert hypothesis["params"]["v27_teacher_kl_beta"] == 0.0
+    assert hypothesis["params"]["reward_structure"] == "decoupled_frame_clearance"
+    assert hypothesis["params"]["gate_frame_pressure_coef"] > 0.0
+    assert hypothesis["params"]["missed_gate_penalty"] > 0.0
+    assert "reward_structure" in hypothesis["architecture"]["changed_reward_numbers"]
+    assert level3_ppo_loop.structural_hypothesis_runnable(hypothesis)
+
+
+@pytest.mark.unit
 def test_teacher_distribution_includes_residual_gru_branch() -> None:
     """Dataset extraction must not fall back to the MLP base actor for loop107."""
     torch.manual_seed(460)

@@ -35,13 +35,17 @@ for an explicitly accepted blind run without analysis.
 
 For the user's unattended Codex-supervised loop, run one train/evaluate chunk at
 a time and let the Codex main agent do the analysis/subagent/research decision
-between invocations. The latest completed chunk, loop116/v45, proved active
-flat v5 MLP retention but stayed inside the old plateau: best checkpoint 4M
-had `20%` success, `1.60` mean gates, `80%` crash, and `6.941s` mean successful
-time. Do not continue v45 as-is or start from loop116 final. The held v46
-residual-frontier teacher-action preflight has passed, and the v47 production
-union dataset is built/audited. The immediate next action is one bounded v47
-W&B-tracked screen, hard-evaluated on unchanged `config/level3.toml`.
+between invocations. The current loop is repeated structural search, not a
+one-off structure change: after each bounded chunk, Codex must analyze the
+result, collect exactly three reviews, write a decision packet, and either hold
+or launch the next named structural lane.
+
+The latest completed chunk, loop117/v47, proved residual-frontier union
+retention was active but stayed inside the old plateau: best checkpoint 3M had
+`20%` success, `1.58` mean gates, `80%` crash, and `7.064s` mean successful
+time. Do not continue v47 as-is or start from loop117 final. The immediate next
+action is one bounded v48 contact/conversion reward-structure screen,
+hard-evaluated on unchanged `config/level3.toml`.
 
 Historical v40 command, retained only for provenance:
 
@@ -189,19 +193,15 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m
+v48_v5_contact_conversion_reward_structure_from_loop110_3m
 ```
 
-v45 confirmed that flat MLP retention is active, but loop101/loop110 teacher
-coverage was not enough to beat the frontier. The v46 diagnostic preflight now
-proves loop107/v37 1M residual-GRU teacher action extraction includes the
-residual branch and matches direct inference exactly on the checked trajectory.
-The v47 production union dataset combines 72 train-pool successes from
-loop107, loop101, and loop110, with `24388` samples and no excluded seed
-overlap. Its audit against loop110/v39 3M reports `KL=0.083788`,
-`MSE=0.017196`, and agreement `0.830296`. The next immediate action is one
-bounded W&B-tracked v47 PPO screen, still hard-evaluated on unchanged
-`config/level3.toml`.
+v47 confirmed that residual-frontier union retention is active, but healthy
+teacher KL/MSE/agreement still did not convert into hard-eval progress. v48
+therefore starts from loop110/v39 3M, keeps the v5 MLP Actor, disables
+retention, and tests a decoupled contact/conversion reward structure. It may
+change reward structure and reward numbers only inside the named lane, and it
+must still hard-evaluate on unchanged `config/level3.toml`.
 
 ## Research-Guided Tuning
 

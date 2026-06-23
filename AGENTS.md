@@ -105,18 +105,21 @@
   checkpoint with `20%` success, `1.60` mean gates, `80%` crash, and `6.941s`
   mean successful time; final was `19%` success and `1.59` mean gates. Do not
   continue v45 as-is and do not start future training from loop116 final.
+- loop117 tested
+  `v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m` and proved
+  residual-frontier union retention was active, but did not beat the frontier.
+  Best was the 3M checkpoint with `20%` success, `1.58` mean gates, `80%`
+  crash, and `7.064s` mean successful time. Teacher KL/MSE/agreement improved,
+  so do not continue v47 as-is and do not start future training from loop117
+  final.
 - The immediate next lane is
-  `v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_v46_preflight_passed_launch_v47_residual_frontier_union_retention.md`.
-  The v46 diagnostic preflight passed in
-  `experiments/level3_ppo_loop/parity/2026-06-23_v46_residual_frontier_teacher_action_preflight.md`:
-  residual-GRU teacher action extraction from loop107/v37 1M matches direct
-  inference with `0.0` action diff and `0.0` hidden-state diff. The v47
-  production union dataset has `72` train-pool success trajectories, `24388`
-  samples, no excluded seed overlap, and audit metrics `KL=0.083788`,
-  `MSE=0.017196`, agreement `0.830296`. Run at most one bounded W&B-tracked
-  v47 screen before analysis and the next decision. Keep hard eval on unchanged
-  `config/level3.toml`.
+  `v48_v5_contact_conversion_reward_structure_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_loop117_reject_v47_launch_v48_contact_conversion_reward_structure.md`.
+  It starts from loop110/v39 3M, keeps the v5 MLP Actor and unchanged
+  `config/level3.toml`, disables retention, and tests one bounded
+  contact/conversion reward-structure screen. After v48, run the analyzer,
+  exactly three subagent reviews, and a main-agent decision before any further
+  training.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
@@ -174,6 +177,11 @@
   Codex-supervised loop. Unattended mode still means one train/evaluate chunk,
   then analyzer, subagent review, research if needed, and a main-agent decision
   before the next chunk.
+- The user's current loop objective is repeated structural search, not a
+  one-off structure change. After a failed structural lane, Codex may create the
+  next named lane, update scripts/state/docs, dry-run it, train exactly one
+  bounded chunk, analyze it, collect exactly three reviews, and decide the next
+  lane again until the target is met or a genuine blocker is reached.
 - For substantive post-run analysis, use exactly three separate subagents:
   evaluator metrics, W&B/PPO diagnostics, and structure/research synthesis. The
   main agent owns the final decision and must enforce the immutable
