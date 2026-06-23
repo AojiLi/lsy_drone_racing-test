@@ -167,6 +167,23 @@ Keep the Level3 track unchanged.
 Do not use 5M/10M/20M milestones as a pass/fail test against the old `21%`
 frontier. They are learning-curve diagnostics.
 
+For any lane that produces a `1M` checkpoint, that checkpoint is also only a
+health check. The early checkpoints answer questions like:
+
+- did the warm-start load correctly;
+- are actions, observations, W&B, and checkpoint metadata sane;
+- are KL, clipfrac, entropy, value loss, SPS, and gradients in a plausible
+  range;
+- did the policy catastrophically lose all basic gate progress;
+- are mean gates, passed-gate rate, crash type, timeout, tilt, and seed churn
+  changing in a diagnostically useful way.
+
+They must not be used to require success-rate growth. In particular, do not
+reject hidden512 because `1M`, `5M`, `10M`, `20M`, or `30M` fail to preserve or
+beat the old `21%` frontier. The first serious success-rate exam for v49 is
+the `60M` read, and a branch with improving signals at 60M should be considered
+for `90M` or `120M`.
+
 Promote early if any milestone shows one of:
 
 - success `>21%`;

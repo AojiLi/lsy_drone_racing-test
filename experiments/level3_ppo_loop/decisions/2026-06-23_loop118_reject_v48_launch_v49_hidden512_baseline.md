@@ -78,6 +78,13 @@ read:
 - Do not run `--max-iterations > 1`.
 - After v49 completes, run the analyzer and exactly three subagent reviews
   before any next training chunk.
+- Treat `1M` checkpoints, when present in future 512-family lanes, and v49's
+  `5M`/`10M`/`20M`/`30M` milestones as health checks, not growth exams.
+- Early checkpoints may diagnose NaNs, action/observation mismatch, broken W&B
+  logging, PPO health, catastrophic zero-gate failure, crash type, timeout,
+  tilt, and mean-gate trends.
+- Early checkpoints must not be used to require success-rate growth or require
+  the 512 policy to preserve the old `21%` frontier.
 - Do not reject the hidden512 family from early 5M-30M milestones.
 - Do not reject the hidden512 family from one 60M v49 run unless it
   catastrophically loses basic gate progress across the long run or exposes a

@@ -7694,6 +7694,28 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
                     "and 90M/120M continuation is preferred when W&B gate, "
                     "finish, or hard-eval mean-gate signals are still moving."
                 ),
+                "early_milestone_diagnostic_policy": {
+                    "principle": (
+                        "Treat 1M checkpoints, when a lane has them, and "
+                        "v49's 5M/10M/20M/30M milestones as health checks, "
+                        "not as growth exams. Level2 showed that useful "
+                        "success can stay absent until 45M-70M."
+                    ),
+                    "allowed_uses": [
+                        "detect NaN or checkpoint/warm-start wiring failure",
+                        "detect action-scale, observation, or W&B logging breakage",
+                        "detect catastrophic loss of basic gate progress",
+                        "diagnose PPO health such as KL, clipfrac, entropy, value loss, and SPS",
+                        "observe mean-gates, passed-gate, crash, timeout, tilt, and seed-churn trends",
+                    ],
+                    "forbidden_uses": [
+                        "requiring success-rate growth at 1M or 5M",
+                        "requiring the 512 policy to preserve the old 21% frontier before 60M",
+                        "rejecting hidden512 because 5M-30M milestones look flat",
+                    ],
+                    "first_success_rate_exam_milestone": "60M",
+                    "serious_maturation_window": "60M-120M",
+                },
             },
         },
         "hypothesis": {

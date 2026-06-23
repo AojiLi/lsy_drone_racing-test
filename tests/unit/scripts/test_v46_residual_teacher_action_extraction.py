@@ -148,6 +148,16 @@ def test_v49_hidden512_baseline_lane_is_runnable() -> None:
         ]
     )
     assert "long_horizon_rule" in hypothesis["architecture"]["followup_loop_policy"]
+    diagnostic_policy = hypothesis["architecture"]["followup_loop_policy"][
+        "early_milestone_diagnostic_policy"
+    ]
+    assert diagnostic_policy["first_success_rate_exam_milestone"] == "60M"
+    assert "requiring success-rate growth at 1M or 5M" in diagnostic_policy[
+        "forbidden_uses"
+    ]
+    assert "detect catastrophic loss of basic gate progress" in diagnostic_policy[
+        "allowed_uses"
+    ]
     assert "catastrophic_hold" in hypothesis["hypothesis"]["promotion_gate"]
     assert "parameter_survey_axes" in hypothesis["hypothesis"]
     assert "rollback" not in hypothesis["hypothesis"]["promotion_gate"]

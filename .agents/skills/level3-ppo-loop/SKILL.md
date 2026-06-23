@@ -135,6 +135,12 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   abandon hidden512 until at least three evaluated hidden512 family trials
   exist: the long baseline, one reward/PPO-number follow-up, and one
   observation, memory, or curriculum follow-up.
+- Early checkpoints are diagnostic health checks, not growth exams. If a lane
+  creates a `1M` checkpoint, use it only for NaNs, action/observation mismatch,
+  checkpoint metadata, W&B logging, PPO health, or catastrophic zero-gate
+  failure. For v49, use 5M/10M/20M/30M the same way. Do not require
+  success-rate growth or preservation of the old 21% frontier before the 60M
+  read.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
