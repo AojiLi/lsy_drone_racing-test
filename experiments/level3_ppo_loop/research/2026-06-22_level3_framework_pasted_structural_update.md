@@ -38,10 +38,12 @@ Parity passed, but loop099 and loop100 did not beat loop097 on unchanged
 `config/level3.toml`. loop100's best was only `19/100`, `1.65` mean gates, and
 `81%` crash.
 
-Therefore the loop should stop treating reward-number tuning, seed replay,
-longer-rollout-only continuation, and privileged-Critic maturation as the main
-bottleneck. The next bottleneck is likely training distribution: the policy
-does not see enough useful gate approach/pass/exit states.
+loop101 tested gate-phase reset curriculum. It tied the old success frontier at
+`20/100`, reached `1.69` mean gates at final and `1.81` mean gates at 8M, but
+did not reduce crash below `80/100`. Therefore the loop should stop treating
+reward-number tuning, longer-rollout-only continuation, privileged-Critic
+maturation, or v33 reset curriculum alone as the main bottleneck. The next
+bottleneck is likely level/track distribution coverage.
 
 ## Structural Priority
 
@@ -64,10 +66,10 @@ Recommended order:
 The current lane is:
 
 ```text
-v33_gate_phase_reset_curriculum_from_loop097_12m
+v34_lowprob_train_pool_plr_from_loop101
 ```
 
-This lane is a bounded 10M training screen from the loop097/v31d 12M checkpoint.
+This lane is a bounded 10M training screen from the loop101/v33 final checkpoint.
 
 It keeps:
 
@@ -78,13 +80,16 @@ It keeps:
 - `256 envs x 128 steps`;
 - no observation/return normalization.
 
-It changes only the training reset distribution:
+It keeps the v33 gate-phase reset curriculum and changes only the training
+track sampler:
 
-- 45% of episodes reset near randomized target-gate approach phases;
-- 55% of episodes keep normal Level3 starts.
+- `track_generator_profile=v34_lowprob_train_pool_bounds_plr`;
+- 8% replay over train-pool bounds/ground failure seeds;
+- 92% normal random Level3 tracks;
+- no dev_seen, validation_unseen, or final_locked seed replay.
 
 ## Deferred Work
 
-Competence-gated curriculum, PLR, GRU, and reward-number changes remain valid
-next stages, but they should be separate named lanes with their own packets and
-hard-eval analysis. They should not be smuggled into v33.
+Online PLR, competence-gated curriculum, GRU, and reward-number changes remain
+valid next stages, but they should be separate named lanes with their own
+packets and hard-eval analysis. They should not be smuggled into v34.

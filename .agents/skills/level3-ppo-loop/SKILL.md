@@ -51,16 +51,22 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   loop097: best loop100 was 19% success / 1.65 mean gates / 81% crash on
   unchanged `config/level3.toml`. Do not continue v32 privileged-Critic
   maturation without a new explicit decision packet.
+- loop101 tested v33 gate-phase reset curriculum for 10M and tied, but did not
+  beat, the old frontier: best loop101 was 20% success / 1.69 mean gates /
+  80% crash with 6.873s mean successful time. The 8M checkpoint reached 1.81
+  mean gates but only 19% success. Do not continue v33 as-is without a new
+  explicit decision packet.
 - The immediate next lane is
-  `v33_gate_phase_reset_curriculum_from_loop097_12m`: a 10M training-only
-  reset-curriculum screen from the loop097/v31d 12M global-best checkpoint.
-  It keeps the deployed v5 Actor path, reward numbers, PPO numbers, rollout
-  geometry, disabled normalization, and unchanged `config/level3.toml` hard
-  eval fixed. It changes only the training reset distribution: 45% of episodes
-  start near randomized target-gate approach phases and 55% keep normal Level3
-  starts. If it does not beat 20% success or materially expand mean gates with
-  lower crash/new seeds, stop v33 and write a new named PLR/GRU/structural
-  packet.
+  `v34_lowprob_train_pool_plr_from_loop101`: a 10M offline train-pool PLR
+  screen from the loop101 final checkpoint. It keeps the deployed v5 Actor
+  path, reward numbers, PPO numbers, rollout geometry, disabled normalization,
+  v33 gate-phase reset curriculum, and unchanged `config/level3.toml` hard eval
+  fixed. It changes only the training track sampler by adding
+  `track_generator_profile=v34_lowprob_train_pool_bounds_plr`, an 8% replay
+  probability over train-pool bounds/ground seeds. Validation, dev, and
+  final_locked seeds must not be used for replay. If v34 does not beat 20%
+  success or materially expand mean gates with crash no worse than 80%, stop
+  offline PLR and write a new named online-PLR/competence-gating/GRU packet.
 - The rejected previous lane was
   `v31d_longer_rollout_maturation_from_loop097_12m_to_30m`. It reached only
   19% success / 1.63 mean gates / 81% crash at its best loop098 checkpoint,

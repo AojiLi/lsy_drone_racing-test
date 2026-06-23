@@ -456,6 +456,15 @@ V33_GATE_PHASE_RESET_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop100_reject_v32_launch_v33_gate_phase_reset_curriculum.md"
 )
+LOOP101_V33_BEST_CHECKPOINT = (
+    "lsy_drone_racing/control/checkpoints/"
+    "level3_loop_101_structural_v33_gate_phase_reset_curriculum_loop097_12m_10m/"
+    "level3_loop_101_structural_v33_gate_phase_reset_curriculum_loop097_12m_10m_final.ckpt"
+)
+V34_TRAIN_POOL_PLR_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_loop101_reject_v33_launch_v34_train_pool_plr.md"
+)
 SUPPORTED_TRAINING_STRUCTURES = {
     "mlp_2x_tanh",
     "recurrent_actor_gru256",
@@ -464,6 +473,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "observation_return_normalization_support",
     "asymmetric_privileged_critic_support",
     "gate_phase_reset_curriculum_support",
+    "offline_train_pool_plr_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -721,6 +731,7 @@ TRACK_GENERATOR_PROFILE_CHOICES = {
     "trace_mixed_corridor",
     "v28_train_pool_bounds_failure_replay",
     "v29_train_pool_success_churn_replay",
+    "v34_lowprob_train_pool_bounds_plr",
 }
 STRING_PARAM_CHOICES = {
     "critic_observation_mode": CRITIC_OBSERVATION_MODE_CHOICES,
@@ -5495,6 +5506,126 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "a mixed reset distribution: most episodes still start normally, "
             "while 45% begin near randomized gate approach phases so the Actor "
             "gets more direct practice on acquire/pass/exit behavior."
+        ),
+    },
+    "v34_lowprob_train_pool_plr_from_loop101": {
+        "name": "v34_lowprob_train_pool_plr_from_loop101",
+        "proposal_name": "structural_v34_lowprob_train_pool_plr_loop101_10m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 10_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 6,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,5,8,10",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+        "allow_repeat_params": True,
+        "requires_training_support": "offline_train_pool_plr_support",
+        "research_packet": LEVEL3_FRAMEWORK_STRUCTURAL_PLAN_PACKET,
+        "approved_hypothesis_packet": V34_TRAIN_POOL_PLR_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "track_generator_profile",
+                "gate_phase_reset_prob",
+                "gate_phase_reset_x_min",
+                "gate_phase_reset_x_max",
+                "gate_phase_reset_yz_max",
+                "gate_phase_reset_speed_min",
+                "gate_phase_reset_speed_max",
+            ],
+            "changed_reward_numbers": [],
+            "offline_plr": {
+                "training_only": True,
+                "profile": "v34_lowprob_train_pool_bounds_plr",
+                "replay_probability": 0.08,
+                "source": (
+                    "train_pool bounds-or-ground failures from the v28 "
+                    "failure-correction probe; excludes dev_seen, "
+                    "validation_unseen, and final_locked seeds"
+                ),
+                "normal_random_track_probability": 0.92,
+            },
+            "curriculum": {
+                "training_only": True,
+                "normal_reset_probability": 0.55,
+                "gate_phase_reset_probability": 0.45,
+                "local_gate_x_range_m": [-1.05, -0.18],
+                "local_gate_yz_abs_max_m": 0.16,
+                "forward_speed_range_mps": [0.15, 1.20],
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "control_horizon_s": 2.56,
+                "continues_checkpoint": LOOP101_V33_BEST_CHECKPOINT,
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 6 offline prioritized level replay",
+            "baseline": "loop101/v33 final",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "validation_seed_leakage": "forbidden",
+            "primary_question": (
+                "Does a low-probability train-pool prioritized track sampler, "
+                "combined with the already-tested v33 gate-phase reset curriculum, "
+                "expand validation-unseen seed coverage beyond the 20% success / "
+                "1.69 mean-gate frontier?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "success > 0.20, or success = 0.20 with stable mean_gates "
+                    "above 1.80 and crash <= 0.80 plus new validation success seeds"
+                ),
+                "rollback": (
+                    "If hard eval stays <=0.20 success with crash around 80% and "
+                    "no stable mean-gate expansion, stop offline PLR and write a "
+                    "new packet for online PLR/competence gating or GRU."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 51,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "v34_lowprob_train_pool_bounds_plr",
+            "gate_phase_reset_prob": 0.45,
+            "gate_phase_reset_x_min": -1.05,
+            "gate_phase_reset_x_max": -0.18,
+            "gate_phase_reset_yz_max": 0.16,
+            "gate_phase_reset_speed_min": 0.15,
+            "gate_phase_reset_speed_max": 1.20,
+        },
+        "rationale": (
+            "loop101/v33 tied the old 20% success frontier and improved mean gates "
+            "slightly to 1.69, with an 8M checkpoint reaching 1.81 mean gates, "
+            "but crash stayed at 80% and W&B race metrics did not show real "
+            "conversion. The next framework stage is prioritized level replay, "
+            "not reward-number tuning. This v34 screen keeps the final Level3 "
+            "track, deployed v5 Actor, reward numbers, PPO numbers, rollout "
+            "geometry, and v33 gate-phase reset curriculum fixed, then adds only "
+            "a low-probability training-only replay sampler over train-pool "
+            "bounds-or-ground seeds. It deliberately excludes validation and "
+            "final seeds and uses 8% replay so normal random Level3 tracks remain "
+            "the dominant training distribution."
         ),
     },
 }

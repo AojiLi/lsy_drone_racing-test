@@ -42,10 +42,13 @@ training evidence did not expand the frontier. loop099 reached `19/100`,
 to about 18M and still reached only `19/100`, `1.65` mean gates, and `81%`
 crash on unchanged `config/level3.toml`.
 
-This means the next loop should not continue local reward-number, fixed-seed
-replay, longer-rollout-only tweaks, or v32 privileged-Critic maturation. It
-should move to the next named training-distribution lane: gate-phase reset
-curriculum.
+loop101 then tested the gate-phase reset curriculum from loop097 for 10M. It
+tied the old success frontier at `20/100`, improved mean gates slightly to
+`1.69`, and improved mean successful time to `6.873s`, but crash remained
+`80/100`. Its 8M checkpoint reached `1.81` mean gates with only `19/100`
+success. This means v33 is not a breakthrough and should not continue as-is.
+The next loop should move to the next named training-distribution lane:
+low-probability offline train-pool PLR.
 
 ## Framework Priorities
 
@@ -66,19 +69,20 @@ curriculum.
 The immediate executable step is:
 
 ```text
-v33_gate_phase_reset_curriculum_from_loop097_12m
+v34_lowprob_train_pool_plr_from_loop101
 ```
 
-This is a training-only reset curriculum screen. It keeps v5 Actor
-observation, loop052 reward/PPO numbers, `256 envs x 128` rollout geometry,
-corrected v30 semantics, and hard eval on unchanged `config/level3.toml`.
-It changes only the training reset distribution:
+This is a training-only offline PLR screen. It keeps v5 Actor observation,
+loop052 reward/PPO numbers, `256 envs x 128` rollout geometry, corrected v30
+semantics, v33 gate-phase reset curriculum, and hard eval on unchanged
+`config/level3.toml`. It changes only the training track sampler:
 
-- 55% of episodes keep normal Level3 starts;
-- 45% of episodes reset near randomized target-gate approach phases;
+- 92% of generated tracks remain normal random Level3 tracks;
+- 8% replay train-pool bounds/ground failure seeds;
+- replay excludes dev_seen, validation_unseen, and final_locked seeds;
 - the target race track geometry and final hard-eval protocol stay unchanged.
 
-The first screen should train 10M from the loop097/v31d 12M checkpoint and
+The first screen should train 10M from the loop101/v33 final checkpoint and
 evaluate 1M/2M/3M/5M/8M/10M milestones on `validation_unseen`.
 
 ## Not Yet Implemented
@@ -88,7 +92,7 @@ These framework pieces require code support before training:
 - separate actor/critic RunningMeanStd if normalization is combined with
   asymmetric Critic later;
 - competence-gated curriculum stages;
-- prioritized level replay over train track seeds;
+- online or dynamic prioritized level replay over train track seeds;
 - tanh-squashed Gaussian PPO log-prob parity;
 - GRU rerun with full hidden-state reset checks.
 
