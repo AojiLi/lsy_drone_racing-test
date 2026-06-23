@@ -7597,20 +7597,21 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
     },
     "v49_v5_hidden512_mlp_warmstart_from_loop110_3m": {
         "name": "v49_v5_hidden512_mlp_warmstart_from_loop110_3m",
-        "proposal_name": "structural_v49_v5_hidden512_mlp_warmstart_5m",
+        "proposal_name": "structural_v49_v5_hidden512_mlp_warmstart_60m",
         "config": TARGET_EVAL_CONFIG,
         "eval_config": TARGET_EVAL_CONFIG,
         "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
-        "train_timesteps": 5_000_000,
-        "checkpoint_interval": 1_000_000,
-        "max_eval_checkpoints": 6,
+        "train_timesteps": 60_000_000,
+        "checkpoint_interval": 5_000_000,
+        "max_eval_checkpoints": 10,
         "eval_seed_split": "validation_unseen",
         "eval_checkpoint_strategy": "milestone",
-        "eval_milestones_m": "1,2,3,4,5",
+        "eval_milestones_m": "5,10,15,20,30,45,60",
         "num_envs": 256,
         "num_steps": 128,
         "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
         "allow_hidden_dim_warmstart": True,
+        "allow_step_curve_maturation": True,
         "allow_repeat_params": True,
         "research_packet": V49_HIDDEN512_BASELINE_PACKET,
         "approved_hypothesis_packet": V49_HIDDEN512_BASELINE_DECISION_PACKET,
@@ -7636,6 +7637,7 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
                 "hidden_dim",
                 "allow_hidden_dim_warmstart",
                 "initial_checkpoint",
+                "train_timesteps",
                 "checkpoint_interval",
                 "eval_milestones_m",
             ],
@@ -7657,12 +7659,15 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "followup_loop_policy": {
                 "baseline_rule": (
                     "Treat v49 as the bootstrap checkpoint for a hidden512 "
-                    "loop family, not as a one-shot capacity verdict. Its "
-                    "hard-eval result should choose the next hidden512 "
-                    "adjustment axis."
+                    "loop family, not as a 5M or one-shot capacity verdict. "
+                    "The first 60M run is allowed to spend tens of millions "
+                    "of steps adapting the expanded weights before judging "
+                    "whether hidden512 deserves 90M/120M maturation or a "
+                    "targeted hidden512 parameter follow-up."
                 ),
                 "minimum_evaluated_family_trials_before_capacity_rejection": 3,
                 "allowed_hidden512_successors": [
+                    "hidden512_same_hypothesis_90m_or_120m_maturation",
                     "hidden512_reward_or_ppo_number_followup",
                     "hidden512_observation_variant",
                     "hidden512_residual_gru_or_gru_transfer",
@@ -7674,10 +7679,20 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
                     "hidden512_observation_or_memory_or_curriculum_followup",
                 ],
                 "single_run_rule": (
-                    "Do not reject hidden512 as a base family from v49 alone "
-                    "unless it catastrophically loses basic gate progress. "
-                    "Even a regressed v49 should normally lead to a targeted "
-                    "hidden512 follow-up or diagnostic lane."
+                    "Do not compare the first few 5M-20M milestones against "
+                    "the old 21% frontier as a pass/fail test. Do not reject "
+                    "hidden512 as a base family from one 60M v49 run unless "
+                    "it catastrophically loses basic gate progress throughout "
+                    "the run or exposes a wiring/training failure. Ordinary "
+                    "underperformance should normally lead to a longer "
+                    "hidden512 maturation or a targeted hidden512 parameter "
+                    "follow-up."
+                ),
+                "long_horizon_rule": (
+                    "Use Level2 step-curve evidence: 30M is only diagnostic, "
+                    "60M is the first serious hidden512 success-rate read, "
+                    "and 90M/120M continuation is preferred when W&B gate, "
+                    "finish, or hard-eval mean-gate signals are still moving."
                 ),
             },
         },
@@ -7691,29 +7706,41 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "primary_question": (
                 "Can a wider 2x512 v5 MLP, warm-started from the loop110/v39 "
                 "3M feed-forward frontier and keeping v39 reward numbers, "
-                "become a stronger baseline for the next structural loop family?"
+                "become a stronger long-horizon baseline for the next "
+                "structural loop family after enough adaptation steps?"
             ),
             "promotion_gate": {
                 "promising_for_maturation": (
-                    "success > 0.21, or success >= 0.21 with mean_gates above "
-                    "1.66 and crash <= 0.79, or success-seed expansion without "
-                    "losing the old frontier"
+                    "After the 60M run, continue toward 90M/120M if any "
+                    "milestone has non-zero success with mean_gates near or "
+                    "above 1.6, improves mean_gates or solved-seed coverage, "
+                    "or W&B gate/finish signals are still improving. Only "
+                    "treat >21% success, success >=21% with mean_gates above "
+                    "1.66 and crash <=0.79, or clear seed expansion as an "
+                    "early promotion signal, not as the only success criterion."
                 ),
                 "baseline_acceptance": (
                     "Use the best v49 checkpoint as the first hidden512 "
-                    "baseline even if it only roughly preserves the frontier; "
-                    "the next decision should stay in the hidden512 family "
-                    "and tune reward/PPO numbers, observation, memory, or "
-                    "curriculum unless the run catastrophically loses gate "
-                    "progress."
+                    "baseline only after the 60M long-horizon read. The next "
+                    "decision should stay in the hidden512 family and choose "
+                    "between 90M/120M maturation, reward/PPO-number tuning, "
+                    "observation, memory, or curriculum unless the run "
+                    "catastrophically loses gate progress."
                 ),
                 "catastrophic_hold": (
                     "Hold for diagnosis if success is near zero and mean_gates "
-                    "fall below 0.50, or if training/evaluation wiring fails. "
-                    "Do not use ordinary underperformance from one v49 screen "
-                    "to reject the hidden512 family."
+                    "stay below 0.50 across the long run, or if "
+                    "training/evaluation wiring fails. Do not use ordinary "
+                    "early underperformance from 5M-30M milestones to reject "
+                    "the hidden512 family."
                 ),
             },
+            "parameter_survey_axes": [
+                "baseline_current_v39_numbers_at_hidden512_for_60m",
+                "hidden512_update_pressure_if_kl_clipfrac_stay_too_low",
+                "hidden512_stability_if_tilt_crash_or_value_loss_increase",
+                "hidden512_memory_or_curriculum_if_gate_phase_confusion_persists",
+            ],
         },
         "params": {
             **LOOP052_REMOTE_NOMINAL_PARAMS,
@@ -7744,9 +7771,11 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "screen regressed. v49 starts a separate hidden512 loop family: "
             "it block-copy warm-starts the loop110/v39 3M v5 MLP into a 2x512 "
             "Actor/Critic, keeps v39 reward numbers and unchanged "
-            "config/level3.toml, then uses the post-run analysis to choose "
-            "the next hidden512-family adjustment rather than judging the "
-            "larger network from one screen."
+            "config/level3.toml, runs a 60M long-horizon baseline with "
+            "milestone evals, then uses the post-run analysis to choose "
+            "90M/120M maturation or the next hidden512-family parameter "
+            "adjustment rather than judging the larger network from a 5M "
+            "screen."
         ),
     },
 }

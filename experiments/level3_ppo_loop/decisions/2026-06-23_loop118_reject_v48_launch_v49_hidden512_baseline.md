@@ -1,4 +1,4 @@
-# Decision: Reject V48, Launch V49 Hidden512 Baseline Loop
+# Decision: Reject V48, Launch V49 Hidden512 Long-Horizon Baseline
 
 Decision: launch_named_structural_lane
 
@@ -20,18 +20,16 @@ Reject v48 as-is. Do not continue from loop118 final, do not mature the
 contact/conversion reward-structure hypothesis, and do not run another small
 contact-reward tweak as the next move.
 
-Launch the new hidden512 baseline loop:
+Launch the hidden512 long-horizon baseline:
 
 `v49_v5_hidden512_mlp_warmstart_from_loop110_3m`
 
-This is not a one-off capacity curiosity. It starts a separate hidden512
-capacity family. If the first screen does not degrade the frontier, later
-reward, observation, GRU, curriculum, or training-distribution experiments
-should be written as hidden512-family successor lanes.
-
-Also, v49 alone must not be used as a simple pass/fail judgment on the larger
-network. The hidden512 family should get multiple targeted follow-up loops
-before being abandoned.
+This is not a short 5M capacity check. The user correctly noted that expanding
+the network from 2x256 to 2x512 is itself a structural change, so the new
+network may need tens of millions of steps to adapt before its success rate is
+meaningful. v49 therefore runs a `60M` baseline with milestone evaluation, then
+the next decision stays inside the hidden512 family unless the run reveals a
+real wiring/training failure or catastrophic loss of gate progress.
 
 ## Rationale
 
@@ -48,14 +46,25 @@ gates, while loop110/v39 3M gives the best feed-forward v5 starting point at
 `21%` success and `1.64` mean gates. Recent v45/v47/v48 lanes show that
 retention and contact-reward pressure are not enough to break the plateau.
 
-The user wants the larger network to become the new baseline before further
-loop changes. v49 therefore isolates network capacity:
+The Level2 checkpoint step curve argues against judging a structurally changed
+policy too early:
+
+- one Level2 branch had `0%` success at 30M, `43%` at 45M, and first exceeded
+  `60%` at 70M;
+- another had only `2%` success at 30M, but `75%` at 60M and `80%` at final.
+
+Therefore v49 should isolate network capacity, but with a real long-horizon
+read:
 
 - start from loop110/v39 3M;
 - keep v5 observation;
 - keep v39 reward numbers;
 - expand the 2-layer Tanh Actor/Critic from hidden_dim `256` to `512`;
 - use `allow_hidden_dim_warmstart=True`;
+- use step-curve maturation permission because loop110/v39 3M already has
+  promising hard-eval evidence;
+- run `60M` with milestone evals at `5M`, `10M`, `15M`, `20M`, `30M`, `45M`,
+  and `60M`;
 - keep hard eval on unchanged `config/level3.toml`.
 
 ## Guardrails
@@ -69,19 +78,25 @@ loop changes. v49 therefore isolates network capacity:
 - Do not run `--max-iterations > 1`.
 - After v49 completes, run the analyzer and exactly three subagent reviews
   before any next training chunk.
-- Do not reject the hidden512 family from v49 alone unless it catastrophically
-  loses basic gate progress or exposes a wiring/training bug.
+- Do not reject the hidden512 family from early 5M-30M milestones.
+- Do not reject the hidden512 family from one 60M v49 run unless it
+  catastrophically loses basic gate progress across the long run or exposes a
+  wiring/training bug.
 
-## Promotion / Rejection
+## Promotion / Continuation / Rejection
 
-Promote or mature v49 if:
+Promote early if:
 
 - success `>21%`; or
 - success `>=21%` with mean gates above `1.66` and crash `<=79%`; or
 - success-seed coverage expands without losing the old frontier.
 
-Use v49 as the temporary hidden512 baseline if it preserves the frontier
-without clear degradation, even if it does not yet hit the final target.
+Continue the same hidden512 hypothesis toward `90M` and possibly `120M` if:
+
+- 60M has non-zero success with mean gates near the old frontier;
+- mean gates improve across 30M/45M/60M;
+- W&B gate/finish signals are still improving without PPO instability;
+- the run finds a new useful solved-seed subset.
 
 If v49 underperforms but still has meaningful gate progress, the next decision
 should stay inside the hidden512 family and choose a targeted follow-up:
@@ -92,11 +107,12 @@ should stay inside the hidden512 family and choose a targeted follow-up:
 - hidden512 curriculum or training-distribution reshaping.
 
 Do not abandon the hidden512 base until at least three evaluated hidden512
-family trials exist: the baseline screen, one reward/PPO-number follow-up, and
-one observation/memory/curriculum follow-up.
+family trials exist: the 60M baseline, one reward/PPO-number follow-up, and one
+observation/memory/curriculum follow-up.
 
 Hold for diagnosis, rather than reject the family, only if v49 has near-zero
-success with mean gates below `0.50`, or if training/evaluation wiring fails.
+success with mean gates below `0.50` throughout the long run, or if training /
+evaluation wiring fails.
 
 ## Next Command
 

@@ -110,11 +110,15 @@ def test_v48_contact_conversion_reward_structure_lane_is_runnable() -> None:
 
 @pytest.mark.unit
 def test_v49_hidden512_baseline_lane_is_runnable() -> None:
-    """v49 should start a hidden512 loop family without changing track or reward structure."""
+    """v49 should start a long-horizon hidden512 family without changing track/reward."""
     hypothesis = level3_ppo_loop.STRUCTURAL_HYPOTHESES[
         "v49_v5_hidden512_mlp_warmstart_from_loop110_3m"
     ]
 
+    assert hypothesis["proposal_name"].endswith("_60m")
+    assert hypothesis["train_timesteps"] == 60_000_000
+    assert hypothesis["checkpoint_interval"] == 5_000_000
+    assert hypothesis["eval_milestones_m"] == "5,10,15,20,30,45,60"
     assert hypothesis["config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
     assert hypothesis["eval_config"] == level3_ppo_loop.TARGET_EVAL_CONFIG
     assert hypothesis["observation_layout"] == (
@@ -137,10 +141,19 @@ def test_v49_hidden512_baseline_lane_is_runnable() -> None:
             "allowed_hidden512_successors"
         ]
     )
+    assert (
+        "hidden512_same_hypothesis_90m_or_120m_maturation"
+        in hypothesis["architecture"]["followup_loop_policy"][
+            "allowed_hidden512_successors"
+        ]
+    )
+    assert "long_horizon_rule" in hypothesis["architecture"]["followup_loop_policy"]
     assert "catastrophic_hold" in hypothesis["hypothesis"]["promotion_gate"]
+    assert "parameter_survey_axes" in hypothesis["hypothesis"]
     assert "rollback" not in hypothesis["hypothesis"]["promotion_gate"]
     assert hypothesis["initial_checkpoint"] == level3_ppo_loop.LOOP110_V39_3M_CHECKPOINT
     assert hypothesis["allow_hidden_dim_warmstart"] is True
+    assert hypothesis["allow_step_curve_maturation"] is True
     assert hypothesis["approved_hypothesis_packet"] == (
         level3_ppo_loop.V49_HIDDEN512_BASELINE_DECISION_PACKET
     )

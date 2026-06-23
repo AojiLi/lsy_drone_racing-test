@@ -121,12 +121,20 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   It starts a hidden512 capacity-family baseline: loop110/v39 3M v5 MLP is
   block-copy warm-started from hidden_dim `256` to `512`, v5 observation and
   v39 reward numbers stay fixed, retention is disabled, and hard eval remains
-  unchanged `config/level3.toml`. v49 is a bootstrap screen, not a one-shot
-  capacity verdict. Unless it catastrophically loses basic gate progress or
-  exposes a wiring bug, the next decision should stay inside the hidden512
-  family. Do not abandon hidden512 until at least three evaluated hidden512
-  family trials exist: the baseline screen, one reward/PPO-number follow-up,
-  and one observation, memory, or curriculum follow-up.
+  unchanged `config/level3.toml`. v49 is now a 60M long-horizon bootstrap, not
+  a 5M screen or one-shot capacity verdict. Evaluate milestones at
+  5M/10M/15M/20M/30M/45M/60M, but do not use the early milestones failing to
+  preserve the old 21% frontier as a rejection signal. The Level2 step curve
+  showed that useful success can appear after 45M-70M even when 30M still looks
+  weak. v49 explicitly enables step-curve maturation because loop110/v39 3M
+  already has promising hard-eval evidence. Unless v49 loses basic gate
+  progress across the long run or exposes a
+  wiring bug, the next decision should stay inside the hidden512 family: either
+  mature the same hypothesis toward 90M/120M or run a targeted hidden512
+  reward/PPO-number, observation, memory, or curriculum follow-up. Do not
+  abandon hidden512 until at least three evaluated hidden512 family trials
+  exist: the long baseline, one reward/PPO-number follow-up, and one
+  observation, memory, or curriculum follow-up.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
