@@ -81,25 +81,25 @@ short continuation from loop107 1M and failed to reproduce it: best was only
 The immediate step is:
 
 ```text
-v39b_feedforward_gate_acquisition_seed_expansion_from_loop110_3m
+v40_sequence_memory_gru_phase_corridor_from_scratch
 ```
 
 loop110/v39 tied the current success/crash frontier at its 3M checkpoint with
 21% success, 1.64 mean gates, 79% crash, and 6.756s mean successful time. It
 also solved 8 validation seeds not solved by loop107 1M, but later checkpoints
-regressed and mean gates did not beat the loop101/loop107 frontier. The next
-runnable step is a bounded same-hypothesis continuation from loop110 3M,
-approved by
-`experiments/level3_ppo_loop/decisions/2026-06-23_loop110_continue_v39b_from_3m.md`.
-It must keep unchanged `config/level3.toml`, v5 Actor observation, MLP policy,
-v39 reward numbers, and Actor-only deployment. Do not start this lane from
-loop110 final.
+regressed and mean gates did not beat the loop101/loop107 frontier. Together
+with loop107/v37 and loop109/v38, the evidence indicates a 19%-21% plateau
+with success-seed reshuffling rather than stable capability growth.
 
-Treat this as a diagnostic, not the main route from 21% to 60%. If a completed
-v39b run remains around 18%-22%, only swaps success seeds, or improves
-successful time without success-rate/crash conversion, stop reward-number
-small-tuning. The next step should be a named structural lane targeting
-training distribution, memory/strategy, observation, or anti-drift stability.
+The next runnable step is therefore the sequence-memory lane approved by
+`experiments/level3_ppo_loop/decisions/2026-06-23_launch_v40_sequence_memory_gru_phase_corridor.md`
+and sourced by
+`experiments/level3_ppo_loop/research/2026-06-23_level3_sequence_memory_gru_phase_corridor_plan.md`.
+It tests a true `recurrent_actor_gru256` Actor from scratch with the v10
+phase/corridor/aperture local observation, fixed v39 gate-acquisition reward
+scale, 5M screening horizon, 1M milestone evaluation, and unchanged
+`config/level3.toml` hard eval. Do not continue v39b, v37, or v38 as the main
+route without a new decision packet.
 
 ## Not Yet Implemented
 

@@ -73,18 +73,17 @@
   79% crash / 7.578s; later checkpoints drifted down to 15%, 12%, 12%, and
   17% success. Do not continue v37 from loop107 final.
 - The immediate next lane is
-  `v39b_feedforward_gate_acquisition_seed_expansion_from_loop110_3m`,
-  approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop110_continue_v39b_from_3m.md`.
-  loop110/v39 tied the current success/crash frontier at its 3M checkpoint
-  with 21% success / 1.64 mean gates / 79% crash / 6.756s and 8 newly solved
-  validation seeds, but later checkpoints regressed. Continue only from loop110
-  3M, keep v39 reward numbers unchanged, and do not start from loop110 final.
-  Treat v39b as a short diagnostic, not the main path to 60% success. If a
-  completed v39b run does not move clearly beyond the 21% plateau, roughly into
-  the 25%-30% range with lower crash or broader gate progress, stop reward
-  number small-tuning and pivot to a named structural lane for training
-  distribution, memory/strategy, observation, or stability.
+  `v40_sequence_memory_gru_phase_corridor_from_scratch`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-23_launch_v40_sequence_memory_gru_phase_corridor.md`
+  and sourced by
+  `experiments/level3_ppo_loop/research/2026-06-23_level3_sequence_memory_gru_phase_corridor_plan.md`.
+  The current evidence says reward-only and residual-GRU routes are plateaued
+  around 19%-21% success, with seed-set reshuffling rather than stable
+  capability growth. v40 therefore tests true GRU-256 sequence memory with
+  explicit phase/corridor/aperture local observation, fixed v39 gate-acquisition
+  reward scale, from-scratch 5M screening, 1M milestone evaluation, and hard
+  eval on unchanged `config/level3.toml`. Do not continue v39b, v37, or v38 as
+  the main route without a new decision packet.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

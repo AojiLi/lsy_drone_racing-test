@@ -1,11 +1,13 @@
 # Level3 PPO Loop
 
-This folder stores the resumable train/evaluate/tune state for the Level3
-domain-randomized PPO controller.
+This folder stores the resumable train/evaluate/tune state for the Level3 PPO
+controller.
 
 ## Target
 
-- Config: `config/level3_dr.toml`
+- Final eval config: `config/level3.toml`
+- Training configs may vary only as named structural lanes; do not modify the
+  Level3 track geometry or randomization to make the task easier.
 - Mean successful time: `<= 7.0s`
 - Success rate: `>= 60%`
 - W&B project: `ADR-PPO-Racing-Level3`
@@ -38,22 +40,25 @@ between invocations:
 ```bash
 pixi run -e gpu python scripts/level3_ppo_loop.py \
   --max-iterations 1 \
-  --train-timesteps 30000000 \
-  --checkpoint-interval 5000000 \
   --wandb-enabled \
   --wandb-entity aojili77-technical-university-of-munich \
-  --codex-autonomous-loop
+  --codex-autonomous-loop \
+  --structural-hypothesis v40_sequence_memory_gru_phase_corridor_from_scratch \
+  --analysis-packet experiments/level3_ppo_loop/analysis/level3_loop_110_structural_v39_feedforward_gate_acquisition_reward_loop101_5m_analysis.md \
+  --research-packet experiments/level3_ppo_loop/research/2026-06-23_level3_sequence_memory_gru_phase_corridor_plan.md \
+  --approved-hypothesis-packet experiments/level3_ppo_loop/decisions/2026-06-23_launch_v40_sequence_memory_gru_phase_corridor.md
 ```
 
 `--codex-autonomous-loop` records that Codex may spawn analysis and research
-subagents and choose the next reward-only hypothesis without per-run user
-confirmation. It implies automatic reward-hypothesis search with relaxed
-reward-number bounds, but it does not bypass W&B/evaluator analysis, reward-only
-guards, or long-run guards.
+subagents and choose the next structural or reward hypothesis without per-run
+user confirmation. It enables automatic structural/hypothesis search, but it
+does not bypass W&B/evaluator analysis, decision packets, hard eval, or
+long-run guards.
 
 When the loop plateaus, it holds by default instead of repeatedly scaling the
-same reward numbers. To let it automatically try a new reward-only hypothesis,
-run a bounded screening trial:
+same reward numbers. Prefer launching an explicit named structural lane with
+attached analysis, research, and decision packets. For narrow reward-number
+screens approved by a decision packet, use a bounded single-iteration command:
 
 ```bash
 pixi run -e gpu python scripts/level3_ppo_loop.py \
@@ -65,8 +70,8 @@ pixi run -e gpu python scripts/level3_ppo_loop.py \
 ```
 
 For a wider exploratory reward-number search, add `--relaxed-reward-bounds`.
-This still does not permit PPO, observation, algorithm, curriculum, or reward
-structure changes.
+Structural changes require a named `--structural-hypothesis` and provenance
+packets; do not hide them inside reward-number search.
 
 ```bash
 pixi run -e gpu python scripts/level3_ppo_loop.py \
@@ -145,8 +150,8 @@ The analyzer combines:
 - evaluator CSV metrics from the loop state
 - sampled W&B curves for `train/*`, `losses/*`, `race/*`, and
   `reward_components/*`
-- reward-only diagnosis and a candidate next command
-- subagent briefs for evaluator review, W&B curve review, and reward-only tuning
+- evaluator diagnosis and a candidate next command
+- subagent briefs for evaluator review, W&B curve review, and structure/research
   synthesis
 
 Outputs are written under `experiments/level3_ppo_loop/analysis/` and the paths
@@ -156,60 +161,40 @@ For Codex-driven analysis, the main agent should hand those generated briefs to
 parallel subagents, compare their findings, and then choose one of:
 
 - stop because the hard gate is met
-- hold reward parameters and inspect instability/regression
-- launch one bounded next iteration with reward-only `--param` overrides
+- hold for more analysis
+- continue the same hypothesis
+- change reward or training numbers as an explicit named lane
+- launch a named structural lane
 
 For Codex-driven autonomy, the main agent should attach ordinary analysis with
 `--analysis-packet`, source-backed research with `--research-packet`, and a
 main-agent decision packet with `--approved-hypothesis-packet`. Analysis packets
 never bypass plateau guards by themselves.
 
-## Two-Stage Tuning Boundary
+## Structural Boundary
 
-Stage 1 is reward-only. It must not change PPO hyperparameters, algorithm,
-observation layout, network/training structure, or add new reward channels.
+Structural search is now active. Observation layout, controller architecture,
+reward structure, PPO/training structure, and training distribution may change
+only as explicit named lanes with a research packet, a decision packet, W&B
+logging, milestone hard eval, and post-run analysis.
 
-Allowed `--param` overrides are limited to active reward numbers:
-
-```text
-gate_stage_coef, gate_axis_coef, gate_bonus, gate_front_bonus,
-gate_back_bonus, finish_bonus, wrong_side_penalty, crash_penalty,
-obstacle_coef, obstacle_margin, timeout_penalty, time_penalty, act_coef,
-d_act_th_coef, d_act_xy_coef, cmd_tilt_coef, rpy_coef, tilt_limit_deg,
-tilt_excess_coef
-```
-
-These disabled reward channels stay at zero unless the user explicitly approves
-a reward-structure change:
+Current immediate lane:
 
 ```text
-progress_coef, near_gate_coef, gate_plane_bonus, missed_gate_penalty,
-obstacle_clearance_coef
+v40_sequence_memory_gru_phase_corridor_from_scratch
 ```
 
-Stage 2, structural escalation, is allowed only after reward-only tuning is
-demonstrably exhausted. Before any structural change, write a detailed
-escalation packet proving all of:
-
-- at least 6 evaluated reward-only trials
-- at least 4 distinct active-reward hypotheses
-- at least 120M accumulated evaluated reward-only training steps
-- at least 4 consecutive no-improvement evaluated trials
-- target success is still not met
-- W&B curves fail to convert into evaluator progress
-- separate subagents agree from evaluator, W&B, reward-failure, papers/GitHub
-  research, and codebase-diagnosis reviews
-
-If this gate passes, structural work must be explicit and separate from
-reward-only trial records; do not hide observation, algorithm, reward-structure,
-or training-structure changes inside a reward-only run.
+It tests true GRU-256 sequence memory with the v10 phase/corridor/aperture
+local observation, fixed v39 gate-acquisition reward scale, 5M from-scratch
+screening, and 1M milestone evaluation. Final acceptance is still only hard
+eval on unchanged `config/level3.toml`.
 
 ## Research-Guided Tuning
 
 For tuning decisions that need papers, GitHub examples, or PPO references, use
 the templates in `experiments/level3_ppo_loop/research/`. Research may guide
-which active reward numbers to scale during Stage 1. It must not propose
-framework changes until the Stage 2 escalation gate is met.
+either reward-number changes or named structural hypotheses, but local hard eval
+on `config/level3.toml` decides acceptance.
 
 Attach the main-agent synthesis to the next trial:
 

@@ -497,6 +497,14 @@ V39B_LOOP110_3M_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop110_continue_v39b_from_3m.md"
 )
+V40_SEQUENCE_MEMORY_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-23_level3_sequence_memory_gru_phase_corridor_plan.md"
+)
+V40_SEQUENCE_MEMORY_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-23_launch_v40_sequence_memory_gru_phase_corridor.md"
+)
 LOOP107_V37_1M_CHECKPOINT = (
     "lsy_drone_racing/control/checkpoints/"
     "level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight/"
@@ -6501,6 +6509,145 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "3M before changing reward numbers again. v39b keeps the exact v39 "
             "reward numbers, MLP policy, v5 observation, rollout geometry, and "
             "unchanged config/level3.toml fixed."
+        ),
+    },
+    "v40_sequence_memory_gru_phase_corridor_from_scratch": {
+        "name": "v40_sequence_memory_gru_phase_corridor_from_scratch",
+        "proposal_name": "structural_v40_sequence_memory_gru_phase_corridor_5m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+        "train_timesteps": 5_000_000,
+        "checkpoint_interval": 1_000_000,
+        "max_eval_checkpoints": 5,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "1,2,3,4,5",
+        "num_envs": 256,
+        "num_steps": 128,
+        "from_scratch": True,
+        "allow_repeat_params": True,
+        "requires_training_support": "recurrent_actor_gru256",
+        "research_packet": V40_SEQUENCE_MEMORY_PACKET,
+        "approved_hypothesis_packet": V40_SEQUENCE_MEMORY_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "recurrent_actor_gru256",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "changed_training_numbers": [
+                "from_scratch",
+                "policy_arch",
+                "observation_layout",
+                "recurrent_hidden_dim",
+                "recurrent_sequence_len",
+                "train_timesteps",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [
+                "gate_stage_coef",
+                "gate_axis_coef",
+                "gate_front_bonus",
+                "gate_bonus",
+                "gate_back_bonus",
+                "finish_bonus",
+                "time_penalty",
+            ],
+            "memory_structure": {
+                "actor": "FC128, FC128, GRU256, FC192, FC96, action_mean4",
+                "sequence_len": 128,
+                "reset_hidden_on_done": True,
+                "reason": (
+                    "Use a true recurrent Actor rather than residual-only memory "
+                    "so the policy can learn phase and corridor state across "
+                    "multiple gates."
+                ),
+            },
+            "observation_structure": {
+                "base": "v5 local current gate, nearest other gate, two obstacles, last action, history",
+                "added": [
+                    "current-gate phase progress",
+                    "gate-corridor obstacle relative features",
+                    "gate aperture margin features",
+                ],
+                "rejected": "do not restore all-gates/v4 observation",
+            },
+            "rollout_structure": {
+                "num_envs": 256,
+                "num_steps": 128,
+                "batch_size": 32768,
+                "sequence_len": 128,
+                "control_horizon_s": 2.56,
+                "start": "random_init",
+            },
+            "future_followup": (
+                "If this screen beats the 21% plateau or raises mean gates "
+                "meaningfully, mature it. If it shows memory signal but drifts, "
+                "add a separate sequence-level success-trajectory pretraining "
+                "lane instead of reusing v38 online teacher retention."
+            ),
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 10 sequence memory with phase/corridor observation",
+            "baseline": "loop101/loop107/loop110 19%-21% plateau",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can a true GRU-256 Actor, given explicit phase, corridor, and "
+                "aperture-margin features, learn a stable multi-gate strategy "
+                "that breaks the 21% success plateau on unchanged Level3?"
+            ),
+            "promotion_gate": {
+                "short_screen": (
+                    "Promote only if a milestone checkpoint clearly beats 21% "
+                    "success, reaches at least 25%-30% success, or raises mean "
+                    "gates beyond 1.75 with lower crash."
+                ),
+                "anti_drift": (
+                    "Use the best milestone checkpoint, not final by default. "
+                    "Reject if success stays <=21%, mean_gates stays near 1.6, "
+                    "or later checkpoints repeat the loop107/loop110 collapse."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 59,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "recurrent_actor_gru256",
+            "recurrent_hidden_dim": 256,
+            "recurrent_sequence_len": 128,
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "The corrected Level3 hard-eval evidence has plateaued around "
+            "19%-21% success across reward, curriculum, replay, privileged "
+            "Critic, and residual-GRU attempts. loop107 showed a transient "
+            "21% residual-GRU signal, but loop108/109 did not reproduce or "
+            "stabilize it, and v38 online teacher retention mostly preserved "
+            "the feed-forward teacher instead of creating new memory behavior. "
+            "v40 therefore stops small reward-number tuning and tests a true "
+            "sequence-memory lane: from-scratch GRU-256 Actor, explicit "
+            "phase/corridor/aperture local observation, fixed v39 gate-acquisition "
+            "reward scale, dense milestone evaluation, and unchanged "
+            "config/level3.toml hard eval."
         ),
     },
 }
