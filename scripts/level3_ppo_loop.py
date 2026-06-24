@@ -686,6 +686,31 @@ DEFAULT_AUTONOMY_POLICY: dict[str, Any] = {
     "required_post_run_review_roles": POST_RUN_REVIEW_ROLES,
     "allowed_post_run_decisions": POST_RUN_DECISION_OPTIONS,
     "main_agent_decision_packet_required_before_next_training": True,
+    "builder_checker_gate": {
+        "required_for_code_semantics_changes": True,
+        "builder": (
+            "Implementation-only agent: edit the approved files, run local "
+            "checks, and report changed files plus pass/fail evidence."
+        ),
+        "checker": (
+            "Read-only verification agent: rediscover relevant checks, run or "
+            "inspect them, report ALL GREEN or FAILED with file:line evidence, "
+            "and verify config/level3.toml geometry/randomization is unchanged."
+        ),
+        "main_agent": (
+            "Arbitrate the checker evidence; do not let builder self-approval "
+            "replace independent checker approval before launching training."
+        ),
+        "required_surfaces": [
+            "observation_layout",
+            "planner_guidance_observation",
+            "inference_action_path",
+            "ppo_training_semantics",
+            "reward_structure",
+            "evaluator_or_parity_scripts",
+            "loop_orchestration",
+        ],
+    },
     "step_curve_policy": {
         "source": LEVEL2_STEP_CURVE_PACKET,
         "screening_timesteps": SCREENING_TIMESTEPS,

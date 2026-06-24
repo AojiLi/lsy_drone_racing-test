@@ -40,12 +40,12 @@ one-off structure change: after each bounded chunk, Codex must analyze the
 result, collect exactly three reviews, write a decision packet, and either hold
 or launch the next named structural lane.
 
-The latest completed chunk, loop117/v47, proved residual-frontier union
-retention was active but stayed inside the old plateau: best checkpoint 3M had
-`20%` success, `1.58` mean gates, `80%` crash, and `7.064s` mean successful
-time. Do not continue v47 as-is or start from loop117 final. The immediate next
-action is one bounded v48 contact/conversion reward-structure screen,
-hard-evaluated on unchanged `config/level3.toml`.
+The latest completed chunk, loop121/v50, fixed the hidden512 PPO update-pressure
+symptom but did not beat the frontier: best checkpoint 25M had `18%` success,
+`1.56` mean gates, `80%` crash, `2%` timeout, and `6.283s` mean successful
+time. Do not continue v50 as the immediate next move. The approved next lane is
+one bounded v51 planner-guidance observation PPO256 screen, hard-evaluated on
+unchanged `config/level3.toml`.
 
 Historical v40 command, retained only for provenance:
 
@@ -183,6 +183,23 @@ For Codex-driven autonomy, the main agent should attach ordinary analysis with
 main-agent decision packet with `--approved-hypothesis-packet`. Analysis packets
 never bypass plateau guards by themselves.
 
+## Builder/Checker Gate
+
+For structural lanes that require code changes, use a two-agent gate before
+training:
+
+- builder implements the approved change and runs local checks;
+- checker is read-only, reruns/discovers the relevant checks, and reports
+  `ALL GREEN` or `FAILED` with concrete file/line evidence;
+- the main agent decides whether the evidence is strong enough to launch the
+  next bounded train/evaluate chunk.
+
+This gate is required for observation, planner-guidance, inference action path,
+PPO/training semantics, reward structure, evaluator/parity script, and loop
+orchestration changes. It is not required for pure markdown analysis, decisions,
+or reader notes. The checker should always confirm that `config/level3.toml`
+track geometry/randomization was not changed.
+
 ## Structural Boundary
 
 Structural search is now active. Observation layout, controller architecture,
@@ -193,15 +210,17 @@ logging, milestone hard eval, and post-run analysis.
 Current immediate lane:
 
 ```text
-v48_v5_contact_conversion_reward_structure_from_loop110_3m
+v51_planner_guidance_obs_ppo256_from_loop110_3m
 ```
 
-v47 confirmed that residual-frontier union retention is active, but healthy
-teacher KL/MSE/agreement still did not convert into hard-eval progress. v48
-therefore starts from loop110/v39 3M, keeps the v5 MLP Actor, disables
-retention, and tests a decoupled contact/conversion reward structure. It may
-change reward structure and reward numbers only inside the named lane, and it
-must still hard-evaluate on unchanged `config/level3.toml`.
+v50 showed that stronger hidden512 PPO updates were active but still did not
+convert into enough Level3 hard-eval success. v51 therefore starts from the
+loop110/v39 3M feed-forward checkpoint, appends deterministic planner-guidance
+features to the v5 observation, keeps a 2x256 Tanh PPO Actor as the only action
+source, and tests whether route-intent information helps gate/obstacle
+conversion. The planner is deployed only as observation computation: no planner
+actions, MPC, safety shield, static seed replay, or track modification are
+allowed. It must still hard-evaluate on unchanged `config/level3.toml`.
 
 ## Research-Guided Tuning
 

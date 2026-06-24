@@ -199,36 +199,69 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   selected initial checkpoint already has promising hard-eval evidence recorded
   in `state.json`. It does not bypass the post-run analysis requirement.
 
+## Builder/Checker Gate
+
+Use this gate before launching training for any structural lane that changes
+code or config semantics. It imports the user's loop pattern: builder writes,
+checker verifies, and the main agent arbitrates.
+
+- Builder role: implement only the approved task. It may edit files, run local
+  checks, and fix checker-reported root causes. It must read `AGENTS.md`, this
+  skill, and relevant project config before editing, then report the goal,
+  files changed, completion standard, and local check result.
+- Checker role: read-only verification. It must not edit files. It must
+  rediscover the relevant checks from repo config and the Level3 loop context,
+  run/inspect them, and report either `ALL GREEN` with proof or `FAILED` with
+  concrete `file:line` evidence and key error lines.
+- Main-agent role: decide whether the checker evidence is sufficient to launch
+  a train/evaluate chunk. The main agent must not let builder self-approval
+  replace checker approval.
+- Required scope: observation layout, planner-guidance observation, inference
+  action path, PPO/training semantics, reward structure, evaluator/parity
+  scripts, and loop orchestration changes.
+- Optional scope: pure analysis packets, decision packets, and reader notes do
+  not need the builder/checker gate unless they also change code semantics.
+- Minimum checker expectations in this repo: `git diff --check`, Python
+  compile checks for touched scripts/modules, the relevant loop `--dry-run`,
+  and any parity/smoke command implied by the changed surface. Checker must
+  explicitly verify that `config/level3.toml` track geometry/randomization was
+  not modified.
+- Templates for delegated prompts live under
+  `.agents/skills/level3-ppo-loop/agents/`.
+
 ## Steps
 
 1. Read `experiments/level3_ppo_loop/state.json` if it exists.
 2. Inspect the latest best checkpoint and recent trial summaries.
 3. Run a dry run before changing the loop command:
    `pixi run -e gpu python scripts/level3_ppo_loop.py --dry-run`.
-4. For real work, run one bounded train/evaluate iteration:
+4. If the next structural lane requires code or config-semantics changes, run
+   the builder/checker gate first. Do not launch training until checker reports
+   approval or the main agent writes an explicit hold.
+5. For real work, run one bounded train/evaluate iteration:
    `pixi run -e gpu python scripts/level3_ppo_loop.py --max-iterations 1 --wandb-enabled`.
    In the user's unattended Codex-supervised loop, still use one script
    iteration at a time with `--codex-autonomous-loop`; do not use
    `--allow-unanalysed-multi-iteration`.
-5. After every completed train/evaluate iteration, build a post-run analysis
+6. After every completed train/evaluate iteration, build a post-run analysis
    packet before choosing another training command:
    `pixi run -e gpu python scripts/analyze_level3_ppo_trial.py --wandb-entity aojili77-technical-university-of-munich --require-wandb-online`.
-6. When the analysis is nontrivial, spawn exactly three separate subagents for
+7. When the analysis is nontrivial, spawn exactly three separate subagents for
    evaluator metrics, W&B/PPO diagnostics, and structure/research synthesis
    using the generated briefs under
    `experiments/level3_ppo_loop/analysis/`.
-7. The analyzer writes `pending_post_run_decision` into state. If its status is
+8. The analyzer writes `pending_post_run_decision` into state. If its status is
    `awaiting_main_agent_decision`, do not launch the next train/evaluate chunk
    until the main agent has written a markdown decision packet under
    `experiments/level3_ppo_loop/decisions/`.
-8. The main agent combines the analysis packet and subagent findings, then
+9. The main agent combines the analysis packet and subagent findings, then
    chooses exactly one of: `stop_target_met`, `hold_for_more_analysis`,
    `continue_same_hypothesis`, `change_reward_or_training_numbers`, or
    `launch_named_structural_lane`.
    The user's current loop is repeated structural search, so a rejected
    structural lane should normally lead to a newly named structural lane or an
    explicit hold, not to silently repeating the same failed lane.
-9. After the main-agent decision packet, spawn one additional reader-note
+10. After the main-agent decision packet, spawn one additional reader-note
    subagent to explain the completed loop in plain Chinese for the user. This
    reader-note subagent is separate from, and must not replace, the three
    required decision-review subagents. Write the final note under
@@ -236,24 +269,24 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
    `pixi run -e gpu python scripts/write_level3_loop_reader_note.py --update-state`
    as the metric/path scaffold when useful; pass a reader-summary file if the
    reader-note subagent produced extra prose.
-10. The next training command after analysis must attach both provenance files:
+11. The next training command after analysis must attach both provenance files:
    `--analysis-packet <analysis.md>` and
    `--approved-hypothesis-packet <decision.md>`.
-11. If the user wants automatic tuning after plateau, dry-run a bounded
+12. If the user wants automatic tuning after plateau, dry-run a bounded
    screening command with `--auto-structural-search` or
    `--auto-hypothesis-search`; prefer 20M-30M before any 80M extension.
-12. If a 30M branch shows non-zero hard-eval success or meaningful gate progress,
+13. If a 30M branch shows non-zero hard-eval success or meaningful gate progress,
    prefer continuing the same hypothesis toward 60M and then 90M with
    `--allow-step-curve-maturation`, rather than immediately changing reward
    numbers.
-13. For nontrivial parameter changes, request or create a research synthesis in
+14. For nontrivial parameter changes, request or create a research synthesis in
     `experiments/level3_ppo_loop/research/` and attach it with
     `--research-packet`.
-14. Stop when the hard gate is met. Report the checkpoint path and metrics.
-15. Keep structural lanes explicit: proposal name, observation layout,
+15. Stop when the hard gate is met. Report the checkpoint path and metrics.
+16. Keep structural lanes explicit: proposal name, observation layout,
     controller/reward/training changes, source packet, and hard-eval summary
     must be recorded in state or a markdown packet.
-16. Never modify `config/level3.toml` track geometry/randomization as a way
+17. Never modify `config/level3.toml` track geometry/randomization as a way
     to improve the metric. Any alternate training config, including
     `level3_dr.toml`, must be clearly labeled as training-only and still
     evaluated on `config/level3.toml`.

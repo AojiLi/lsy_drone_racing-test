@@ -108,6 +108,20 @@
   analysis packet and the main-agent decision packet, using `--analysis-packet`
   and `--approved-hypothesis-packet`. Structural lanes must be named explicitly
   and may not modify the Level3 race track.
+- For any structural lane that changes code or config semantics before
+  training, split implementation and verification into a builder/checker gate.
+  A builder agent may edit the code and run local checks, but it may not approve
+  its own work. A checker agent must be read-only, rediscover the relevant
+  checks from repo configuration and loop context, run/inspect them, and report
+  `ALL GREEN` or `FAILED` with concrete `file:line` evidence. The main agent
+  decides whether to launch training only after checker approval.
+- The builder/checker gate is required for changes touching observation layout,
+  planner-guidance features, inference action path, PPO/training semantics,
+  reward structure, evaluator/parity scripts, or loop orchestration. It is not
+  required for pure analysis, decision, or reader-note markdown updates.
+- If checker fails, route the failure back to builder for the smallest root
+  cause fix, then run checker again. Do not weaken tests, skip checks, or
+  silently change `config/level3.toml`.
 
 ## Tuning And Research Rules
 
