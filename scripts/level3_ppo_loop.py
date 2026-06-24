@@ -577,6 +577,14 @@ V49_HIDDEN512_BASELINE_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-23_loop118_reject_v48_launch_v49_hidden512_baseline.md"
 )
+V50_HIDDEN512_UPDATE_PRESSURE_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-24_level3_v50_hidden512_update_pressure_plan.md"
+)
+V50_HIDDEN512_UPDATE_PRESSURE_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-24_loop120_reject_v49_recovery_launch_v50_hidden512_update_pressure.md"
+)
 V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
     "2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md"
@@ -7798,6 +7806,153 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "90M/120M maturation or the next hidden512-family parameter "
             "adjustment rather than judging the larger network from a 5M "
             "screen."
+        ),
+    },
+    "v50_hidden512_update_pressure_conversion_from_loop110_3m": {
+        "name": "v50_hidden512_update_pressure_conversion_from_loop110_3m",
+        "proposal_name": "structural_hidden512_v50_update_pressure_conversion_30m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+        "train_timesteps": 30_000_000,
+        "checkpoint_interval": 5_000_000,
+        "max_eval_checkpoints": 8,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "5,10,15,20,30",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+        "allow_hidden_dim_warmstart": True,
+        "allow_step_curve_maturation": True,
+        "allow_repeat_params": True,
+        "research_packet": V50_HIDDEN512_UPDATE_PRESSURE_PACKET,
+        "approved_hypothesis_packet": V50_HIDDEN512_UPDATE_PRESSURE_DECISION_PACKET,
+        "architecture": {
+            "deployment_policy": "end_to_end_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "capacity_family": "hidden512",
+            "baseline_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+            "parent_failure": (
+                "loop119/loop120 completed the v49 hidden512 long-horizon read "
+                "and regressed to a best 15% success, 1.50 mean gates, and 85% "
+                "crash. W&B showed near-zero approximate KL and zero clip "
+                "fraction while entropy rose, so the next hidden512-family "
+                "test should change PPO update pressure instead of continuing "
+                "the same annealed schedule to 90M/120M."
+            ),
+            "changed_training_numbers": [
+                "learning_rate",
+                "anneal_lr",
+                "update_epochs",
+                "clip_coef",
+                "ent_coef",
+                "vf_coef",
+                "target_kl",
+                "hidden_dim",
+                "allow_hidden_dim_warmstart",
+                "initial_checkpoint",
+                "train_timesteps",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [],
+            "retention": {
+                "type": "none",
+                "reason": (
+                    "v45 and v47 improved teacher/retention diagnostics but "
+                    "did not expand the hard-eval frontier; v50 isolates "
+                    "hidden512 PPO update pressure before adding retention or "
+                    "memory again."
+                ),
+            },
+            "warmstart": {
+                "type": "block_copy_hidden_dim_expansion",
+                "source_hidden_dim": 256,
+                "target_hidden_dim": 512,
+                "source_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+                "support_flag": "allow_hidden_dim_warmstart",
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 19 hidden512 update-pressure follow-up",
+            "baseline": "loop110/v39 3M feed-forward v5 frontier",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": True,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can the 2x512 v5 MLP convert gate progress better when PPO "
+                "updates remain active throughout the 30M chunk, instead of "
+                "using the v49 low-learning-rate annealed schedule that "
+                "collapsed to near-zero KL and zero clip fraction?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "Continue this v50 family toward 60M only if a checkpoint "
+                    "shows success near or above 18% with mean_gates >= 1.55, "
+                    "or improves evaluator mean_gates while W&B passed_gate or "
+                    "finished metrics rise without crash/tilt blow-up."
+                ),
+                "reject_or_change_axis": (
+                    "If v50 stays below 16% success, mean_gates stays below "
+                    "1.50, or W&B shows higher update pressure without "
+                    "evaluator conversion, move to the required hidden512 "
+                    "observation, memory, or curriculum follow-up."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 67,
+            "learning_rate": 1.0e-4,
+            "anneal_lr": False,
+            "update_epochs": 8,
+            "num_minibatches": 8,
+            "clip_coef": 0.30,
+            "clip_vloss": True,
+            "ent_coef": 0.005,
+            "vf_coef": 0.5,
+            "max_grad_norm": 1.5,
+            "target_kl": 0.05,
+            "hidden_dim": 512,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "v27_teacher_kl_beta": 0.0,
+            "reward_structure": "legacy_staged",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_plane_bonus": 0.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "The v49 60M hidden512 read did not justify same-hypothesis "
+            "maturation: evaluator success fell to 15%/14%/13% across the "
+            "recovery milestones, while W&B showed approximate KL near zero, "
+            "clip fraction at zero, policy loss near zero, and entropy rising. "
+            "v50 keeps the hidden512 family alive, starts again from the "
+            "loop110/v39 3M feed-forward v5 checkpoint for a clean comparison, "
+            "keeps reward numbers and config/level3.toml unchanged, and tests "
+            "whether sustained PPO update pressure plus lower entropy pressure "
+            "can convert gate progress before moving to observation, memory, "
+            "or curriculum changes."
         ),
     },
 }

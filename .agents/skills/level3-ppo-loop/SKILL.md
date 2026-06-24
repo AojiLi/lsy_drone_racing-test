@@ -115,32 +115,31 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   best was the 1M checkpoint with `16%` success, `1.50` mean gates, `84%`
   crash, and `6.516s` mean successful time. Do not continue v48, do not mature
   it, and do not start future work from loop118 checkpoints.
+- loop119/loop120 tested the v49 hidden512 long-horizon family. loop119 reached
+  the 45M checkpoint before interruption; loop120 recovered from that checkpoint
+  for the effective 45M-to-60M read. Best loop120 was only `15%` success,
+  `1.50` mean gates, `85%` crash, and `6.741s`, with later milestones falling
+  to `14%` and `13%` success. W&B showed near-zero `approx_kl`, zero
+  `clipfrac`, near-zero policy loss, rising entropy, and no gate/finish
+  conversion. Do not continue v49 as-is toward 90M/120M and do not start future
+  work from loop120 final.
 - The immediate next lane is
-  `v49_v5_hidden512_mlp_warmstart_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop118_reject_v48_launch_v49_hidden512_baseline.md`.
-  It starts a hidden512 capacity-family baseline: loop110/v39 3M v5 MLP is
-  block-copy warm-started from hidden_dim `256` to `512`, v5 observation and
-  v39 reward numbers stay fixed, retention is disabled, and hard eval remains
-  unchanged `config/level3.toml`. v49 is now a 60M long-horizon bootstrap, not
-  a 5M screen or one-shot capacity verdict. Evaluate milestones at
-  5M/10M/15M/20M/30M/45M/60M, but do not use the early milestones failing to
-  preserve the old 21% frontier as a rejection signal. The Level2 step curve
-  showed that useful success can appear after 45M-70M even when 30M still looks
-  weak. v49 explicitly enables step-curve maturation because loop110/v39 3M
-  already has promising hard-eval evidence. Unless v49 loses basic gate
-  progress across the long run or exposes a
-  wiring bug, the next decision should stay inside the hidden512 family: either
-  mature the same hypothesis toward 90M/120M or run a targeted hidden512
-  reward/PPO-number, observation, memory, or curriculum follow-up. Do not
-  abandon hidden512 until at least three evaluated hidden512 family trials
-  exist: the long baseline, one reward/PPO-number follow-up, and one
-  observation, memory, or curriculum follow-up.
+  `v50_hidden512_update_pressure_conversion_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-24_loop120_reject_v49_recovery_launch_v50_hidden512_update_pressure.md`.
+  It stays inside the hidden512 family, starts again from loop110/v39 3M,
+  keeps v5 observation, v39 reward numbers, and unchanged `config/level3.toml`,
+  and tests one bounded 30M PPO update-pressure follow-up with
+  `learning_rate=1e-4`, `anneal_lr=False`, `update_epochs=8`,
+  `clip_coef=0.30`, `ent_coef=0.005`, `vf_coef=0.5`, and `target_kl=0.05`.
+  After v50, run the analyzer, exactly three subagent reviews, and a
+  main-agent decision before any further training. If v50 also fails to reach
+  at least `16%` success and `1.50` mean gates, stop PPO-number tuning and move
+  to the required hidden512 observation, memory, or curriculum follow-up.
 - Early checkpoints are diagnostic health checks, not growth exams. If a lane
   creates a `1M` checkpoint, use it only for NaNs, action/observation mismatch,
   checkpoint metadata, W&B logging, PPO health, or catastrophic zero-gate
-  failure. For v49, use 5M/10M/20M/30M the same way. Do not require
-  success-rate growth or preservation of the old 21% frontier before the 60M
-  read.
+  failure. For v50, use 5M/10M/15M/20M as health and trend checks; do not
+  accept any result without hard eval on unchanged `config/level3.toml`.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /

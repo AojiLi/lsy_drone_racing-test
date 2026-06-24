@@ -112,14 +112,29 @@
   crash, and `7.064s` mean successful time. Teacher KL/MSE/agreement improved,
   so do not continue v47 as-is and do not start future training from loop117
   final.
+- loop118 tested
+  `v48_v5_contact_conversion_reward_structure_from_loop110_3m` and regressed:
+  best was the 1M checkpoint with `16%` success, `1.50` mean gates, `84%`
+  crash, and `6.516s` mean successful time. Do not continue v48, do not mature
+  it, and do not start future work from loop118 checkpoints.
+- loop119/loop120 tested the v49 hidden512 long-horizon family. loop119 reached
+  the 45M checkpoint before interruption; loop120 recovered from that checkpoint
+  for the effective 45M-to-60M read. Best loop120 was only `15%` success,
+  `1.50` mean gates, `85%` crash, and `6.741s`, with later milestones falling
+  to `14%` and `13%` success. W&B showed near-zero `approx_kl`, zero
+  `clipfrac`, near-zero policy loss, rising entropy, and no gate/finish
+  conversion. Do not continue v49 as-is toward 90M/120M and do not start future
+  work from loop120 final.
 - The immediate next lane is
-  `v48_v5_contact_conversion_reward_structure_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-23_loop117_reject_v47_launch_v48_contact_conversion_reward_structure.md`.
-  It starts from loop110/v39 3M, keeps the v5 MLP Actor and unchanged
-  `config/level3.toml`, disables retention, and tests one bounded
-  contact/conversion reward-structure screen. After v48, run the analyzer,
-  exactly three subagent reviews, and a main-agent decision before any further
-  training.
+  `v50_hidden512_update_pressure_conversion_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-24_loop120_reject_v49_recovery_launch_v50_hidden512_update_pressure.md`.
+  It stays inside the hidden512 family, starts again from loop110/v39 3M,
+  keeps v5 observation, v39 reward numbers, and unchanged `config/level3.toml`,
+  and tests one bounded 30M PPO update-pressure follow-up with
+  `learning_rate=1e-4`, `anneal_lr=False`, `update_epochs=8`,
+  `clip_coef=0.30`, `ent_coef=0.005`, `vf_coef=0.5`, and `target_kl=0.05`.
+  After v50, run the analyzer, exactly three subagent reviews, and a
+  main-agent decision before any further training.
 - loop103 tested v35 competence-gated gate-phase reset for 10M and did not
   beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
   81% crash with 7.245s mean successful time, and final fell to 17% success /
