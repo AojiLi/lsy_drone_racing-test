@@ -36,6 +36,11 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   baseline is the remote-inspired local-obstacle v5 layout
   `level3_target_gate_nearest_gate_2obs_local_history_v5`; do not restore the
   rejected all-gates/v4 lane unless the user explicitly asks.
+- v51 explicitly opens planner-guidance observation as a deployed observation
+  layout. The planner may compute deterministic route-intent features at
+  inference, but it must not output actions, override PPO actions, act as MPC,
+  provide a safety shield, replay static seed-specific routes, or modify the
+  Level3 track. The PPO Actor remains the only action-producing controller.
 - The current structural roadmap is
   `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
   The latest pasted-framework synthesis is
@@ -123,18 +128,23 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   `clipfrac`, near-zero policy loss, rising entropy, and no gate/finish
   conversion. Do not continue v49 as-is toward 90M/120M and do not start future
   work from loop120 final.
+- loop121 tested
+  `v50_hidden512_update_pressure_conversion_from_loop110_3m` for 30M. It fixed
+  the v49 near-zero PPO update-pressure symptom, but hard-eval conversion was
+  weak: best checkpoint was 25M with `18%` success, `1.56` mean gates, `80%`
+  crash, and `6.283s` mean successful time; final fell to `15%` success and
+  `1.45` mean gates. It did not meet the target or beat the global best. Do not
+  continue v50 as the next immediate move.
 - The immediate next lane is
-  `v50_hidden512_update_pressure_conversion_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-24_loop120_reject_v49_recovery_launch_v50_hidden512_update_pressure.md`.
-  It stays inside the hidden512 family, starts again from loop110/v39 3M,
-  keeps v5 observation, v39 reward numbers, and unchanged `config/level3.toml`,
-  and tests one bounded 30M PPO update-pressure follow-up with
-  `learning_rate=1e-4`, `anneal_lr=False`, `update_epochs=8`,
-  `clip_coef=0.30`, `ent_coef=0.005`, `vf_coef=0.5`, and `target_kl=0.05`.
-  After v50, run the analyzer, exactly three subagent reviews, and a
-  main-agent decision before any further training. If v50 also fails to reach
-  at least `16%` success and `1.50` mean gates, stop PPO-number tuning and move
-  to the required hidden512 observation, memory, or curriculum follow-up.
+  `v51_planner_guidance_obs_ppo256_from_loop110_3m`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-24_loop121_reject_v50_launch_v51_planner_guidance_obs_ppo256.md`.
+  It appends deterministic planner-guidance features to the v5 observation,
+  uses planner computation at inference only as observation, keeps a 2x256 Tanh
+  PPO Actor as the only action source, warm-starts from loop110/v39 3M by
+  zero-padding appended planner-channel weights, keeps v39/v50 reward and PPO
+  update-pressure settings, and hard-evaluates on unchanged `config/level3.toml`.
+  After v51, run the analyzer, exactly three subagent reviews, and a
+  main-agent decision before any further training.
 - Early checkpoints are diagnostic health checks, not growth exams. If a lane
   creates a `1M` checkpoint, use it only for NaNs, action/observation mismatch,
   checkpoint metadata, W&B logging, PPO health, or catastrophic zero-gate

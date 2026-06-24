@@ -44,6 +44,7 @@ LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT = (
 LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUT = (
     "level3_gate_corridor_aperture_margin_minimal_2obs_local_history_v11"
 )
+LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT = "level3_planner_guidance_2obs_local_history_v12"
 CRITIC_OBSERVATION_SAME_AS_ACTOR = "same_as_actor"
 CRITIC_OBSERVATION_LEVEL3_FULL_STATE_V1 = "level3_full_state_v1"
 CRITIC_OBSERVATION_MODE_CHOICES = {
@@ -59,6 +60,7 @@ SUPPORTED_OBSERVATION_LAYOUTS = (
     LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUT,
     LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
     LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUT,
+    LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT,
 )
 
 TARGET_SUCCESS_RATE = 0.60
@@ -585,6 +587,14 @@ V50_HIDDEN512_UPDATE_PRESSURE_DECISION_PACKET = (
     "experiments/level3_ppo_loop/decisions/"
     "2026-06-24_loop120_reject_v49_recovery_launch_v50_hidden512_update_pressure.md"
 )
+V51_PLANNER_GUIDANCE_PACKET = (
+    "experiments/level3_ppo_loop/research/"
+    "2026-06-24_level3_v51_planner_guidance_obs_ppo256_plan.md"
+)
+V51_PLANNER_GUIDANCE_DECISION_PACKET = (
+    "experiments/level3_ppo_loop/decisions/"
+    "2026-06-24_loop121_reject_v50_launch_v51_planner_guidance_obs_ppo256.md"
+)
 V43_SUCCESS_TRAJECTORY_BC_PREFLIGHT_PACKET = (
     "experiments/level3_ppo_loop/parity/"
     "2026-06-23_v43_success_trajectory_bc_warmstart_preflight.md"
@@ -619,6 +629,7 @@ SUPPORTED_TRAINING_STRUCTURES = {
     "residual_gru_teacher_retention_support",
     "success_trajectory_imitation_warmstart_support",
     "recurrent_sequence_retention_support",
+    "planner_guidance_observation_support",
 }
 MIN_MEAN_GATES_IMPROVEMENT = 0.05
 DEFAULT_PLATEAU_TRIAL_LIMIT = 2
@@ -7953,6 +7964,162 @@ STRUCTURAL_HYPOTHESES: dict[str, dict[str, Any]] = {
             "whether sustained PPO update pressure plus lower entropy pressure "
             "can convert gate progress before moving to observation, memory, "
             "or curriculum changes."
+        ),
+    },
+    "v51_planner_guidance_obs_ppo256_from_loop110_3m": {
+        "name": "v51_planner_guidance_obs_ppo256_from_loop110_3m",
+        "proposal_name": "structural_v51_planner_guidance_obs_ppo256_30m",
+        "config": TARGET_EVAL_CONFIG,
+        "eval_config": TARGET_EVAL_CONFIG,
+        "observation_layout": LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT,
+        "train_timesteps": 30_000_000,
+        "checkpoint_interval": 5_000_000,
+        "max_eval_checkpoints": 8,
+        "eval_seed_split": "validation_unseen",
+        "eval_checkpoint_strategy": "milestone",
+        "eval_milestones_m": "5,10,15,20,30",
+        "num_envs": 256,
+        "num_steps": 128,
+        "initial_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+        "allow_step_curve_maturation": True,
+        "allow_repeat_params": True,
+        "research_packet": V51_PLANNER_GUIDANCE_PACKET,
+        "approved_hypothesis_packet": V51_PLANNER_GUIDANCE_DECISION_PACKET,
+        "requires_training_support": "planner_guidance_observation_support",
+        "architecture": {
+            "deployment_policy": "planner_guidance_observation_plus_ppo_actor",
+            "policy_arch": "mlp_2x_tanh",
+            "policy_distribution": "legacy_normal_action_for_A_control",
+            "actor_obs_layout": LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT,
+            "actor_output": "roll_pitch_yaw_thrust",
+            "planner_used_at_inference": True,
+            "planner_outputs_actions": False,
+            "planner_version": "local_gate_waypoint_obstacle_risk_v1",
+            "planner_feature_schema": [
+                "target_body_xyz",
+                "desired_dir_body_xyz",
+                "gate_local_xyz",
+                "avoid_body_xy",
+                "nearest_obstacle_clearance_xy",
+                "desired_speed",
+            ],
+            "planner_feature_dim": 13,
+            "normalization": "disabled",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "track_geometry_change": "forbidden",
+            "capacity_family": "planner_guided_ppo256",
+            "baseline_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+            "warmstart": {
+                "type": "append_local_features_zero_padded",
+                "source_observation_layout": LOCAL_OBSTACLE_OBSERVATION_LAYOUT,
+                "target_observation_layout": LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT,
+                "source_hidden_dim": 256,
+                "target_hidden_dim": 256,
+                "source_checkpoint": LOOP110_V39_3M_CHECKPOINT,
+                "reason": (
+                    "v12 appends deterministic planner-guidance channels to "
+                    "the v5 observation, so existing v5 input weights are "
+                    "copied and new planner-channel weights start at zero."
+                ),
+            },
+            "parent_failure": (
+                "loop121/v50 fixed the hidden512 near-zero PPO-update symptom "
+                "but only reached 18% success and 1.56 mean gates at its best, "
+                "below the 21%/1.66 global frontier. The next bottleneck is "
+                "route intent and gate/obstacle geometry rather than hidden "
+                "capacity or another PPO-number tweak."
+            ),
+            "changed_training_numbers": [
+                "observation_layout",
+                "planner_guidance_features",
+                "hidden_dim",
+                "initial_checkpoint",
+                "train_timesteps",
+                "checkpoint_interval",
+                "eval_milestones_m",
+            ],
+            "changed_reward_numbers": [],
+            "retention": {
+                "type": "none",
+                "reason": (
+                    "Planner-guidance observation directly attacks route-intent "
+                    "and obstacle-corridor ambiguity before reintroducing "
+                    "retention, GRU, or imitation losses."
+                ),
+            },
+        },
+        "hypothesis": {
+            "framework_stage": "Experiment 20 planner-guidance observation lane",
+            "baseline": "loop110/v39 3M feed-forward v5 frontier",
+            "train_config": TARGET_EVAL_CONFIG,
+            "hard_eval_config": TARGET_EVAL_CONFIG,
+            "deployment_actor_only": False,
+            "planner_used_at_inference": True,
+            "planner_outputs_actions": False,
+            "track_geometry_change": "forbidden",
+            "primary_question": (
+                "Can a deterministic planner-guidance observation give the "
+                "2x256 PPO actor enough local route intent to break the "
+                "20%-21% Level3 hard-eval plateau while keeping PPO as the "
+                "only action-producing controller?"
+            ),
+            "promotion_gate": {
+                "promising_for_maturation": (
+                    "Continue toward 60M if any checkpoint reaches at least "
+                    "25% success, mean_gates >= 1.75, crash <= 75%, or shows "
+                    "clear new solved-seed coverage with stable W&B PPO health."
+                ),
+                "reject_or_change_axis": (
+                    "If all milestones remain below 16% success or below 1.50 "
+                    "mean_gates, hold for planner-feature parity and feature "
+                    "diagnostics before changing reward numbers."
+                ),
+            },
+        },
+        "params": {
+            **LOOP052_REMOTE_NOMINAL_PARAMS,
+            "seed": 71,
+            "learning_rate": 1.0e-4,
+            "anneal_lr": False,
+            "update_epochs": 8,
+            "num_minibatches": 8,
+            "clip_coef": 0.30,
+            "clip_vloss": True,
+            "ent_coef": 0.005,
+            "vf_coef": 0.5,
+            "max_grad_norm": 1.5,
+            "target_kl": 0.05,
+            "hidden_dim": 256,
+            "obs_norm_enabled": False,
+            "return_norm_enabled": False,
+            "critic_observation_mode": CRITIC_OBSERVATION_SAME_AS_ACTOR,
+            "track_generator_profile": "default",
+            "policy_arch": "mlp_2x_tanh",
+            "v27_teacher_kl_beta": 0.0,
+            "reward_structure": "legacy_staged",
+            "gate_stage_coef": 13.0,
+            "gate_axis_coef": 24.0,
+            "gate_front_bonus": 5.0,
+            "gate_plane_bonus": 0.0,
+            "gate_bonus": 200.0,
+            "gate_back_bonus": 35.0,
+            "finish_bonus": 175.0,
+            "missed_gate_penalty": 0.0,
+            "gate_frame_pressure_coef": 0.0,
+            "wrong_side_penalty": 8.0,
+            "time_penalty": 0.02,
+        },
+        "rationale": (
+            "The user approved planner-as-observation for maximum Level3 "
+            "success while keeping the Level3 track unchanged. v51 appends "
+            "deterministic local route-intent features to the v5 observation, "
+            "uses the planner at inference only as observation computation, "
+            "keeps the PPO actor as the only action source, returns to the "
+            "2x256 MLP that produced the feed-forward frontier, and warm-starts "
+            "from loop110/v39 with zero-padded weights for the new planner "
+            "channels. This tests whether route-intent information, not "
+            "hidden512 capacity, is the missing structural ingredient."
         ),
     },
 }

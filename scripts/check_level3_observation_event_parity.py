@@ -26,6 +26,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     LOCAL_NEXT_GATE_OBSERVATION_LAYOUTS,
     LOCAL_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
+    LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUTS,
 )
 from lsy_drone_racing.control.train_CleanRL_ppo_level3 import Level2RaceReward, RaceObservation
 from lsy_drone_racing.utils import load_config
@@ -77,6 +78,9 @@ def make_training_obs_probe(
     )
     probe._use_local_gate_aperture_margin_minimal = (
         observation_layout in LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS
+    )
+    probe._use_local_planner_guidance = (
+        observation_layout in LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUTS
     )
     probe.history_dim = (
         RaceObservation.LOCAL_HISTORY_DIM

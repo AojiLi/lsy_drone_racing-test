@@ -40,6 +40,8 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     LOCAL_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUT,
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
+    LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT,
+    LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUTS,
     POLICY_ARCH_MLP,
     POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
     POLICY_ARCH_RECURRENT_ACTOR_GRU256,
@@ -2103,6 +2105,9 @@ class RaceObservation(VectorObservationWrapper):
         self._use_local_gate_aperture_margin_minimal = (
             observation_layout in LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS
         )
+        self._use_local_planner_guidance = (
+            observation_layout in LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUTS
+        )
         self.history_dim = self.LOCAL_HISTORY_DIM if self._use_local_obstacles else self.WORLD_HISTORY_DIM
         self.layout = self._build_layout()
         self.actor_observation_dim = self.layout[-1][1].stop
@@ -2212,6 +2217,8 @@ class RaceObservation(VectorObservationWrapper):
                 add("gate_aperture_margin", 9)
             if self._use_local_gate_aperture_margin_minimal:
                 add("gate_aperture_margins_only", 5)
+            if self._use_local_planner_guidance:
+                add("planner_guidance", 13)
             return layout
         add("target_progress", 1)
         add("gate_prev_corners_body", 12)
@@ -2317,6 +2324,15 @@ class RaceObservation(VectorObservationWrapper):
                 parts.append(
                     self._gate_aperture_margins_only(
                         observations,
+                        active_target_gate,
+                    )
+                )
+            if self._use_local_planner_guidance:
+                parts.append(
+                    self._planner_guidance(
+                        observations,
+                        pos,
+                        rot_t,
                         active_target_gate,
                     )
                 )
@@ -2478,6 +2494,75 @@ class RaceObservation(VectorObservationWrapper):
             ],
             axis=-1,
         )
+
+    def _planner_guidance(
+        self,
+        observations: dict[str, Array],
+        pos: Array,
+        rot_t: Array,
+        active_target_gate: Array,
+    ) -> Array:
+        """Return deterministic route-intent features for planner-guided PPO."""
+        gate_idx = jp.mod(active_target_gate, self.n_gates)
+        batch_idx = jp.arange(pos.shape[0])
+        gate_pos = observations["gates_pos"][batch_idx, gate_idx]
+        gate_quat = observations["gates_quat"][batch_idx, gate_idx]
+        gate_rot = self.quat_to_rotmat(gate_quat)
+        gate_rot_t = jp.swapaxes(gate_rot, -1, -2)
+        gate_local = jp.einsum("nij,nj->ni", gate_rot_t, pos - gate_pos)
+        gate_forward_world = gate_rot[:, :, 0]
+
+        through_offset = jp.where(gate_local[:, 0] < -0.20, 0.15, 0.35)
+        waypoint_world = gate_pos + gate_forward_world * through_offset[:, None]
+
+        obstacles_pos = observations["obstacles_pos"]
+        relative_xy = obstacles_pos[..., :2] - pos[:, None, :2]
+        distance_xy = jp.linalg.norm(relative_xy, axis=-1)
+        nearest_idx = jp.argmin(distance_xy, axis=-1)
+        nearest_pos = obstacles_pos[batch_idx, nearest_idx]
+        nearest_vec_world = pos - nearest_pos
+        nearest_vec_xy = nearest_vec_world[:, :2]
+        nearest_distance_xy = jp.linalg.norm(nearest_vec_xy, axis=-1)
+        obstacle_risk = jp.clip((0.65 - nearest_distance_xy) / 0.65, 0.0, 1.0)
+        away_xy = nearest_vec_xy / jp.maximum(nearest_distance_xy[:, None], 1e-6)
+        avoid_world = jp.concatenate(
+            [away_xy * (0.35 * obstacle_risk[:, None]), jp.zeros((pos.shape[0], 1))],
+            axis=-1,
+        )
+
+        target_world = waypoint_world - pos
+        desired_world = target_world + avoid_world
+        target_body = jp.einsum("nij,nj->ni", rot_t, target_world)
+        target_body = jp.clip(target_body, -2.0, 2.0)
+        desired_body = jp.einsum("nij,nj->ni", rot_t, desired_world)
+        desired_dir_body = desired_body / jp.maximum(
+            jp.linalg.norm(desired_body, axis=-1, keepdims=True),
+            1e-6,
+        )
+        avoid_body = jp.einsum("nij,nj->ni", rot_t, avoid_world)
+        centerline = jp.linalg.norm(gate_local[:, 1:3], axis=-1)
+        target_distance = jp.linalg.norm(target_world, axis=-1)
+        desired_speed = jp.clip(
+            0.35
+            + 0.55 * jp.clip(target_distance / 1.5, 0.0, 1.0)
+            - 0.25 * obstacle_risk
+            - 0.20 * jp.clip(centerline / 0.5, 0.0, 1.0),
+            0.25,
+            0.95,
+        )
+        nearest_clearance = jp.clip(nearest_distance_xy - 0.15, -0.15, 2.0)
+
+        return jp.concatenate(
+            [
+                target_body,
+                desired_dir_body,
+                jp.clip(gate_local, -2.0, 2.0),
+                jp.clip(avoid_body[:, :2], -1.0, 1.0),
+                nearest_clearance[:, None],
+                desired_speed[:, None],
+            ],
+            axis=-1,
+        ).astype(jp.float32)
 
     def _gate_corners_body(
         self, observations: dict[str, Array], gate_idx: Array, pos: Array, rot_t: Array
@@ -4029,6 +4114,7 @@ def train_ppo(
                     LOCAL_GATE_APERTURE_MARGIN_OBSERVATION_LAYOUT,
                     LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_OBSERVATION_LAYOUT,
                     LOCAL_GATE_CORRIDOR_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUT,
+                    LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT,
                 )
                 and observation_layout in LOCAL_OBSTACLE_OBSERVATION_LAYOUTS
                 and model_state_dict["actor_mean.0.weight"].shape[1]
@@ -4217,6 +4303,36 @@ def train_ppo(
             "retention_dataset_path": args.v27_retention_dataset_path,
             "retention_batch_size": int(args.v27_retention_batch_size),
         }
+
+    def checkpoint_extra_metadata() -> dict[str, Any] | None:
+        metadata: dict[str, Any] = {}
+        if args.observation_layout == LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUT:
+            metadata["planner_guidance"] = {
+                "enabled": True,
+                "planner_version": "local_gate_waypoint_obstacle_risk_v1",
+                "planner_used_at_inference": True,
+                "planner_outputs_actions": False,
+                "feature_schema": [
+                    "target_body_x",
+                    "target_body_y",
+                    "target_body_z",
+                    "desired_dir_body_x",
+                    "desired_dir_body_y",
+                    "desired_dir_body_z",
+                    "gate_local_x",
+                    "gate_local_y",
+                    "gate_local_z",
+                    "avoid_body_x",
+                    "avoid_body_y",
+                    "nearest_obstacle_clearance_xy",
+                    "desired_speed",
+                ],
+                "feature_dim": 13,
+            }
+        if teacher_retention_metadata is not None:
+            metadata["teacher_retention"] = teacher_retention_metadata
+        return metadata or None
+
     optimizer = optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -4793,11 +4909,7 @@ def train_ppo(
                     critic_observation_mode=args.critic_observation_mode,
                     actor_observation_dim=actor_obs_dim,
                     critic_observation_dim=critic_obs_dim,
-                    extra_metadata=(
-                        {"teacher_retention": teacher_retention_metadata}
-                        if teacher_retention_metadata is not None
-                        else None
-                    ),
+                    extra_metadata=checkpoint_extra_metadata(),
                 ),
                 checkpoint_path,
             )
@@ -4822,11 +4934,7 @@ def train_ppo(
                 critic_observation_mode=args.critic_observation_mode,
                 actor_observation_dim=actor_obs_dim,
                 critic_observation_dim=critic_obs_dim,
-                extra_metadata=(
-                    {"teacher_retention": teacher_retention_metadata}
-                    if teacher_retention_metadata is not None
-                    else None
-                ),
+                extra_metadata=checkpoint_extra_metadata(),
             ),
             model_path,
         )

@@ -22,6 +22,7 @@ from lsy_drone_racing.control.ppo_level3_observation import (
     LOCAL_NEXT_GATE_OBSERVATION_LAYOUTS,
     LOCAL_OBSTACLE_OBSERVATION_LAYOUTS,
     LOCAL_PHASE_PROGRESS_OBSERVATION_LAYOUTS,
+    LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUTS,
     POLICY_ARCH_MLP,
     POLICY_ARCH_MLP_RESIDUAL_RECURRENT_ACTOR_GRU256,
     POLICY_ARCH_RECURRENT_ACTOR_GRU256,
@@ -344,6 +345,9 @@ class PPOLevel2Inference(Controller):
         self._use_local_gate_aperture_margin_minimal = (
             self.observation_layout in LOCAL_GATE_APERTURE_MARGIN_MINIMAL_OBSERVATION_LAYOUTS
         )
+        self._use_local_planner_guidance = (
+            self.observation_layout in LOCAL_PLANNER_GUIDANCE_OBSERVATION_LAYOUTS
+        )
         if self._use_local_obstacles:
             current_obs_dim = (
                 base_obs_dim
@@ -358,6 +362,7 @@ class PPOLevel2Inference(Controller):
                 + (5 * self.n_local_obstacles if self._use_local_gate_corridor_obstacles else 0)
                 + (9 if self._use_local_gate_aperture_margin else 0)
                 + (5 if self._use_local_gate_aperture_margin_minimal else 0)
+                + (13 if self._use_local_planner_guidance else 0)
             )
         else:
             current_obs_dim = (
@@ -570,6 +575,10 @@ class PPOLevel2Inference(Controller):
                 obs_parts.append(
                     self._gate_aperture_margins_only(obs, active_target_gate)
                 )
+            if self._use_local_planner_guidance:
+                obs_parts.append(
+                    self._planner_guidance(obs, pos, rot_t, active_target_gate)
+                )
             flat = np.concatenate(obs_parts).astype(np.float32)
             self._history = np.concatenate(
                 [self._history[1:], self._basic_history(obs)[None, :]]
@@ -749,6 +758,68 @@ class PPOLevel2Inference(Controller):
             ],
             dtype=np.float32,
         )
+
+    def _planner_guidance(
+        self,
+        obs: dict[str, NDArray[np.floating]],
+        pos: NDArray[np.floating],
+        rot_t: NDArray[np.floating],
+        active_target_gate: int,
+    ) -> NDArray[np.float32]:
+        """Return deterministic route-intent features matching training."""
+        gate_idx = int(active_target_gate) % self.n_gates
+        gate_pos = np.asarray(obs["gates_pos"], dtype=np.float32)[gate_idx]
+        gate_quat = np.asarray(obs["gates_quat"], dtype=np.float32)[gate_idx]
+        gate_rot = self.quat_to_rotmat(gate_quat)
+        gate_local = (gate_rot.T @ (pos - gate_pos)).astype(np.float32)
+        gate_forward_world = gate_rot[:, 0]
+
+        through_offset = 0.15 if float(gate_local[0]) < -0.20 else 0.35
+        waypoint_world = gate_pos + gate_forward_world * through_offset
+
+        obstacles_pos = np.asarray(obs["obstacles_pos"], dtype=np.float32)
+        relative_xy = obstacles_pos[:, :2] - pos[None, :2]
+        distance_xy = np.linalg.norm(relative_xy, axis=-1)
+        nearest_idx = int(np.argmin(distance_xy))
+        nearest_vec_world = pos - obstacles_pos[nearest_idx]
+        nearest_vec_xy = nearest_vec_world[:2]
+        nearest_distance_xy = float(np.linalg.norm(nearest_vec_xy))
+        obstacle_risk = float(np.clip((0.65 - nearest_distance_xy) / 0.65, 0.0, 1.0))
+        away_xy = nearest_vec_xy / max(nearest_distance_xy, 1e-6)
+        avoid_world = np.array(
+            [away_xy[0] * 0.35 * obstacle_risk, away_xy[1] * 0.35 * obstacle_risk, 0.0],
+            dtype=np.float32,
+        )
+
+        target_world = waypoint_world - pos
+        desired_world = target_world + avoid_world
+        target_body = np.clip(rot_t @ target_world, -2.0, 2.0)
+        desired_body = rot_t @ desired_world
+        desired_dir_body = desired_body / max(float(np.linalg.norm(desired_body)), 1e-6)
+        avoid_body = rot_t @ avoid_world
+        centerline = float(np.linalg.norm(gate_local[1:3]))
+        target_distance = float(np.linalg.norm(target_world))
+        desired_speed = float(
+            np.clip(
+                0.35
+                + 0.55 * np.clip(target_distance / 1.5, 0.0, 1.0)
+                - 0.25 * obstacle_risk
+                - 0.20 * np.clip(centerline / 0.5, 0.0, 1.0),
+                0.25,
+                0.95,
+            )
+        )
+        nearest_clearance = float(np.clip(nearest_distance_xy - 0.15, -0.15, 2.0))
+
+        return np.concatenate(
+            [
+                target_body.astype(np.float32),
+                desired_dir_body.astype(np.float32),
+                np.clip(gate_local, -2.0, 2.0).astype(np.float32),
+                np.clip(avoid_body[:2], -1.0, 1.0).astype(np.float32),
+                np.array([nearest_clearance, desired_speed], dtype=np.float32),
+            ]
+        ).astype(np.float32)
 
     def _basic_history(self, obs: dict[str, NDArray[np.floating]]) -> NDArray[np.float32]:
         """Return the short state history expected by the loaded checkpoint layout."""

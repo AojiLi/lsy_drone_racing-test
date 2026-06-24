@@ -27,11 +27,12 @@
 - Never edit Level3 track geometry or randomization to make the task easier.
   `config/level3.toml` is the immutable target. `config/level3_dr.toml` is only
   a domain-randomized training/robustness config.
-- Keep deployment strictly
-  observation/history -> PPO actor -> roll/pitch/yaw/thrust. Do not add MPC,
-  waypoint planners, subgoal policies, rule controllers, static seed replay, or
-  inference-time safety shields unless a later explicit structural packet
-  approves them.
+- Keep the action path strictly
+  observation/history -> PPO actor -> roll/pitch/yaw/thrust. v51 explicitly
+  allows a deterministic planner-guidance module as deployed observation
+  computation only. Do not add planner action output, MPC, subgoal policies,
+  rule controllers, static seed replay, or inference-time safety shields unless
+  a later explicit structural packet approves them.
 - Training curricula and alternate train configs are allowed only as named
   structural lanes. They must still be hard-evaluated on `config/level3.toml`.
 - Do not overwrite `notebooks/train_level3_ppo.ipynb` unless the user explicitly
@@ -158,10 +159,14 @@
   `v50_hidden512_update_pressure_conversion_from_loop110_3m` for 30M. Its best
   hard-eval checkpoint was 25M with `18%` success, `1.56` mean gates, `80%`
   crash, and `6.283s` mean successful time. It did not meet target.
-- As of 2026-06-24, state records a pending post-run decision gate for
-  `level3_loop_121_structural_hidden512_v50_update_pressure_conversion_30m`.
-  Do not launch further training until the three required reviews are
-  synthesized into a main-agent decision packet.
+- The loop121 post-run gate has been resolved by the v51 decision packet:
+  `experiments/level3_ppo_loop/decisions/2026-06-24_loop121_reject_v50_launch_v51_planner_guidance_obs_ppo256.md`.
+- The immediate next lane is
+  `v51_planner_guidance_obs_ppo256_from_loop110_3m`: append deterministic
+  planner-guidance observation features to v5, use planner computation at
+  inference only as observation, keep a 2x256 Tanh PPO Actor as the only action
+  source, warm-start from loop110/v39 3M with zero-padded planner-channel input
+  weights, and hard-evaluate on unchanged `config/level3.toml`.
 - loop121 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_121_structural_hidden512_v50_update_pressure_conversion_30m_analysis.md`.
 
@@ -192,8 +197,8 @@
   gate/finish progress; W&B showed near-zero update pressure symptoms. Do not
   continue v49 toward 90M/120M or start from loop120 final.
 - v50 hidden512 update-pressure follow-up improved update diagnostics but did
-  not meet the target or beat the global best. Further action requires the
-  pending loop121 main-agent decision packet.
+  not meet the target or beat the global best. It has been rejected as the next
+  immediate move by the loop121 v51 decision packet.
 
 ## Git And Generated Files
 
