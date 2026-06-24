@@ -228,24 +228,32 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
    The user's current loop is repeated structural search, so a rejected
    structural lane should normally lead to a newly named structural lane or an
    explicit hold, not to silently repeating the same failed lane.
-9. The next training command after analysis must attach both provenance files:
+9. After the main-agent decision packet, spawn one additional reader-note
+   subagent to explain the completed loop in plain Chinese for the user. This
+   reader-note subagent is separate from, and must not replace, the three
+   required decision-review subagents. Write the final note under
+   `drone_notes/level3_loops/`. Use
+   `pixi run -e gpu python scripts/write_level3_loop_reader_note.py --update-state`
+   as the metric/path scaffold when useful; pass a reader-summary file if the
+   reader-note subagent produced extra prose.
+10. The next training command after analysis must attach both provenance files:
    `--analysis-packet <analysis.md>` and
    `--approved-hypothesis-packet <decision.md>`.
-10. If the user wants automatic tuning after plateau, dry-run a bounded
+11. If the user wants automatic tuning after plateau, dry-run a bounded
    screening command with `--auto-structural-search` or
    `--auto-hypothesis-search`; prefer 20M-30M before any 80M extension.
-11. If a 30M branch shows non-zero hard-eval success or meaningful gate progress,
+12. If a 30M branch shows non-zero hard-eval success or meaningful gate progress,
    prefer continuing the same hypothesis toward 60M and then 90M with
    `--allow-step-curve-maturation`, rather than immediately changing reward
    numbers.
-12. For nontrivial parameter changes, request or create a research synthesis in
+13. For nontrivial parameter changes, request or create a research synthesis in
     `experiments/level3_ppo_loop/research/` and attach it with
     `--research-packet`.
-13. Stop when the hard gate is met. Report the checkpoint path and metrics.
-14. Keep structural lanes explicit: proposal name, observation layout,
+14. Stop when the hard gate is met. Report the checkpoint path and metrics.
+15. Keep structural lanes explicit: proposal name, observation layout,
     controller/reward/training changes, source packet, and hard-eval summary
     must be recorded in state or a markdown packet.
-15. Never modify `config/level3.toml` track geometry/randomization as a way
+16. Never modify `config/level3.toml` track geometry/randomization as a way
     to improve the metric. Any alternate training config, including
     `level3_dr.toml`, must be clearly labeled as training-only and still
     evaluated on `config/level3.toml`.
@@ -283,6 +291,9 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   committing, inspect `git status` and avoid adding checkpoints, W&B run
   directories, CSV/NPZ datasets, logs, caches, or other bulky generated training
   artifacts unless the user explicitly asks.
+- Commit small reader notes under `drone_notes/level3_loops/` after each loop so
+  the user can review what happened without opening state JSON or W&B. Keep
+  `drone_notes/.obsidian/` ignored.
 - External evidence should influence the next experiment through a written
   synthesis packet. Do not let papers or GitHub examples override local metrics;
   use them to choose structural or reward hypotheses, then let hard eval on

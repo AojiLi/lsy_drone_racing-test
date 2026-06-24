@@ -1,0 +1,15 @@
+# Level3 loop121 读者笔记
+
+最新完成的是 loop121，也就是 v50：从 loop110/v39 的 3M checkpoint 继续，尝试更大的 512 隐层网络，并加强 PPO 的“更新力度”。PPO 可以理解成训练策略网络的算法；这轮主要想让策略真的学动，而不是训练曲线看起来停住。
+
+结果：v50 确实修好了上一轮 v49 那种“几乎不更新”的问题，但没有解决 Level3。最好 checkpoint 是 25M：成功率 18%，平均过门数 1.56，撞毁率 80%，成功时平均 6.283 秒。最终 checkpoint 还掉到 15% 成功率、1.45 平均过门数。目标是成功率至少 60%，且成功时平均不超过 7 秒，所以远没达标。当前全局最好仍是 loop107/v37 1M：21% 成功率，1.66 平均过门数，79% 撞毁率，7.578 秒。
+
+没解决的核心原因：成功的飞行已经够快，问题不是速度，而是大多数种子还飞不稳、过不了足够多的门，撞毁太多。v50 让训练更新更健康，但这些更新只带来小幅评测提升，没有真正学会更可靠的路线意图、门洞/通道选择和避障判断。
+
+下一轮 v51 会试 planner-guidance observation。意思是：加入一个确定性的“路线提示”模块，把局部目标方向、门框坐标、避障方向、最近障碍距离、期望速度等 13 个数字追加到观测里，让 PPO 策略看见更清楚的局部路线信息。
+
+技术上会改变：观测布局换成 `level3_planner_guidance_2obs_local_history_v12`，planner 版本是 `local_gate_waypoint_obstacle_risk_v1`，策略网络回到 2x256 Tanh PPO Actor，从 loop110/v39 3M warm-start，并对新增 planner 输入通道做零填充初始化。
+
+不会改变：`config/level3.toml` 赛道、门、障碍、随机化和硬评测不变；planner 不输出动作、不接管控制、不做安全盾、不做 MPC、不回放固定种子路线。动作仍然只由 PPO Actor 输出 roll/pitch/yaw/thrust。
+
+下一轮重点看：成功率是否到 25% 以上，平均过门数是否到 1.75 以上，撞毁率是否降到 75% 以下；同时看是否出现新的成功种子。训练诊断上看 `approx_kl`、`clipfrac`、熵/action std、value loss、explained variance，以及 passed gate、finished、crashed、gate stage。v51 如果所有里程碑都低于 16% 成功率或 1.50 平均过门数，就应暂停做 planner 特征诊断。

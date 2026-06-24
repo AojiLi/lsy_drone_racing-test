@@ -20,6 +20,7 @@ lsy_drone_racing/control/checkpoints/
 plots/
 c_generated_code/
 /build
+drone_notes/.obsidian/
 
 # pixi environments
 .pixi/*

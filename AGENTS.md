@@ -97,6 +97,13 @@
 - The main-agent decision packet must choose exactly one next action:
   `stop_target_met`, `hold_for_more_analysis`, `continue_same_hypothesis`,
   `change_reward_or_training_numbers`, or `launch_named_structural_lane`.
+- After the analyzer, three required reviews, and main-agent decision packet are
+  complete, spawn one additional reader-note subagent to explain the completed
+  loop in plain Chinese for the user. This reader-note subagent is not a
+  decision reviewer and must not replace the three required reviews. Write the
+  final human-readable note under `drone_notes/level3_loops/`, using
+  `scripts/write_level3_loop_reader_note.py` as the metric/path scaffold when
+  useful.
 - The next training command after a completed analysis must attach both the
   analysis packet and the main-agent decision packet, using `--analysis-packet`
   and `--approved-hypothesis-packet`. Structural lanes must be named explicitly
@@ -207,6 +214,8 @@
   `aojili-test/main` by default.
 - Do not add checkpoints, W&B run directories, CSV/NPZ datasets, logs, caches,
   or other bulky generated training artifacts unless the user explicitly asks.
+- Do commit small markdown reader notes under `drone_notes/level3_loops/`.
+  Keep Obsidian workspace/config files under `drone_notes/.obsidian/` ignored.
 - If unrelated user or generated changes are present, do not revert them and do
   not include them in commits unless they are part of the requested work.
 
