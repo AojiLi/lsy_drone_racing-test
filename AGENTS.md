@@ -1,206 +1,98 @@
 # AGENTS.md
 
-## Level3 PPO Loop
+## Purpose
+
+- This file is durable repository guidance for Codex. Keep it concise and
+  practical: record rules that should apply every time an agent works in this
+  repo.
+- Do not use this file as a full experiment log. Run-specific metrics belong in
+  `experiments/level3_ppo_loop/state.json`, analysis packets, and decision
+  packets. Add only durable conclusions, hard boundaries, current blockers, and
+  workflow rules here.
+- For the detailed Level3 workflow, use the repo skill
+  `.agents/skills/level3-ppo-loop/SKILL.md`.
+
+## Level3 PPO Objective
 
 - Primary objective: train a PPO controller for final evaluation on
-  `config/level3.toml` with
-  mean successful race time `<= 7.0s` and success rate `>= 0.60`.
-- Treat `experiments/level3_ppo_loop/state.json` as the resumable experiment
-  state. Read it before launching new training and update it after each
-  train/evaluate chunk.
-- Use `scripts/level3_ppo_loop.py` for the train/evaluate/tune loop instead of
-  hand-running ad hoc commands. Start with `--dry-run` when changing the loop.
-- Use the hard gate from competition-style checkpoint evaluation, not training
-  reward alone. Training reward can guide debugging, but it is not the target.
-- Use the Level2 checkpoint step-curve packet
-  `experiments/level3_ppo_loop/analysis/2026-06-18_level2_checkpoint_step_curve.md`
-  to calibrate training horizons: treat 30M as screening/debug evidence, not a
-  final success-rate judgment. If a branch has non-zero hard-eval success or
-  meaningful gate progress, mature the same hypothesis toward 60M-90M before
-  rejecting it.
-- Use milestone-aware checkpoint evaluation for longer chunks. Prefer checking
-  intermediate 30M/60M/90M-style checkpoints plus recent checkpoints; do not
-  assume the final checkpoint is best.
-- Reward-only mode is no longer the default. The user has approved structural
-  search for Level3, including observation layout, controller, reward
-  structure, PPO/training structure, and hyperparameter changes.
-- Hard boundary: do not edit Level3 track geometry/randomization to make the
-  task easier, and do not accept any result unless it is hard-evaluated on
-  `config/level3.toml`. The final target is the real Level3 track in
-  `level3.toml`; `level3_dr.toml` is only a domain-randomized sim-to-real
-  robustness/training config.
-- Training curricula or alternate train configs may be explored only as named
-  structural lanes. Final acceptance and state `best` must always come from
-  hard eval on `config/level3.toml`.
-- Each structural lane must have a clear hypothesis, source or local evidence,
-  a unique proposal/run name, W&B logging, checkpoint milestone evaluation, and
-  a post-run analysis packet before the next training chunk.
-- Observation-layout experiments are open. The active deployed observation
-  baseline is the remote-inspired local-obstacle v5 layout
-  `level3_target_gate_nearest_gate_2obs_local_history_v5`; do not restore the
-  rejected all-gates/v4 lane unless the user explicitly asks.
-- The current structural roadmap is
-  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
-  The latest pasted-framework synthesis is
-  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_pasted_structural_update.md`.
-  Its priority order is PPO correctness, clean longer-rollout baseline,
-  observation/return normalization, asymmetric privileged critic, gate-phase
-  reset curriculum, prioritized level replay, GRU, reward numbers, then speed.
-- v32 asymmetric privileged-Critic support and zero-update Actor parity have
-  passed. The first v32 training screen, `loop099`, reached 19% success /
-  1.66 mean gates / 81% crash at its 3M checkpoint on `config/level3.toml`,
-  close to but not better than the loop097 global best of 20% / 1.66 / 80%.
-- loop100 matured v32 from loop099 3M to about 18M and still did not beat
-  loop097: best loop100 was 19% success / 1.65 mean gates / 81% crash on
-  unchanged `config/level3.toml`. Do not continue v32 privileged-Critic
-  maturation without a new explicit decision packet.
-- loop101 tested v33 gate-phase reset curriculum for 10M and tied, but did not
-  beat, the old frontier: best loop101 was 20% success / 1.69 mean gates /
-  80% crash with 6.873s mean successful time. The 8M checkpoint reached 1.81
-  mean gates but only 19% success. Do not continue v33 as-is without a new
-  explicit decision packet.
-- loop102 tested v34 offline train-pool PLR for 10M and regressed: best loop102
-  was only 17% success / 1.59 mean gates / 83% crash, and final fell to 10%
-  success / 1.43 mean gates / 90% crash. Do not continue v34 as-is and do not
-  start future training from loop102 checkpoints.
-- loop106 tested v36 online competence-gated level replay for 10M and did not
-  beat the loop101 frontier. Its best checkpoint was 1M with 20% success /
-  1.63 mean gates / 80% crash / 7.744s, and final collapsed to 14% success /
-  1.41 mean gates / 86% crash. Do not continue v36, tune replay probability,
-  or start future training from loop106 checkpoints.
-- loop107 tested `v37_gru_transfer_memory_structure_from_loop101` for 5M. Its
-  best checkpoint was the 1M checkpoint with 21% success / 1.66 mean gates /
-  79% crash / 7.578s; later checkpoints drifted down to 15%, 12%, 12%, and
-  17% success. Do not continue v37 from loop107 final.
-- loop112 tested
-  `v40_sequence_memory_gru_phase_corridor_from_scratch` and regressed hard:
-  every 1M/2M/3M/4M/final milestone had `0%` success and `0.0` mean gates, with
-  all failures at gate 0. Do not continue v40 as-is, do not mature it to a long
-  run, and do not start future training from loop112 checkpoints.
-- v41 audited GRU/v10 wiring after loop112 and passed: recurrent Actor
-  zero-update parity, train/eval action-scale parity, hidden-state reset/carry
-  parity, v10 observation parity/sanity, and recurrent PPO gradient/update
-  sanity were all clean. This rules out an obvious wiring bug as the cause of
-  v40's zero-gate failure.
-- loop113 tested
-  `v42_gru_v10_gate_phase_reset_curriculum_from_scratch` and also failed to
-  acquire normal-start gate progress: best was the 4M checkpoint with `0%`
-  success, `0.01` mean gates, `54%` crash, and `46%` timeout. Do not continue
-  v42 as-is and do not start future training from loop113 checkpoints.
-- loop114 tested `v43_success_trajectory_imitation_warmstart_gru_v10` and
-  failed to preserve the BC first-gate signal: best was the 5M checkpoint with
-  `0%` success, `0.01` mean gates, `51%` crash, and `49%` timeout. The highest
-  mean-gates milestone was only `0.06`, below the BC-only diagnostic's `0.15`.
-  Do not continue v43 as-is and do not start future training from loop114
-  checkpoints.
-- loop115 tested
-  `v44_sequence_success_retention_failure_correction_gru_v10` and proved active
-  recurrent sequence retention, but did not convert it into hard-eval progress:
-  every milestone had `0%` success and the final checkpoint reached only `0.17`
-  mean gates with `95%` crash. Do not continue v44 as-is and do not start future
-  training from loop115 checkpoints.
-- loop116 tested
-  `v45_v5_frontier_seed_union_retention_mlp_from_loop110_3m` and proved flat
-  v5 MLP retention was active, but did not beat the frontier. Best was the 4M
-  checkpoint with `20%` success, `1.60` mean gates, `80%` crash, and `6.941s`
-  mean successful time; final was `19%` success and `1.59` mean gates. Do not
-  continue v45 as-is and do not start future training from loop116 final.
-- loop117 tested
-  `v47_v5_residual_frontier_union_retention_mlp_from_loop110_3m` and proved
-  residual-frontier union retention was active, but did not beat the frontier.
-  Best was the 3M checkpoint with `20%` success, `1.58` mean gates, `80%`
-  crash, and `7.064s` mean successful time. Teacher KL/MSE/agreement improved,
-  so do not continue v47 as-is and do not start future training from loop117
-  final.
-- loop118 tested
-  `v48_v5_contact_conversion_reward_structure_from_loop110_3m` and regressed:
-  best was the 1M checkpoint with `16%` success, `1.50` mean gates, `84%`
-  crash, and `6.516s` mean successful time. Do not continue v48, do not mature
-  it, and do not start future work from loop118 checkpoints.
-- loop119/loop120 tested the v49 hidden512 long-horizon family. loop119 reached
-  the 45M checkpoint before interruption; loop120 recovered from that checkpoint
-  for the effective 45M-to-60M read. Best loop120 was only `15%` success,
-  `1.50` mean gates, `85%` crash, and `6.741s`, with later milestones falling
-  to `14%` and `13%` success. W&B showed near-zero `approx_kl`, zero
-  `clipfrac`, near-zero policy loss, rising entropy, and no gate/finish
-  conversion. Do not continue v49 as-is toward 90M/120M and do not start future
-  work from loop120 final.
-- The immediate next lane is
-  `v50_hidden512_update_pressure_conversion_from_loop110_3m`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-24_loop120_reject_v49_recovery_launch_v50_hidden512_update_pressure.md`.
-  It stays inside the hidden512 family, starts again from loop110/v39 3M,
-  keeps v5 observation, v39 reward numbers, and unchanged `config/level3.toml`,
-  and tests one bounded 30M PPO update-pressure follow-up with
-  `learning_rate=1e-4`, `anneal_lr=False`, `update_epochs=8`,
-  `clip_coef=0.30`, `ent_coef=0.005`, `vf_coef=0.5`, and `target_kl=0.05`.
-  After v50, run the analyzer, exactly three subagent reviews, and a
-  main-agent decision before any further training.
-- loop103 tested v35 competence-gated gate-phase reset for 10M and did not
-  beat the loop101 frontier: best loop103 was 19% success / 1.68 mean gates /
-  81% crash with 7.245s mean successful time, and final fell to 17% success /
-  1.58 mean gates / 83% crash. Do not continue v35 as-is and do not start
-  future training from loop103 checkpoints.
-- For full training, run through the GPU pixi environment:
-  `pixi run -e gpu python scripts/level3_ppo_loop.py --max-iterations 1 --wandb-enabled`.
-- For the user's unattended Codex-supervised loop, use
-  `--codex-autonomous-loop` so each run records that Codex may spawn analysis
-  and research subagents and choose the next structural or reward hypothesis
-  without per-run confirmation.
-- For a long continuation justified by the Level2 step curve, use
-  `--allow-step-curve-maturation` only when the selected initial checkpoint has
-  promising hard-eval evidence already recorded in `state.json`. This does not
-  bypass the requirement to analyze after the chunk.
-- If `state.json` records a post-audit hold such as
-  `stage2_after_loop014_escalation_audit`, the loop must not start training
-  unless the command explicitly uses `--override-state-hold` together with a
-  named structural command and/or explicit parameter values plus an
-  `--approved-hypothesis-packet`.
+  `config/level3.toml` with success rate `>= 0.60` and mean successful race
+  time `<= 7.0s`.
+- Use the hard gate from competition-style checkpoint evaluation. Training
+  reward and W&B curves are diagnostics, not acceptance criteria.
+- Final acceptance and `state.json` `best` must always come from hard eval on
+  unchanged `config/level3.toml`.
+
+## Hard Boundaries
+
+- Never edit Level3 track geometry or randomization to make the task easier.
+  `config/level3.toml` is the immutable target. `config/level3_dr.toml` is only
+  a domain-randomized training/robustness config.
 - Keep deployment strictly
-  observation/history -> PPO actor -> roll/pitch/yaw/thrust; do not add MPC,
+  observation/history -> PPO actor -> roll/pitch/yaw/thrust. Do not add MPC,
   waypoint planners, subgoal policies, rule controllers, static seed replay, or
   inference-time safety shields unless a later explicit structural packet
   approves them.
-- For live W&B tracking, log in first with `pixi run -e gpu wandb login` or set
-  `WANDB_API_KEY` in the shell before starting the loop.
-- Default W&B project for Level3 loop runs is `ADR-PPO-Racing-Level3`.
-- Do not overwrite `notebooks/train_level3_ppo.ipynb` unless explicitly asked;
-  it is an interactive planning/debug notebook and may contain local edits.
+- Training curricula and alternate train configs are allowed only as named
+  structural lanes. They must still be hard-evaluated on `config/level3.toml`.
+- Do not overwrite `notebooks/train_level3_ppo.ipynb` unless the user explicitly
+  asks; it is an interactive planning/debug notebook and may contain local edits.
+
+## Source Of Truth
+
+- Treat `experiments/level3_ppo_loop/state.json` as the resumable experiment
+  state. Read it before launching training and update it after each
+  train/evaluate chunk.
+- Before training, inspect the latest analysis packet and main-agent decision
+  packet referenced by `state.json`.
+- If `state.json` has
+  `pending_post_run_decision.status == "awaiting_main_agent_decision"`, do not
+  launch another train/evaluate chunk until the main agent has written a
+  markdown decision packet under `experiments/level3_ppo_loop/decisions/`.
 - Checkpoints live under `lsy_drone_racing/control/checkpoints/`. Prefer
-  continuing from the best level3 checkpoint recorded in state; otherwise use
-  the latest `level3_DR_initial` checkpoint when compatible.
-- Use `--from-scratch` when intentionally starting a new random-init baseline.
-  After that, let later runs continue from the best checkpoint recorded in
-  `state.json`.
-- Generated loop logs and CSVs belong under `experiments/level3_ppo_loop/`.
-  Keep final summaries concise and include the best checkpoint path, success
-  rate, mean successful time, crash rate, and next action.
-- After completing code, loop-state, analysis, decision, or loop-instruction
-  changes for this project, commit them and push to `aojili-test/main` by
-  default. Before committing, always inspect `git status` and avoid adding
-  checkpoints, W&B runs, CSV/NPZ datasets, logs, caches, or other bulky
-  generated training artifacts unless the user explicitly asks.
-- After each completed train/evaluate iteration, run
-  `scripts/analyze_level3_ppo_trial.py` before launching another training
-  iteration. The analysis packet must combine evaluator CSV metrics, W&B curves,
-  W&B reward components, PPO diagnostics, and a next-lane recommendation.
-- The analyzer creates a post-run decision gate in `state.json`. If
-  `pending_post_run_decision.status` is `awaiting_main_agent_decision`, do not
-  launch another train/evaluate chunk until the main agent has synthesized the
-  reviews into a markdown decision packet under
-  `experiments/level3_ppo_loop/decisions/`.
+  continuing from the best Level3 checkpoint recorded in state; otherwise use
+  the latest compatible `level3_DR_initial` checkpoint. Use `--from-scratch`
+  only when intentionally starting a random-init baseline.
+- Generated loop logs, CSVs, analysis packets, decision packets, and research
+  packets belong under `experiments/level3_ppo_loop/`.
+
+## Required Loop Workflow
+
+- Use `scripts/level3_ppo_loop.py` for train/evaluate/tune work instead of
+  hand-running ad hoc commands.
+- Start with a dry run when changing the loop command:
+
+  ```bash
+  pixi run -e gpu python scripts/level3_ppo_loop.py --dry-run
+  ```
+
+- For full training, run through the GPU pixi environment and only one bounded
+  train/evaluate iteration at a time:
+
+  ```bash
+  pixi run -e gpu python scripts/level3_ppo_loop.py --max-iterations 1 --wandb-enabled
+  ```
+
+- For the user's unattended Codex-supervised loop, add
+  `--codex-autonomous-loop`. This authorizes Codex to spawn analysis/research
+  subagents and choose the next structural or reward hypothesis without
+  per-run confirmation, but it does not bypass hard eval, analysis, or decision
+  gates.
 - Do not run `scripts/level3_ppo_loop.py` with `--max-iterations > 1` for the
-  Codex-supervised loop. Unattended mode still means one train/evaluate chunk,
-  then analyzer, subagent review, research if needed, and a main-agent decision
-  before the next chunk.
-- The user's current loop objective is repeated structural search, not a
-  one-off structure change. After a failed structural lane, Codex may create the
-  next named lane, update scripts/state/docs, dry-run it, train exactly one
-  bounded chunk, analyze it, collect exactly three reviews, and decide the next
-  lane again until the target is met or a genuine blocker is reached.
+  Codex-supervised loop.
+- For live W&B tracking, log in first with
+  `pixi run -e gpu wandb login` or set `WANDB_API_KEY`. Default W&B project:
+  `ADR-PPO-Racing-Level3`.
+- After every completed train/evaluate iteration, run the analyzer before
+  launching another training iteration:
+
+  ```bash
+  pixi run -e gpu python scripts/analyze_level3_ppo_trial.py --wandb-entity aojili77-technical-university-of-munich --require-wandb-online
+  ```
+
 - For substantive post-run analysis, use exactly three separate subagents:
   evaluator metrics, W&B/PPO diagnostics, and structure/research synthesis. The
   main agent owns the final decision and must enforce the immutable
-  `level3.toml` hard eval.
+  `config/level3.toml` hard eval.
 - The main-agent decision packet must choose exactly one next action:
   `stop_target_met`, `hold_for_more_analysis`, `continue_same_hypothesis`,
   `change_reward_or_training_numbers`, or `launch_named_structural_lane`.
@@ -208,9 +100,115 @@
   analysis packet and the main-agent decision packet, using `--analysis-packet`
   and `--approved-hypothesis-packet`. Structural lanes must be named explicitly
   and may not modify the Level3 race track.
-- For nontrivial tuning changes, use research-guided tuning: spawn distinct
-  research agents for papers, GitHub/open-source examples, and reward tuning
-  references; synthesize their source-backed findings into a markdown packet
-  under `experiments/level3_ppo_loop/research/`; attach it to the next run with
-  `--research-packet`. External evidence may guide structural hypotheses, but
-  local hard eval on `config/level3.toml` decides.
+
+## Tuning And Research Rules
+
+- Reward-only mode is no longer the default. The user has approved structural
+  search for Level3, including observation layout, controller, reward
+  structure, PPO/training structure, and hyperparameter changes.
+- Each structural lane must have a clear hypothesis, source or local evidence,
+  a unique proposal/run name, W&B logging, checkpoint milestone evaluation, and
+  a post-run analysis packet before the next training chunk.
+- Nontrivial tuning changes should be research-guided. Spawn distinct research
+  agents for papers, GitHub/open-source examples, and reward tuning references;
+  synthesize their findings into a markdown packet under
+  `experiments/level3_ppo_loop/research/`; attach it with `--research-packet`.
+  External evidence may guide hypotheses, but local hard eval decides.
+- Use the Level2 checkpoint step-curve packet
+  `experiments/level3_ppo_loop/analysis/2026-06-18_level2_checkpoint_step_curve.md`
+  to calibrate horizons: treat 30M as screening/debug evidence, not a final
+  success-rate judgment.
+- If a branch has non-zero hard-eval success or meaningful gate progress, prefer
+  maturing the same hypothesis toward 60M-90M before rejecting it.
+- Use milestone-aware checkpoint evaluation for longer chunks. Evaluate
+  intermediate 30M/60M/90M-style checkpoints plus recent checkpoints; never
+  assume the final checkpoint is best.
+- Use `--allow-step-curve-maturation` only when the selected initial checkpoint
+  already has promising hard-eval evidence recorded in `state.json`. It does
+  not bypass post-run analysis.
+- If `state.json` records a state-level hold such as
+  `stage2_after_loop014_escalation_audit`, do not start training unless the
+  command explicitly uses `--override-state-hold` together with a named
+  structural command and/or explicit parameter values plus an
+  `--approved-hypothesis-packet`.
+
+## Observation And Roadmap
+
+- Observation-layout experiments are open. The active deployed observation
+  baseline is the remote-inspired local-obstacle v5 layout
+  `level3_target_gate_nearest_gate_2obs_local_history_v5`. Do not restore the
+  rejected all-gates/v4 lane unless the user explicitly asks.
+- Current structural roadmap:
+  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
+- Latest pasted-framework synthesis:
+  `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_pasted_structural_update.md`.
+- Roadmap priority order: PPO correctness, clean longer-rollout baseline,
+  observation/return normalization, asymmetric privileged critic,
+  gate-phase reset curriculum, prioritized level replay, GRU, reward numbers,
+  then speed.
+
+## Current Frontier And Gate
+
+- `state.json` is the source of truth if this summary drifts.
+- Current global best recorded in state is
+  `level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight:1M`:
+  `21%` success, `1.66` mean gates, `79%` crash, and `7.578s` mean successful
+  time. Target is not met.
+- loop121 tested
+  `v50_hidden512_update_pressure_conversion_from_loop110_3m` for 30M. Its best
+  hard-eval checkpoint was 25M with `18%` success, `1.56` mean gates, `80%`
+  crash, and `6.283s` mean successful time. It did not meet target.
+- As of 2026-06-24, state records a pending post-run decision gate for
+  `level3_loop_121_structural_hidden512_v50_update_pressure_conversion_30m`.
+  Do not launch further training until the three required reviews are
+  synthesized into a main-agent decision packet.
+- loop121 analysis packet:
+  `experiments/level3_ppo_loop/analysis/level3_loop_121_structural_hidden512_v50_update_pressure_conversion_30m_analysis.md`.
+
+## Rejected Or Held Lanes
+
+- v31d clean longer-rollout maturation did not beat the loop097/loop101
+  frontier. Do not continue v31d without a new explicit decision packet.
+- v32 asymmetric privileged-Critic support and zero-update Actor parity passed,
+  but loop099/loop100 did not beat the frontier. Do not continue v32 maturation
+  without a new explicit decision packet.
+- v33 gate-phase reset curriculum tied but did not beat the frontier. v35
+  competence-gated gate-phase reset also did not beat the frontier. Do not
+  continue either as-is.
+- v34 offline train-pool PLR regressed. v36 online competence-gated level replay
+  did not beat the frontier and collapsed by final. Do not continue these lanes,
+  tune replay probability, or start future work from their checkpoints.
+- v37 GRU transfer produced the current global best at the 1M checkpoint, but
+  later checkpoints drifted down. Do not continue from loop107 final.
+- v40-v44 recurrent/GRU/BC/sequence-retention lanes failed to acquire or
+  preserve hard-eval gate progress. v41 audited GRU/v10 wiring and found no
+  obvious wiring bug. Do not continue v40-v44 as-is or start future work from
+  their checkpoints.
+- v45 and v47 retention lanes proved retention mechanisms were active but did
+  not beat the frontier. Do not continue them as-is or start from their finals.
+- v48 contact-conversion reward structure regressed. Do not mature it or start
+  future work from loop118 checkpoints.
+- v49 hidden512 long-horizon recovery did not convert PPO training signals into
+  gate/finish progress; W&B showed near-zero update pressure symptoms. Do not
+  continue v49 toward 90M/120M or start from loop120 final.
+- v50 hidden512 update-pressure follow-up improved update diagnostics but did
+  not meet the target or beat the global best. Further action requires the
+  pending loop121 main-agent decision packet.
+
+## Git And Generated Files
+
+- After completing code, loop-state, analysis, decision, or loop-instruction
+  changes, inspect `git status`, commit the intended files, and push to
+  `aojili-test/main` by default.
+- Do not add checkpoints, W&B run directories, CSV/NPZ datasets, logs, caches,
+  or other bulky generated training artifacts unless the user explicitly asks.
+- If unrelated user or generated changes are present, do not revert them and do
+  not include them in commits unless they are part of the requested work.
+
+## Final Summaries
+
+- Keep final summaries concise.
+- Include the best checkpoint path, success rate, mean successful time, crash
+  rate, target-met status, and next action.
+- Mention any tests, dry-runs, analyzer runs, W&B checks, or hard-eval steps
+  that were not run.
