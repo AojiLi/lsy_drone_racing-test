@@ -28,7 +28,10 @@
   unchanged `config/level3.toml`. For that lane, success rate is the primary
   screen, and a slower `15s-20s` successful time is acceptable as an
   intermediate milestone if the built-in 30s environment timeout permits it.
-  Speed optimization comes after reliable completion.
+  Speed optimization comes after reliable completion. The preferred v53
+  architecture is now an upper planner/MPPI/geometric module that generates a
+  short reference trajectory, with PPO or a low-level tracker following that
+  trajectory.
 
 ## Hard Boundaries
 
@@ -204,9 +207,10 @@
   `v53_completion_first_hybrid_planner_controller`, approved by:
   `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
   This is not PPO training and is not recorded as PPO target success. It may
-  use a direct planner/state-machine/action controller to prioritize safe
-  completion on unchanged `config/level3.toml`, with slower successful times
-  accepted as an intermediate milestone.
+  use an upper planner/state-machine/MPPI module to generate local reference
+  trajectories and a PPO/low-level tracker to follow them. Direct non-PPO action
+  output is allowed inside this lane for tracker baselines, but the preferred
+  structure is planner trajectory -> tracker -> `[roll, pitch, yaw, thrust]`.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

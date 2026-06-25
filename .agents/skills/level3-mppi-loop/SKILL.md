@@ -18,6 +18,9 @@ work.
 - Completion-first screen: prioritize `>= 0.60` success on unchanged
   `config/level3.toml`; `15s-20s` successful time is acceptable as an
   intermediate milestone if the built-in 30s timeout permits it.
+- Preferred v53 architecture: upper planner/MPPI/geometric route module
+  generates a short reference trajectory; PPO or a low-level tracker follows
+  the trajectory and outputs `[roll, pitch, yaw, thrust]`.
 - Previous MPPI lane: `v52_mppi_oracle_teacher_level3`.
 - Current decision packet:
   `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
@@ -98,17 +101,23 @@ packet win.
 
 ## Completion-First Hybrid Defaults
 
-The first v53 controller should be slower and more explicit than PPO:
+The first v53 controller should be slower and more explicit than pure PPO:
 
 - takeoff/stabilize;
 - cruise to a pre-gate waypoint;
-- slow down near local visibility range;
+- slow down near local visibility range, especially around the `0.7m`
+  `level3.toml` sensor range where true gate/obstacle poses become visible;
+- replan a local `1s-2s` reference trajectory after the gate/obstacle is
+  observed;
 - align in the active gate frame;
 - choose an obstacle-aware aperture point;
-- cross the gate only after alignment;
+- let PPO or a low-level tracker follow reference position/velocity/phase;
+- cross the gate only after alignment and speed reduction;
 - recover after crossing before accelerating to the next gate.
 
-Direct action output is allowed in this lane. Keep it separate from PPO metrics.
+Direct action output is allowed in this lane for controller/tracker baselines,
+but the preferred structure is planner trajectory -> tracker -> action. Keep it
+separate from PPO metrics.
 
 ## MPPI Design Defaults
 

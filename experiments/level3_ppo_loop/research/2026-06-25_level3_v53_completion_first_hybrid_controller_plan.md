@@ -1,4 +1,4 @@
-# V53 Plan: Completion-First Hybrid Planner Controller
+# V53 Plan: Completion-First Trajectory Planner + PPO Tracker
 
 Date: 2026-06-25
 
@@ -10,6 +10,19 @@ completion on unchanged `config/level3.toml`.
 The user explicitly approved leaving the pure-PPO action path for this lane.
 This lane is controller evidence, not PPO success, and must remain separate from
 PPO training metrics.
+
+The refined architecture is:
+
+```text
+observed/nominal gates and obstacles
+-> upper planner or MPPI/geometric local planner
+-> short reference trajectory: target_pos, target_vel, desired_speed, phase
+-> PPO or low-level trajectory tracker
+-> [roll, pitch, yaw, thrust]
+```
+
+The upper planner should think about route and timing. The tracker should think
+about flying the drone body.
 
 ## Target
 
@@ -36,19 +49,27 @@ align in the gate frame, then cross.
 
 ## Structural Hypothesis
 
-Use a slow-safe high-level controller with phases:
+Use a slow-safe high-level planner with phases:
 
 ```text
 takeoff/stabilize
 -> cruise to pre-gate waypoint
 -> sensing/slowdown inside local visibility distance
+-> generate/replan local reference trajectory
 -> gate-frame align and obstacle-aware aperture selection
 -> controlled crossing
 -> post-gate recover and switch to next gate
 ```
 
-Unlike v51, the planner may output actions directly in this lane. PPO is not the
-only action source here.
+The key Level3 detail is `sensor_range = 0.7`. Far away, gates and obstacles may
+only be nominal. Near the gate, the controller should slow down, let true local
+geometry enter observation, and then replan the next local trajectory.
+
+Unlike v51, this lane is not limited to planner-as-observation. The planner may
+drive the deployed controller through reference trajectories, and direct
+non-PPO action output is allowed for tracker baselines. The preferred main path
+is not MPPI directly outputting every action; it is upper planner -> trajectory
+reference -> PPO/low-level tracker.
 
 ## Preferred First Implementation
 
@@ -64,13 +85,24 @@ First version should be simple and debuggable:
 - use the actual observed/randomized gate and obstacle poses from the environment
   observation;
 - choose a safe aperture point for each gate;
+- maintain a reference trajectory queue for the next `1s-2s`;
+- expose tracker inputs such as reference position error, reference velocity
+  error, active phase, desired speed, gate-frame local position, and aperture
+  offset;
 - cap cruise speed aggressively before the gate;
+- slow down when entering the `0.7m-1.0m` local visibility band, then replan;
 - use gate-frame local position to decide phase transitions;
 - avoid static seed replay and any seed-specific hard-coded path;
 - expose diagnostics for phase, target gate, aperture offset, and speed command.
 
-MPPI can still be used later, but the immediate experiment should not be another
-local MPPI cost-weight sweep.
+MPPI can be used as the upper planner if useful. The immediate experiment should
+not be another local MPPI cost-weight sweep; it should test whether trajectory
+factorization makes the task easier.
+
+If the current PPO checkpoint cannot directly track references without retraining,
+use a minimal deterministic tracker as a control sanity baseline, then open a
+follow-up PPO-tracker imitation/fine-tuning packet only after the planner/tracker
+interface has useful smoke/dev evidence.
 
 ## Evaluation Ladder
 
@@ -94,5 +126,6 @@ local MPPI cost-weight sweep.
 ## Next Action
 
 Launch `v53_completion_first_hybrid_planner_controller` through the non-PPO
-controller workflow. Start with implementation plus builder/checker verification,
-then run smoke/dev evals before any full validation.
+controller workflow. Implement the planner trajectory interface first, then the
+tracker. Start with builder/checker verification, then run smoke/dev evals
+before any full validation.
