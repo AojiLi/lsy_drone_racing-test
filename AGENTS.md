@@ -60,10 +60,11 @@
 - Generated loop logs, CSVs, analysis packets, decision packets, and research
   packets belong under `experiments/level3_ppo_loop/`.
 
-## Required Loop Workflow
+## Required PPO Loop Workflow
 
-- Use `scripts/level3_ppo_loop.py` for train/evaluate/tune work instead of
-  hand-running ad hoc commands.
+- Use `scripts/level3_ppo_loop.py` for PPO train/evaluate/tune work instead of
+  hand-running ad hoc commands. For MPPI oracle/controller evaluation, use
+  `.agents/skills/level3-mppi-loop/SKILL.md` and the MPPI evaluator workflow.
 - Start with a dry run when changing the loop command:
 
   ```bash

@@ -1,3 +1,4 @@
+---
 name: mppi-checker
 description: Read-only verification for Level3 MPPI oracle/controller and evaluator changes. Must not edit files.
 tools: Read, Grep, Glob, Bash

@@ -1,6 +1,6 @@
 ---
 name: level3-ppo-loop
-description: Use when training, evaluating, or tuning the Level3 PPO drone-racing loop for final evaluation on config/level3.toml with the target of <=7.0s mean successful time and >=60% success.
+description: Use when training, evaluating, or tuning the Level3 PPO drone-racing loop for final evaluation on config/level3.toml with the target of at most 7.0s mean successful time and at least 60 percent success.
 ---
 
 # Level3 PPO Loop

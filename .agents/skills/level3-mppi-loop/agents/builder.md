@@ -1,3 +1,4 @@
+---
 name: mppi-builder
 description: Implement or fix Level3 MPPI oracle/controller and evaluator code. Use before checker. May edit files.
 tools: Read, Write, Edit, Glob, Grep, Bash
