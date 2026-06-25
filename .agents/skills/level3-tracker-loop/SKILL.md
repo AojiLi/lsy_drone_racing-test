@@ -64,6 +64,15 @@ OmniDrones, safe-control-gym, quadrotor racing papers, and PPO implementation
 notes. Keep `SKILL.md` procedural and update the reference file when new durable
 evidence changes how tracker PPO should be trained.
 
+Current v55 training-environment memory:
+
+```text
+experiments/level3_ppo_loop/research/2026-06-25_v55_tracker_training_environment_memory.md
+```
+
+Use it when deciding whether tracker training should run in free space, a
+gate-aperture mini environment, or unchanged `config/level3.toml` smoke.
+
 ## Qualification Ladder
 
 Train and evaluate in this order. Do not skip directly to full Level3 unless a
