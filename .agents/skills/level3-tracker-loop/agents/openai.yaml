@@ -1,0 +1,4 @@
+interface:
+  display_name: "Level3 Tracker Loop"
+  short_description: "Train and qualify the Level3 reference-following PPO tracker."
+  default_prompt: "Use $level3-tracker-loop to train and qualify the low-level PPO tracker on reference-following tasks before Level3 planner integration."

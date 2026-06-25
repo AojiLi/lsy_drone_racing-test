@@ -13,6 +13,8 @@
   `.agents/skills/level3-ppo-loop/SKILL.md`.
 - For Level3 MPPI oracle/controller/teacher-data workflow, use the repo skill
   `.agents/skills/level3-mppi-loop/SKILL.md`.
+- For v54/v55 low-level reference-tracker qualification, use the repo skill
+  `.agents/skills/level3-tracker-loop/SKILL.md`.
 
 ## Level3 PPO Objective
 
@@ -35,6 +37,11 @@
   Level2 PPO checkpoint through a virtual local-gate adapter was action-finite
   but failed first-gate progress on seeds `101-105`, so it is no longer the
   primary route.
+- Current tracker-first objective: the bottom PPO tracker's first required
+  ability is accurate, smooth reference following, not direct Level3 gate
+  completion. Train and qualify hover, point, line, L-shape, curve, braking,
+  heading, and multi-point reference tracking before treating planner+tracker
+  Level3 gate pass as the primary exam.
 
 ## Hard Boundaries
 
@@ -222,6 +229,12 @@
   nominal far-field guidance, slowdown near `0.7m-1.0m`, visible-geometry
   replanning, and reference trajectory generation. Do not launch long training
   until builder/checker support and hover/point/gate-aperture smoke checks pass.
+- The current tracker-specific next lane is
+  `v55_tracker_qualification_curriculum`: prove the low-level PPO can follow
+  reference points and short trajectories before planner-driven Level3 long
+  training. Use `.agents/skills/level3-tracker-loop/SKILL.md`. Do not approve a
+  manual long-training command until tracker qualification and strict
+  planner-integration smoke pass.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
