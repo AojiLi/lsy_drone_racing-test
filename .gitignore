@@ -21,6 +21,7 @@ plots/
 c_generated_code/
 /build
 drone_notes/.obsidian/
+drone_notes/Welcome.md
 
 # pixi environments
 .pixi/*
