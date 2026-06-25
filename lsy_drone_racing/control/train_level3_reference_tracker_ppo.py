@@ -16,7 +16,7 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     REFERENCE_TRACKER_REWARD_DEFAULTS,
     REFERENCE_TRACKER_TASKS,
     TRACKER_ENV_MODES,
-    ReferenceTrackerEnv,
+    ReferenceTrackerVectorEnv,
     TrackerPPOAgent,
     load_tracker_checkpoint,
     normalize_tracker_task,
@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tracker-env-mode", choices=TRACKER_ENV_MODES, default="auto")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--total-timesteps", type=int, default=4096)
+    parser.add_argument("--num-envs", "--num_envs", dest="num_envs", type=int, default=1)
     parser.add_argument("--num-steps", type=int, default=256)
     parser.add_argument("--num-minibatches", type=int, default=4)
     parser.add_argument("--update-epochs", type=int, default=4)
@@ -58,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
     add_reward_arguments(parser)
     parser.add_argument("--cuda", action="store_true")
+    parser.add_argument("--jax-device", default="gpu")
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--initial-model-path", type=Path)
     parser.add_argument("--checkpoint-interval", type=int, default=0)
@@ -123,76 +125,85 @@ def train(args: argparse.Namespace) -> Path:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if args.cuda and torch.cuda.is_available() else "cpu")
-    env = ReferenceTrackerEnv(
-        config_name=args.config,
-        task=args.task,
-        max_episode_steps=args.max_episode_steps,
-        seed=args.seed,
-        render=False,
-        rp_limit_deg=args.rp_limit_deg,
-        tracker_env_mode=args.tracker_env_mode,
-        reward_coefficients=reward_coefficients_from_args(args),
-    )
+    num_envs = int(args.num_envs)
+    if num_envs < 1:
+        raise ValueError("--num-envs must be >= 1")
+    env = make_training_env(args, num_envs)
     agent = make_agent(args, device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
     if args.wandb_enabled:
         setup_wandb(args)
 
     obs_np, _info = env.reset(seed=args.seed)
-    obs = torch.as_tensor(obs_np, dtype=torch.float32, device=device)
-    next_done = torch.tensor(0.0, device=device)
+    obs = torch.as_tensor(obs_np, dtype=torch.float32, device=device).reshape(
+        num_envs,
+        REFERENCE_TRACKER_OBS_DIM,
+    )
+    next_done = torch.zeros(num_envs, dtype=torch.float32, device=device)
     initial_global_step = initial_checkpoint_step(args.initial_model_path)
     global_step = initial_global_step
     start_time = time.time()
     next_checkpoint_step = (
         global_step + args.checkpoint_interval if args.checkpoint_interval > 0 else None
     )
-    batch_size = args.num_steps
+    batch_size = args.num_steps * num_envs
     minibatch_size = max(1, batch_size // max(1, args.num_minibatches))
-    num_updates = max(1, args.total_timesteps // args.num_steps)
-    episode_return = 0.0
-    episode_length = 0
+    num_updates = max(1, args.total_timesteps // batch_size)
+    episode_return = np.zeros(num_envs, dtype=np.float32)
+    episode_length = np.zeros(num_envs, dtype=np.int32)
 
     for update in range(1, num_updates + 1):
-        obs_buf = torch.zeros((args.num_steps, REFERENCE_TRACKER_OBS_DIM), device=device)
-        actions_buf = torch.zeros((args.num_steps, 4), device=device)
-        logprobs_buf = torch.zeros((args.num_steps,), device=device)
-        rewards_buf = torch.zeros((args.num_steps,), device=device)
-        dones_buf = torch.zeros((args.num_steps,), device=device)
-        values_buf = torch.zeros((args.num_steps,), device=device)
+        obs_buf = torch.zeros(
+            (args.num_steps, num_envs, REFERENCE_TRACKER_OBS_DIM),
+            device=device,
+        )
+        actions_buf = torch.zeros((args.num_steps, num_envs, 4), device=device)
+        logprobs_buf = torch.zeros((args.num_steps, num_envs), device=device)
+        rewards_buf = torch.zeros((args.num_steps, num_envs), device=device)
+        dones_buf = torch.zeros((args.num_steps, num_envs), device=device)
+        values_buf = torch.zeros((args.num_steps, num_envs), device=device)
 
         for step in range(args.num_steps):
-            global_step += 1
+            global_step += num_envs
             obs_buf[step] = obs
             dones_buf[step] = next_done
             with torch.no_grad():
-                action, logprob, _entropy, value = agent.get_action_and_value(obs.unsqueeze(0))
-            action_np = action.squeeze(0).detach().cpu().numpy().astype(np.float32)
+                action, logprob, _entropy, value = agent.get_action_and_value(obs)
+            action_np = action.detach().cpu().numpy().astype(np.float32)
             next_obs_np, reward, terminated, truncated, _info = env.step(action_np)
-            done = bool(terminated or truncated)
-            episode_return += float(reward)
+            reward_np = np.asarray(reward, dtype=np.float32).reshape(num_envs)
+            done_np = (
+                np.asarray(terminated, dtype=bool).reshape(num_envs)
+                | np.asarray(truncated, dtype=bool).reshape(num_envs)
+            )
+            episode_return += reward_np
             episode_length += 1
 
-            actions_buf[step] = action.squeeze(0)
-            logprobs_buf[step] = logprob.squeeze(0)
-            rewards_buf[step] = float(reward)
-            next_done = torch.tensor(float(done), device=device)
-            values_buf[step] = value.squeeze(0)
+            actions_buf[step] = action
+            logprobs_buf[step] = logprob
+            rewards_buf[step] = torch.as_tensor(reward_np, dtype=torch.float32, device=device)
+            next_done = torch.as_tensor(done_np.astype(np.float32), device=device)
+            values_buf[step] = value.reshape(-1)
 
-            if done:
+            if done_np.any():
                 if args.wandb_enabled:
+                    completed_returns = episode_return[done_np]
+                    completed_lengths = episode_length[done_np]
                     wandb.log(
                         {
                             "global_step": global_step,
-                            "train/episode_return": episode_return,
-                            "train/episode_length": episode_length,
+                            "train/episode_return": float(np.mean(completed_returns)),
+                            "train/episode_length": float(np.mean(completed_lengths)),
+                            "train/episodes_completed": int(done_np.sum()),
                         }
                         | env.last_diagnostics
-                )
-                next_obs_np, _info = env.reset()
-                episode_return = 0.0
-                episode_length = 0
-            obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=device)
+                    )
+                episode_return[done_np] = 0.0
+                episode_length[done_np] = 0
+            obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=device).reshape(
+                num_envs,
+                REFERENCE_TRACKER_OBS_DIM,
+            )
 
             if next_checkpoint_step is not None and global_step >= next_checkpoint_step:
                 checkpoint_path = checkpoint_step_path(args.model_path, next_checkpoint_step)
@@ -205,12 +216,12 @@ def train(args: argparse.Namespace) -> Path:
                 next_checkpoint_step += args.checkpoint_interval
 
         with torch.no_grad():
-            next_value = agent.critic(obs.unsqueeze(0)).reshape(())
+            next_value = agent.critic(obs).reshape(-1)
             advantages = torch.zeros_like(rewards_buf)
-            lastgaelam = torch.tensor(0.0, device=device)
+            lastgaelam = torch.zeros(num_envs, device=device)
             for t in reversed(range(args.num_steps)):
                 if t == args.num_steps - 1:
-                    next_nonterminal = 1.0 - next_done
+                    next_nonterminal = 1.0 - next_done.float()
                     next_values = next_value
                 else:
                     next_nonterminal = 1.0 - dones_buf[t + 1]
@@ -220,6 +231,12 @@ def train(args: argparse.Namespace) -> Path:
                 advantages[t] = lastgaelam
             returns = advantages + values_buf
 
+        b_obs = obs_buf.reshape((batch_size, REFERENCE_TRACKER_OBS_DIM))
+        b_actions = actions_buf.reshape((batch_size, 4))
+        b_logprobs = logprobs_buf.reshape(batch_size)
+        b_advantages = advantages.reshape(batch_size)
+        b_returns = returns.reshape(batch_size)
+
         batch_indices = np.arange(batch_size)
         clipfracs: list[float] = []
         for _epoch in range(args.update_epochs):
@@ -227,15 +244,16 @@ def train(args: argparse.Namespace) -> Path:
             for start in range(0, batch_size, minibatch_size):
                 mb_idx = batch_indices[start : start + minibatch_size]
                 _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                    obs_buf[mb_idx], actions_buf[mb_idx]
+                    b_obs[mb_idx],
+                    b_actions[mb_idx],
                 )
-                logratio = newlogprob - logprobs_buf[mb_idx]
+                logratio = newlogprob - b_logprobs[mb_idx]
                 ratio = logratio.exp()
                 with torch.no_grad():
                     clipfracs.append(
                         float(((ratio - 1.0).abs() > args.clip_coef).float().mean().item())
                     )
-                mb_advantages = advantages[mb_idx]
+                mb_advantages = b_advantages[mb_idx]
                 mb_advantages = (mb_advantages - mb_advantages.mean()) / (
                     mb_advantages.std(unbiased=False) + 1e-8
                 )
@@ -246,7 +264,7 @@ def train(args: argparse.Namespace) -> Path:
                     1.0 + args.clip_coef,
                 )
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-                value_loss = 0.5 * ((newvalue.reshape(-1) - returns[mb_idx]) ** 2).mean()
+                value_loss = 0.5 * ((newvalue.reshape(-1) - b_returns[mb_idx]) ** 2).mean()
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + args.vf_coef * value_loss
                 optimizer.zero_grad()
@@ -294,11 +312,37 @@ def checkpoint_metadata(args: argparse.Namespace) -> dict[str, object]:
         "task": normalize_tracker_task(args.task),
         "requested_task": args.task,
         "tracker_env_mode": args.tracker_env_mode,
+        "num_envs": int(args.num_envs),
+        "num_steps": int(args.num_steps),
+        "total_timesteps": int(args.total_timesteps),
+        "jax_device": str(args.jax_device),
         "rp_limit_deg": float(args.rp_limit_deg),
         "reward_coefficients": reward_coefficients_from_args(args),
         "max_episode_steps": int(args.max_episode_steps),
         "v54_lane": "v54_reference_trajectory_tracker_ppo",
     }
+
+
+def make_training_env(
+    args: argparse.Namespace,
+    num_envs: int,
+) -> ReferenceTrackerVectorEnv:
+    """Construct the batched tracker env requested by CLI arguments."""
+    kwargs = {
+        "config_name": args.config,
+        "task": args.task,
+        "max_episode_steps": args.max_episode_steps,
+        "seed": args.seed,
+        "render": False,
+        "rp_limit_deg": args.rp_limit_deg,
+        "tracker_env_mode": args.tracker_env_mode,
+        "reward_coefficients": reward_coefficients_from_args(args),
+    }
+    return ReferenceTrackerVectorEnv(
+        **kwargs,
+        num_envs=num_envs,
+        jax_device=args.jax_device,
+    )
 
 
 def reward_coefficients_from_args(args: argparse.Namespace) -> dict[str, float]:

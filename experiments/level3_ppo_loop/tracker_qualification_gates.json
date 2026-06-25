@@ -34,6 +34,19 @@
       "reference_tracker_range": "15M-50M environment interactions is common for published quadrotor trajectory-tracking or agile-control PPO-style work.",
       "full_racing_or_obstacle_generalization_range": "100M+ environment interactions is common for full racing, obstacle-rich, vision, or broad generalization policies."
     },
+    "parallel_rollout_policy": {
+      "single_env_training_allowed": false,
+      "default_num_envs": 1024,
+      "default_num_steps": 32,
+      "default_batch_size": 32768,
+      "level2_precedent": "Earlier successful PPO training used 1024 parallel envs with 32-step rollouts for 32768 samples per update.",
+      "longer_horizon_variant": {
+        "num_envs": 256,
+        "num_steps": 128,
+        "batch_size": 32768,
+        "use_when": "Use after a decision packet if 1024x32 shows insufficient credit horizon for trajectory tracking."
+      }
+    },
     "extension_rule": "If a stage misses its gate after default maturation but milestone checkpoints or W&B curves are still improving, prefer a same-stage extension chunk after the three-review decision packet instead of immediately changing reward, observation, PPO structure, or declaring the stage failed.",
     "budget_review_rule": "If changing stage budgets or rejecting a stage for undertraining, run a research/budget review against papers, GitHub configs, W&B curves, and local milestone curves before the decision packet."
   },

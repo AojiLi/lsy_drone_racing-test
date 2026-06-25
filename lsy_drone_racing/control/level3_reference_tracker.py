@@ -7,11 +7,13 @@ from pathlib import Path
 from typing import Any, Self
 
 import gymnasium as gym
+import jax
 import numpy as np
 import torch
 import torch.nn as nn
 from drone_models.core import load_params
 from gymnasium import spaces
+from gymnasium.vector.utils import batch_space
 from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
 from torch import Tensor
 from torch.distributions.normal import Normal
@@ -361,6 +363,31 @@ def tracker_history_row(obs: dict[str, Any]) -> np.ndarray:
             np.asarray(obs["ang_vel"], dtype=np.float32),
         ]
     ).astype(np.float32)
+
+
+def _tree_index(tree: Any, index: Any) -> Any:
+    """Index a nested observation/info tree without flattening nested dicts."""
+    if isinstance(tree, dict):
+        return {key: _tree_index(value, index) for key, value in tree.items()}
+    return tree[index]
+
+
+def _to_numpy_tree(tree: Any) -> Any:
+    """Convert a JAX/numpy pytree to numpy arrays while preserving dictionaries."""
+    if isinstance(tree, dict):
+        return {key: _to_numpy_tree(value) for key, value in tree.items()}
+    return np.asarray(tree)
+
+
+def _mean_diagnostics(rows: list[dict[str, float]]) -> dict[str, float]:
+    """Average per-world tracker diagnostics for compact W&B logging."""
+    if not rows:
+        return {}
+    keys = sorted({key for row in rows for key in row})
+    return {
+        key: float(np.mean([row[key] for row in rows if key in row]))
+        for key in keys
+    }
 
 
 class ReferenceTrajectoryGenerator:
@@ -953,6 +980,7 @@ class ReferenceTrackerEnv(gym.Env):
             self.task,
             tracker_env_mode,
         )
+        self.max_episode_steps = int(max_episode_steps)
         self.config.sim.render = bool(render)
         if int(seed) >= 0:
             self.config.env.seed = int(seed)
@@ -966,6 +994,7 @@ class ReferenceTrackerEnv(gym.Env):
             disturbances=self.config.env.get("disturbances"),
             randomizations=self.config.env.get("randomizations"),
             seed=self.config.env.seed,
+            max_episode_steps=self.max_episode_steps,
         )
         self.base_env = JaxToNumpy(self.base_env)
         self.generator = ReferenceTrajectoryGenerator(
@@ -978,7 +1007,6 @@ class ReferenceTrackerEnv(gym.Env):
         self.reward_model = reward_model or ReferenceTrackerReward(
             **(reward_coefficients or {})
         )
-        self.max_episode_steps = int(max_episode_steps)
         self.action_low, self.action_high = action_bounds_from_config(
             self.config,
             rp_limit_deg,
@@ -1059,3 +1087,208 @@ class ReferenceTrackerEnv(gym.Env):
             if isinstance(reset_obs, dict):
                 return reset_obs
         return raw_obs
+
+
+class ReferenceTrackerVectorEnv:
+    """Vectorized tracker-training wrapper over Gymnasium's JAX vector env."""
+
+    def __init__(
+        self,
+        *,
+        config_name: str = "level3.toml",
+        task: str = "level3",
+        num_envs: int = 1,
+        max_episode_steps: int = 500,
+        seed: int = -1,
+        render: bool = False,
+        rp_limit_deg: float = 50.0,
+        tracker_env_mode: str = "auto",
+        reward_coefficients: dict[str, float] | None = None,
+        reward_model: ReferenceTrackerReward | None = None,
+        jax_device: str = "gpu",
+    ):
+        """Wrap a vector race env as parallel tracker-training worlds."""
+        self.num_envs = int(num_envs)
+        if self.num_envs < 1:
+            raise ValueError("num_envs must be >= 1")
+        self.config_name = config_name
+        self.config = load_config(Path(__file__).parents[2] / "config" / config_name)
+        self.task = normalize_tracker_task(task)
+        self.tracker_env_mode = tracker_env_mode_from_config(
+            self.config,
+            self.task,
+            tracker_env_mode,
+        )
+        self.config.sim.render = bool(render)
+        if int(seed) >= 0:
+            self.config.env.seed = int(seed)
+        self._jax_device = jax.devices(jax_device)[0]
+        self.base_env = gym.make_vec(
+            self.config.env.id,
+            num_envs=self.num_envs,
+            freq=self.config.env.freq,
+            sim_config=self.config.sim,
+            sensor_range=self.config.env.sensor_range,
+            control_mode=self.config.env.control_mode,
+            track=self.config.env.track,
+            disturbances=self.config.env.get("disturbances"),
+            randomizations=self.config.env.get("randomizations"),
+            seed=self.config.env.seed,
+            max_episode_steps=int(max_episode_steps),
+            device=jax_device,
+        )
+        self.generators = [
+            ReferenceTrajectoryGenerator(self.task, dt=1.0 / float(self.config.env.freq))
+            for _ in range(self.num_envs)
+        ]
+        self.observation_builder = ReferenceTrackerObservation()
+        if reward_model is not None and reward_coefficients is not None:
+            raise ValueError("Pass either reward_model or reward_coefficients, not both.")
+        self.reward_model = reward_model or ReferenceTrackerReward(
+            **(reward_coefficients or {})
+        )
+        self.max_episode_steps = int(max_episode_steps)
+        self.action_low, self.action_high = action_bounds_from_config(
+            self.config,
+            rp_limit_deg,
+        )
+        self.single_action_space = spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(4,),
+            dtype=np.float32,
+        )
+        self.single_observation_space = spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(REFERENCE_TRACKER_OBS_DIM,),
+            dtype=np.float32,
+        )
+        self.action_space = batch_space(self.single_action_space, self.num_envs)
+        self.observation_space = batch_space(
+            self.single_observation_space,
+            self.num_envs,
+        )
+        self._raw_obs: dict[str, Any] | None = None
+        self._references: list[ReferenceFrame | None] = [None] * self.num_envs
+        self._memories: list[TrackerMemory | None] = [None] * self.num_envs
+        self._steps = np.zeros(self.num_envs, dtype=np.int32)
+        self.last_diagnostics: dict[str, float] = {}
+
+    def reset(
+        self,
+        *,
+        seed: int | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Reset all vector worlds and rebuild per-world tracker state."""
+        raw_obs, info = self.base_env.reset(seed=seed, options=options)
+        raw_obs = _to_numpy_tree(raw_obs)
+        info = _to_numpy_tree(info)
+        rows = []
+        for env_idx in range(self.num_envs):
+            obs_i = _tree_index(raw_obs, env_idx)
+            self.generators[env_idx].reset(obs_i)
+            memory = TrackerMemory.from_observation(obs_i)
+            reference = self.generators[env_idx].reference(obs_i)
+            self._memories[env_idx] = memory
+            self._references[env_idx] = reference
+            rows.append(self.observation_builder.build(obs_i, reference, memory))
+        self._raw_obs = raw_obs
+        self._steps = np.zeros(self.num_envs, dtype=np.int32)
+        self.last_diagnostics = {}
+        return np.stack(rows).astype(np.float32), info
+
+    def step(
+        self,
+        actions: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+        """Apply one normalized tracker action per world."""
+        if self._raw_obs is None:
+            raise RuntimeError("ReferenceTrackerVectorEnv.step called before reset.")
+        action_norm = np.clip(np.asarray(actions, dtype=np.float32), -1.0, 1.0)
+        if action_norm.shape != (self.num_envs, 4):
+            raise ValueError(
+                f"Expected actions shape {(self.num_envs, 4)}, got {action_norm.shape}"
+            )
+        sim_action = scale_action(action_norm, self.action_low, self.action_high)
+        prev_obs_batch = self._raw_obs
+        raw_obs, _sparse_reward, terminated, truncated, info = self.base_env.step(
+            jax.device_put(sim_action, self._jax_device)
+        )
+        raw_obs = _to_numpy_tree(raw_obs)
+        info = _to_numpy_tree(info)
+        terminations = np.asarray(terminated, dtype=bool).reshape(self.num_envs)
+        truncations = np.asarray(truncated, dtype=bool).reshape(self.num_envs)
+        self._steps += 1
+        truncations = truncations | (self._steps >= self.max_episode_steps)
+
+        rewards = np.zeros(self.num_envs, dtype=np.float32)
+        obs_rows = []
+        diagnostics_rows: list[dict[str, float]] = []
+        for env_idx in range(self.num_envs):
+            memory = self._memories[env_idx]
+            reference = self._references[env_idx]
+            if memory is None or reference is None:
+                raise RuntimeError("ReferenceTrackerVectorEnv internal state is uninitialized.")
+            prev_obs = _tree_index(prev_obs_batch, env_idx)
+            final_obs = self._final_observation(raw_obs, info, env_idx)
+            next_obs = _tree_index(raw_obs, env_idx)
+            prev_action = memory.last_action_norm.copy()
+            reward, diagnostics = self.reward_model.compute(
+                prev_obs,
+                final_obs,
+                reference,
+                action_norm[env_idx],
+                prev_action,
+                terminated=bool(terminations[env_idx]),
+                truncated=bool(truncations[env_idx]),
+            )
+            rewards[env_idx] = float(reward)
+            done = bool(terminations[env_idx] or truncations[env_idx])
+            if done:
+                self.generators[env_idx].reset(next_obs)
+                memory = TrackerMemory.from_observation(next_obs)
+                self._steps[env_idx] = 0
+            else:
+                memory.update(final_obs, action_norm[env_idx])
+            reference = self.generators[env_idx].reference(next_obs)
+            self._memories[env_idx] = memory
+            self._references[env_idx] = reference
+            row_diagnostics = diagnostics | {
+                "tracker/phase_id": float(reference.phase_id),
+                "tracker/target_gate": float(reference.target_gate),
+                "tracker/reward": float(reward),
+            }
+            diagnostics_rows.append(row_diagnostics)
+            obs_rows.append(self.observation_builder.build(next_obs, reference, memory))
+
+        self._raw_obs = raw_obs
+        self.last_diagnostics = _mean_diagnostics(diagnostics_rows)
+        return (
+            np.stack(obs_rows).astype(np.float32),
+            rewards,
+            terminations.astype(bool),
+            truncations.astype(bool),
+            info,
+        )
+
+    def close(self) -> None:
+        """Close the wrapped vector environment."""
+        self.base_env.close()
+
+    @staticmethod
+    def _final_observation(
+        raw_obs: dict[str, Any],
+        info: dict[str, Any],
+        env_idx: int,
+    ) -> dict[str, Any]:
+        if isinstance(info, dict) and "final_observation" in info:
+            final_obs = info["final_observation"]
+            if isinstance(final_obs, dict):
+                return _tree_index(final_obs, env_idx)
+        if isinstance(info, dict) and "reset_observations" in info:
+            reset_obs = info["reset_observations"]
+            if isinstance(reset_obs, dict):
+                return _tree_index(reset_obs, env_idx)
+        return _tree_index(raw_obs, env_idx)

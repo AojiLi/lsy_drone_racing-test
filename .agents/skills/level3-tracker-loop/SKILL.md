@@ -313,6 +313,22 @@ gate_aperture_reference: 15M
 planner_integration_smoke: no new training, evaluate only
 ```
 
+Tracker learning chunks must use vectorized environments. The single-env
+trainer path is now only for tiny debug/smoke checks. The default maturation
+rollout geometry follows the successful Level2/Level3 PPO precedent:
+
+```text
+1024 envs x 32 steps = 32768 samples/update
+```
+
+If W&B/milestone analysis suggests this has too little temporal credit horizon
+for a tracker stage, a main-agent decision packet may switch that stage to the
+known longer-rollout variant:
+
+```text
+256 envs x 128 steps = 32768 samples/update
+```
+
 These are bounded chunks, not infinite training approval. If a stage still
 fails after its default maturation chunk, run the three failure-review subagents
 before changing reward, curriculum, PPO hyperparameters, network size, or the

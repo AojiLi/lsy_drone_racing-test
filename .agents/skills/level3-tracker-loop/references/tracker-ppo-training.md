@@ -108,6 +108,16 @@ If milestone checkpoints are still improving after the default chunk, prefer a
 same-stage extension decision before changing reward, observation, network
 structure, or planner logic.
 
+Do not run tracker learning chunks through the old single-env PPO loop. It is
+too slow and changes the meaning of "1M steps" into a long wall-clock run. Use
+vectorized PPO rollout geometry:
+
+- default: `1024 envs x 32 steps = 32768 samples/update`, matching earlier PPO
+  training precedent in this repo;
+- longer-horizon alternative: `256 envs x 128 steps = 32768 samples/update`,
+  if a decision packet finds the short rollout horizon is hurting a tracker
+  stage.
+
 ## Reward Guidance
 
 Keep tracker reward local and measurable:

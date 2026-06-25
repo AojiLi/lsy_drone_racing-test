@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from lsy_drone_racing.control.level3_reference_tracker import (
+    REFERENCE_TRACKER_OBS_DIM,
+    ReferenceTrackerVectorEnv,
     ReferenceTrajectoryGenerator,
     normalize_tracker_task,
     tracker_env_mode_from_config,
@@ -77,3 +79,33 @@ def test_tracker_training_config_rejects_wrong_task_family() -> None:
 
     with pytest.raises(ValueError, match="not valid for gate_aperture"):
         tracker_env_mode_from_config(gate_config, "line_tracking")
+
+
+def test_reference_tracker_vector_env_reset_step_shapes() -> None:
+    env = ReferenceTrackerVectorEnv(
+        config_name="level3_tracker_free_space.toml",
+        task="hover",
+        tracker_env_mode="free_space",
+        num_envs=2,
+        max_episode_steps=8,
+        seed=123,
+        jax_device="cpu",
+    )
+    try:
+        obs, _info = env.reset(seed=123)
+        assert obs.shape == (2, REFERENCE_TRACKER_OBS_DIM)
+        assert np.isfinite(obs).all()
+
+        next_obs, reward, terminated, truncated, _info = env.step(
+            np.zeros((2, 4), dtype=np.float32)
+        )
+
+        assert next_obs.shape == (2, REFERENCE_TRACKER_OBS_DIM)
+        assert reward.shape == (2,)
+        assert terminated.shape == (2,)
+        assert truncated.shape == (2,)
+        assert np.isfinite(next_obs).all()
+        assert np.isfinite(reward).all()
+        assert "tracker/reward" in env.last_diagnostics
+    finally:
+        env.close()
