@@ -27,12 +27,14 @@
 - Never edit Level3 track geometry or randomization to make the task easier.
   `config/level3.toml` is the immutable target. `config/level3_dr.toml` is only
   a domain-randomized training/robustness config.
-- Keep the action path strictly
+- Keep PPO-lane deployment strictly
   observation/history -> PPO actor -> roll/pitch/yaw/thrust. v51 explicitly
-  allows a deterministic planner-guidance module as deployed observation
-  computation only. Do not add planner action output, MPC, subgoal policies,
-  rule controllers, static seed replay, or inference-time safety shields unless
-  a later explicit structural packet approves them.
+  allowed a deterministic planner-guidance module as deployed observation
+  computation only. v52 explicitly approves a separate MPPI oracle/teacher loop
+  that may output actions during MPPI evaluation and teacher-data generation.
+  Do not mix MPPI/planner action output into PPO lanes, add static seed replay,
+  or add inference-time safety shields unless a later explicit structural
+  packet approves them.
 - Training curricula and alternate train configs are allowed only as named
   structural lanes. They must still be hard-evaluated on `config/level3.toml`.
 - Do not overwrite `notebooks/train_level3_ppo.ipynb` unless the user explicitly
@@ -164,6 +166,8 @@
   `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
 - Latest pasted-framework synthesis:
   `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_pasted_structural_update.md`.
+- Current MPPI oracle/teacher plan:
+  `experiments/level3_ppo_loop/research/2026-06-25_level3_v52_mppi_oracle_teacher_plan.md`.
 - Roadmap priority order: PPO correctness, clean longer-rollout baseline,
   observation/return normalization, asymmetric privileged critic,
   gate-phase reset curriculum, prioritized level replay, GRU, reward numbers,
@@ -176,20 +180,20 @@
   `level3_loop_107_structural_v37_gru_transfer_memory_loop101_preflight:1M`:
   `21%` success, `1.66` mean gates, `79%` crash, and `7.578s` mean successful
   time. Target is not met.
-- loop121 tested
-  `v50_hidden512_update_pressure_conversion_from_loop110_3m` for 30M. Its best
-  hard-eval checkpoint was 25M with `18%` success, `1.56` mean gates, `80%`
-  crash, and `6.283s` mean successful time. It did not meet target.
-- The loop121 post-run gate has been resolved by the v51 decision packet:
-  `experiments/level3_ppo_loop/decisions/2026-06-24_loop121_reject_v50_launch_v51_planner_guidance_obs_ppo256.md`.
+- loop122 tested `v51_planner_guidance_obs_ppo256_from_loop110_3m` for 30M.
+  Its best hard-eval checkpoint was 10M with `18%` success, `1.42` mean gates,
+  `81%` crash, and `6.991s` mean successful time. It did not meet target or
+  beat the current global best.
+- The loop122 post-run gate was resolved by:
+  `experiments/level3_ppo_loop/decisions/2026-06-25_loop122_hold_for_v51_planner_diagnostics.md`.
 - The immediate next lane is
-  `v51_planner_guidance_obs_ppo256_from_loop110_3m`: append deterministic
-  planner-guidance observation features to v5, use planner computation at
-  inference only as observation, keep a 2x256 Tanh PPO Actor as the only action
-  source, warm-start from loop110/v39 3M with zero-padded planner-channel input
-  weights, and hard-evaluate on unchanged `config/level3.toml`.
-- loop121 analysis packet:
-  `experiments/level3_ppo_loop/analysis/level3_loop_121_structural_hidden512_v50_update_pressure_conversion_30m_analysis.md`.
+  `v52_mppi_oracle_teacher_level3`, approved by:
+  `experiments/level3_ppo_loop/decisions/2026-06-25_launch_v52_mppi_oracle_teacher_loop.md`.
+  This is not PPO training. First implement and hard-evaluate an MPPI oracle on
+  unchanged `config/level3.toml`; only generate PPO teacher data after MPPI
+  evidence justifies it.
+- loop122 analysis packet:
+  `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
 ## Rejected Or Held Lanes
 
@@ -220,6 +224,9 @@
 - v50 hidden512 update-pressure follow-up improved update diagnostics but did
   not meet the target or beat the global best. It has been rejected as the next
   immediate move by the loop121 v51 decision packet.
+- v51 planner-guidance observation did not beat the frontier and must not be
+  continued as-is. Further planner-as-observation work requires diagnostics;
+  the current next route is the separate v52 MPPI oracle/teacher loop.
 
 ## Git And Generated Files
 
