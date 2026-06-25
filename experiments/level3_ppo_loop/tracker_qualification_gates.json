@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "lane": "v55_tracker_qualification_curriculum",
+  "purpose": "Completion gates for the Level3 low-level PPO reference tracker. A stage may only unlock the next stage after all required metrics pass.",
+  "hard_boundary": {
+    "final_eval_config": "config/level3.toml",
+    "target_track_mutable": false,
+    "free_space_training_config": "config/level3_tracker_free_space.toml",
+    "gate_aperture_training_config": "config/level3_tracker_gate_aperture.toml"
+  },
+  "common_rules": {
+    "checkpoint_backed_required": true,
+    "all_finite_required": true,
+    "generated_artifacts_in_git": false,
+    "stage_gate_semantics": "all required_metrics must pass before next_stage is unlocked"
+  },
+  "stages": [
+    {
+      "id": "hover",
+      "order": 1,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "hover",
+      "min_eval_episodes": 20,
+      "next_stage": "point_hold",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "success_rate", "op": ">=", "value": 0.95},
+        {"name": "crash_rate", "op": "<=", "value": 0.02},
+        {"name": "mean_position_error_m", "op": "<=", "value": 0.12},
+        {"name": "p90_position_error_m", "op": "<=", "value": 0.2},
+        {"name": "mean_speed_mps", "op": "<=", "value": 0.15},
+        {"name": "mean_action_delta_l2", "op": "<=", "value": 0.22}
+      ]
+    },
+    {
+      "id": "point_hold",
+      "order": 2,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "point_hold",
+      "prerequisite_stage": "hover",
+      "min_eval_episodes": 20,
+      "next_stage": "point_reach",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "success_rate", "op": ">=", "value": 0.9},
+        {"name": "crash_rate", "op": "<=", "value": 0.03},
+        {"name": "mean_final_position_error_m", "op": "<=", "value": 0.15},
+        {"name": "p90_final_position_error_m", "op": "<=", "value": 0.25},
+        {"name": "mean_terminal_speed_mps", "op": "<=", "value": 0.2},
+        {"name": "mean_overshoot_m", "op": "<=", "value": 0.16},
+        {"name": "hold_time_ratio", "op": ">=", "value": 0.6}
+      ]
+    },
+    {
+      "id": "point_reach",
+      "order": 3,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "point_reach",
+      "prerequisite_stage": "point_hold",
+      "min_eval_episodes": 20,
+      "next_stage": "brake_to_point",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "success_rate", "op": ">=", "value": 0.9},
+        {"name": "crash_rate", "op": "<=", "value": 0.05},
+        {"name": "mean_final_position_error_m", "op": "<=", "value": 0.18},
+        {"name": "p90_final_position_error_m", "op": "<=", "value": 0.3},
+        {"name": "mean_overshoot_m", "op": "<=", "value": 0.2},
+        {"name": "mean_time_to_target_s", "op": "<=", "value": 3.5}
+      ]
+    },
+    {
+      "id": "brake_to_point",
+      "order": 4,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "brake_to_point",
+      "prerequisite_stage": "point_reach",
+      "min_eval_episodes": 20,
+      "next_stage": "line_tracking",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "brake_success_rate", "op": ">=", "value": 0.85},
+        {"name": "crash_rate", "op": "<=", "value": 0.05},
+        {"name": "mean_terminal_speed_mps", "op": "<=", "value": 0.18},
+        {"name": "p90_terminal_speed_mps", "op": "<=", "value": 0.3},
+        {"name": "mean_overshoot_m", "op": "<=", "value": 0.18},
+        {"name": "p90_overshoot_m", "op": "<=", "value": 0.32}
+      ]
+    },
+    {
+      "id": "line_tracking",
+      "order": 5,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "line_tracking",
+      "prerequisite_stage": "brake_to_point",
+      "min_eval_episodes": 20,
+      "next_stage": "heading_tracking",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "success_rate", "op": ">=", "value": 0.9},
+        {"name": "crash_rate", "op": "<=", "value": 0.05},
+        {"name": "mean_cross_track_error_m", "op": "<=", "value": 0.12},
+        {"name": "p90_cross_track_error_m", "op": "<=", "value": 0.22},
+        {"name": "mean_speed_error_mps", "op": "<=", "value": 0.18},
+        {"name": "mean_action_delta_l2", "op": "<=", "value": 0.28}
+      ]
+    },
+    {
+      "id": "heading_tracking",
+      "order": 6,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "heading_tracking",
+      "prerequisite_stage": "line_tracking",
+      "min_eval_episodes": 20,
+      "next_stage": "multi_point_reference",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "success_rate", "op": ">=", "value": 0.9},
+        {"name": "crash_rate", "op": "<=", "value": 0.05},
+        {"name": "mean_heading_error_rad", "op": "<=", "value": 0.25},
+        {"name": "p90_heading_error_rad", "op": "<=", "value": 0.45},
+        {"name": "mean_yaw_rate_abs", "op": "<=", "value": 1.2},
+        {"name": "mean_action_delta_l2", "op": "<=", "value": 0.28}
+      ]
+    },
+    {
+      "id": "multi_point_reference",
+      "order": 7,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "multi_point_reference",
+      "prerequisite_stage": "heading_tracking",
+      "min_eval_episodes": 20,
+      "next_stage": "l_shape_tracking",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "segment_completion_rate", "op": ">=", "value": 0.85},
+        {"name": "crash_rate", "op": "<=", "value": 0.05},
+        {"name": "mean_position_error_m", "op": "<=", "value": 0.2},
+        {"name": "p90_position_error_m", "op": "<=", "value": 0.35},
+        {"name": "mean_switch_overshoot_m", "op": "<=", "value": 0.25},
+        {"name": "mean_action_delta_l2", "op": "<=", "value": 0.32}
+      ]
+    },
+    {
+      "id": "l_shape_tracking",
+      "order": 8,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "l_shape_tracking",
+      "prerequisite_stage": "multi_point_reference",
+      "min_eval_episodes": 20,
+      "next_stage": "curve_tracking",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "corner_completion_rate", "op": ">=", "value": 0.8},
+        {"name": "crash_rate", "op": "<=", "value": 0.07},
+        {"name": "mean_cross_track_error_m", "op": "<=", "value": 0.18},
+        {"name": "p90_cross_track_error_m", "op": "<=", "value": 0.32},
+        {"name": "mean_corner_overshoot_m", "op": "<=", "value": 0.28},
+        {"name": "mean_action_delta_l2", "op": "<=", "value": 0.35}
+      ]
+    },
+    {
+      "id": "curve_tracking",
+      "order": 9,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "curve_tracking",
+      "prerequisite_stage": "l_shape_tracking",
+      "min_eval_episodes": 20,
+      "next_stage": "zigzag_or_lemniscate_tracking",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "path_completion_rate", "op": ">=", "value": 0.8},
+        {"name": "crash_rate", "op": "<=", "value": 0.07},
+        {"name": "mean_cross_track_error_m", "op": "<=", "value": 0.18},
+        {"name": "p90_cross_track_error_m", "op": "<=", "value": 0.35},
+        {"name": "oscillation_score", "op": "<=", "value": 0.35},
+        {"name": "mean_action_delta_l2", "op": "<=", "value": 0.35}
+      ]
+    },
+    {
+      "id": "zigzag_or_lemniscate_tracking",
+      "order": 10,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "zigzag_or_lemniscate_tracking",
+      "prerequisite_stage": "curve_tracking",
+      "min_eval_episodes": 20,
+      "next_stage": "gate_aperture_reference",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "path_completion_rate", "op": ">=", "value": 0.75},
+        {"name": "crash_rate", "op": "<=", "value": 0.08},
+        {"name": "mean_cross_track_error_m", "op": "<=", "value": 0.22},
+        {"name": "p90_cross_track_error_m", "op": "<=", "value": 0.4},
+        {"name": "mean_action_delta_l2", "op": "<=", "value": 0.4},
+        {"name": "p90_action_delta_l2", "op": "<=", "value": 0.65}
+      ]
+    },
+    {
+      "id": "gate_aperture_reference",
+      "order": 11,
+      "environment": "gate_aperture",
+      "config": "config/level3_tracker_gate_aperture.toml",
+      "task": "gate_aperture_reference",
+      "prerequisite_stage": "zigzag_or_lemniscate_tracking",
+      "min_eval_episodes": 30,
+      "next_stage": "planner_integration_smoke",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "valid_aperture_cross_rate", "op": ">=", "value": 0.7},
+        {"name": "post_gate_recovery_rate", "op": ">=", "value": 0.6},
+        {"name": "crash_rate", "op": "<=", "value": 0.1},
+        {"name": "mean_aperture_yz_error_m", "op": "<=", "value": 0.18},
+        {"name": "p90_aperture_yz_error_m", "op": "<=", "value": 0.32},
+        {"name": "mean_post_gate_speed_mps", "op": "<=", "value": 0.65}
+      ]
+    },
+    {
+      "id": "planner_integration_smoke",
+      "order": 12,
+      "environment": "level3",
+      "config": "config/level3.toml",
+      "task": "level3",
+      "prerequisite_stage": "gate_aperture_reference",
+      "min_eval_episodes": 20,
+      "next_stage": "manual_long_level3_training_review",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "level3_toml_diff_clean", "op": "==", "value": true},
+        {"name": "nonzero_first_gate_progress_ratio", "op": ">=", "value": 0.5},
+        {"name": "gate0_pass_count", "op": ">=", "value": 1},
+        {"name": "early_termination_ratio", "op": "<=", "value": 0.6}
+      ]
+    }
+  ]
+}

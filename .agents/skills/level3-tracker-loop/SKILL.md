@@ -73,6 +73,24 @@ experiments/level3_ppo_loop/research/2026-06-25_v55_tracker_training_environment
 Use it when deciding whether tracker training should run in free space, a
 gate-aperture mini environment, or unchanged `config/level3.toml` smoke.
 
+Current v55 machine-readable completion gates:
+
+```text
+experiments/level3_ppo_loop/tracker_qualification_gates.json
+```
+
+Use this gate spec with:
+
+```bash
+pixi run -e tests python scripts/check_level3_tracker_stage_gate.py \
+  --stage <stage_id> \
+  --metrics-json <stage_eval_metrics.json>
+```
+
+When starting any stage after `hover`, add `--require-prerequisites` and pass a
+history JSON that marks prior stages as passed. The stage checker must pass
+before the next stage is unlocked.
+
 ## Qualification Ladder
 
 Train and evaluate in this order. Do not skip directly to full Level3 unless a
@@ -142,6 +160,11 @@ For planner integration smoke, additionally report:
 - `config/level3.toml` unchanged check.
 
 ## Promotion Gates
+
+Each stage has a concrete completion gate in
+`experiments/level3_ppo_loop/tracker_qualification_gates.json`. The loop may
+continue to the next stage only after `scripts/check_level3_tracker_stage_gate.py`
+returns success for the current stage. Missing metrics fail closed.
 
 Do not approve planner-driven long Level3 training until all are true:
 
