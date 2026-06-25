@@ -66,6 +66,10 @@ REFERENCE_TRACKER_REWARD_DEFAULTS = {
     "action_coef": 0.02,
     "action_delta_coef": 0.04,
     "progress_bonus": 0.3,
+    "gate_x_progress_coef": 0.0,
+    "gate_cross_bonus": 0.0,
+    "gate_recover_bonus": 0.0,
+    "gate_linger_penalty_coef": 0.0,
     "crash_penalty": 250.0,
 }
 
@@ -909,6 +913,16 @@ class ReferenceTrackerReward:
         action_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_coef"],
         action_delta_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_delta_coef"],
         progress_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["progress_bonus"],
+        gate_x_progress_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "gate_x_progress_coef"
+        ],
+        gate_cross_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["gate_cross_bonus"],
+        gate_recover_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "gate_recover_bonus"
+        ],
+        gate_linger_penalty_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "gate_linger_penalty_coef"
+        ],
         crash_penalty: float = REFERENCE_TRACKER_REWARD_DEFAULTS["crash_penalty"],
     ):
         """Set reward coefficients for dense local reference tracking."""
@@ -921,6 +935,10 @@ class ReferenceTrackerReward:
         self.action_coef = float(action_coef)
         self.action_delta_coef = float(action_delta_coef)
         self.progress_bonus = float(progress_bonus)
+        self.gate_x_progress_coef = float(gate_x_progress_coef)
+        self.gate_cross_bonus = float(gate_cross_bonus)
+        self.gate_recover_bonus = float(gate_recover_bonus)
+        self.gate_linger_penalty_coef = float(gate_linger_penalty_coef)
         self.crash_penalty = float(crash_penalty)
 
     def coefficients(self) -> dict[str, float]:
@@ -961,6 +979,7 @@ class ReferenceTrackerReward:
             obstacle_penalty = self.obstacle_margin - reference.obstacle_distance
         action_penalty = float(np.mean(np.square(action_norm)))
         delta_penalty = float(np.mean(np.square(action_norm - prev_action_norm)))
+        gate_terms = self._gate_completion_terms(prev_obs, obs, reference, vel)
         reward = (
             -self.pos_error_coef * pos_error
             - self.vel_error_coef * vel_error
@@ -970,6 +989,10 @@ class ReferenceTrackerReward:
             - self.action_coef * action_penalty
             - self.action_delta_coef * delta_penalty
             + self.progress_bonus * (prev_error - pos_error)
+            + self.gate_x_progress_coef * gate_terms["gate_x_progress_aligned_m"]
+            + self.gate_cross_bonus * gate_terms["valid_aperture_cross_event"]
+            + self.gate_recover_bonus * gate_terms["post_gate_recovery_event"]
+            - self.gate_linger_penalty_coef * gate_terms["near_plane_linger_event"]
         )
         if terminated and not truncated:
             reward -= self.crash_penalty
@@ -981,8 +1004,73 @@ class ReferenceTrackerReward:
             "tracker/obstacle_penalty": obstacle_penalty,
             "tracker/action_penalty": action_penalty,
             "tracker/action_delta_penalty": delta_penalty,
+            "tracker/gate_x": gate_terms["gate_x"],
+            "tracker/gate_x_progress": gate_terms["gate_x_progress_m"],
+            "tracker/gate_x_progress_aligned": gate_terms["gate_x_progress_aligned_m"],
+            "tracker/gate_current_yz_error": gate_terms["current_aperture_yz_error"],
+            "tracker/valid_aperture_cross_event": gate_terms["valid_aperture_cross_event"],
+            "tracker/post_gate_recovery_event": gate_terms["post_gate_recovery_event"],
+            "tracker/near_plane_linger_event": gate_terms["near_plane_linger_event"],
         }
         return float(reward), diagnostics
+
+    @staticmethod
+    def _gate_completion_terms(
+        prev_obs: dict[str, Any],
+        obs: dict[str, Any],
+        reference: ReferenceFrame,
+        vel: np.ndarray,
+    ) -> dict[str, float]:
+        """Return gate-crossing shaping terms for gate-aperture training."""
+        terms = {
+            "gate_x": 0.0,
+            "gate_x_progress_m": 0.0,
+            "gate_x_progress_aligned_m": 0.0,
+            "current_aperture_yz_error": 0.0,
+            "valid_aperture_cross_event": 0.0,
+            "post_gate_recovery_event": 0.0,
+            "near_plane_linger_event": 0.0,
+        }
+        try:
+            prev_gate_local = ReferenceTrackerReward._target_gate_local(
+                prev_obs,
+                reference.target_gate,
+            )
+            gate_local = ReferenceTrackerReward._target_gate_local(
+                obs,
+                reference.target_gate,
+            )
+        except (KeyError, IndexError, ValueError):
+            return terms
+
+        prev_x = float(prev_gate_local[0])
+        gate_x = float(gate_local[0])
+        gate_x_progress = max(0.0, gate_x - prev_x)
+        yz_error = float(np.linalg.norm(gate_local[1:3] - reference.aperture_yz))
+        alignment_scale = max(0.0, 1.0 - yz_error / 0.32)
+        speed = float(np.linalg.norm(vel))
+
+        terms["gate_x"] = gate_x
+        terms["gate_x_progress_m"] = gate_x_progress
+        terms["gate_x_progress_aligned_m"] = gate_x_progress * alignment_scale
+        terms["current_aperture_yz_error"] = yz_error
+        if prev_x < 0.0 <= gate_x and yz_error <= 0.32:
+            terms["valid_aperture_cross_event"] = 1.0
+        if gate_x >= 0.35 and speed <= 0.65:
+            terms["post_gate_recovery_event"] = 1.0
+        if -0.32 <= gate_x < -0.20 and yz_error <= 0.12 and speed <= 0.12:
+            terms["near_plane_linger_event"] = 1.0
+        return terms
+
+    @staticmethod
+    def _target_gate_local(obs: dict[str, Any], target_gate: int) -> np.ndarray:
+        gates_pos = np.asarray(obs["gates_pos"], dtype=np.float32)
+        gates_quat = np.asarray(obs["gates_quat"], dtype=np.float32)
+        target_gate = int(np.clip(target_gate, 0, len(gates_pos) - 1))
+        gate_pos = gates_pos[target_gate]
+        gate_rot = quat_to_rotmat(gates_quat[target_gate])
+        pos = np.asarray(obs["pos"], dtype=np.float32)
+        return (gate_rot.T @ (pos - gate_pos)).astype(np.float32)
 
 
 class ReferenceTrackerEnv(gym.Env):
