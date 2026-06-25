@@ -50,6 +50,20 @@ tracker quality:
 Do not use Level3 gate pass as the first tracker learning exam. Use gate pass as
 an integration test after the tracker passes reference-following exams.
 
+## Research Reference
+
+When changing tracker observations, reward terms, qualification tasks, PPO
+training schedule, or planner-integration gates, first read:
+
+```text
+.agents/skills/level3-tracker-loop/references/tracker-ppo-training.md
+```
+
+That file records the source-backed tracker-training pattern from DATT,
+OmniDrones, safe-control-gym, quadrotor racing papers, and PPO implementation
+notes. Keep `SKILL.md` procedural and update the reference file when new durable
+evidence changes how tracker PPO should be trained.
+
 ## Qualification Ladder
 
 Train and evaluate in this order. Do not skip directly to full Level3 unless a
@@ -83,10 +97,13 @@ packet explains why the lower rungs are already proven.
 9. `curve_tracking`
    - follow a small smooth curve;
    - require low cross-track error and no oscillation.
-10. `gate_aperture_reference`
+10. `zigzag_or_lemniscate_tracking`
+    - follow sharper but still short held-out curves;
+    - require low tracking error without unstable corrective actions.
+11. `gate_aperture_reference`
     - follow pre-gate -> aperture -> post-gate reference points;
     - this is still a tracker exam, not full Level3 racing.
-11. `planner_integration_smoke`
+12. `planner_integration_smoke`
     - run unchanged `config/level3.toml` with the upper planner and tracker.
 
 ## Metrics
@@ -135,6 +152,9 @@ If these fail, write a hold packet. Do not give a fake long-training command.
 1. Read, in order:
    - `AGENTS.md`;
    - this skill;
+   - `.agents/skills/level3-tracker-loop/references/tracker-ppo-training.md`
+     when changing tracker observation, reward, curriculum, training schedule,
+     or promotion gates;
    - `experiments/level3_ppo_loop/state.json`;
    - the latest v54 analysis and decision packet.
 2. Identify the next missing qualification rung. Prefer the lowest unproven
@@ -160,6 +180,20 @@ If these fail, write a hold packet. Do not give a fake long-training command.
 
 - Prefer a dedicated tracker qualification script or task mode over direct
   Level3 reward tuning.
+- Observation should include local/body-frame reference error and a short future
+  reference horizon, plus desired velocity/speed, heading/yaw error, drone
+  velocity/attitude/body-rate features, and previous action/history where
+  available.
+- Keep reward local to tracker behavior: tracking error, velocity error,
+  heading error, braking terminal speed, overshoot, action smoothness,
+  uprightness/spin, and crash/timeout. Do not use global race progress as the
+  first tracker-learning reward.
+- Increase reference difficulty in stages: fixed/easy references first, then
+  randomized starts/endpoints/speeds/curvature, then disturbances/latency/domain
+  randomization after nominal tracking works.
+- During analysis, inspect PPO diagnostics such as approximate KL, clip
+  fraction, entropy/action std, value loss, explained variance, and reward
+  scale relative to value clipping.
 - Keep training chunks bounded until qualification metrics improve.
 - Use W&B for live PPO metrics and tracker diagnostics.
 - Keep generated checkpoints, smoke JSONs, W&B directories, logs, caches, and
@@ -183,9 +217,11 @@ point_hold
 point_reach
 line_tracking
 brake_to_point
+heading_tracking
 multi_point_reference
 l_shape_tracking
 curve_tracking
+zigzag_or_lemniscate_tracking
 gate_aperture_reference
 ```
 
