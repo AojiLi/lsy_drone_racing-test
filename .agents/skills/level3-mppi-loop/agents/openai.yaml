@@ -1,0 +1,4 @@
+interface:
+  display_name: "Level3 MPPI Loop"
+  short_description: "Run Level3 MPPI oracle and teacher-data workflows."
+  default_prompt: "Use $level3-mppi-loop to implement, evaluate, and analyze the Level3 MPPI oracle/teacher loop without modifying config/level3.toml."

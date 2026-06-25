@@ -7,6 +7,10 @@ description: Use when training, evaluating, or tuning the Level3 PPO drone-racin
 
 Use this workflow for Level3 PPO train/evaluate/tune work.
 
+For Level3 MPPI oracle/controller work, MPPI hard evals, MPPI teacher
+trajectories, or MPPI-generated PPO imitation data, use
+`.agents/skills/level3-mppi-loop/SKILL.md` instead.
+
 ## Contract
 
 - Target config: `config/level3.toml`.
@@ -41,11 +45,9 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   inference, but it must not output actions, override PPO actions, act as MPC,
   provide a safety shield, replay static seed-specific routes, or modify the
   Level3 track. The PPO Actor remains the only action-producing controller.
-- v52 explicitly opens a separate MPPI oracle/teacher lane. In that lane only,
-  MPPI may output `roll/pitch/yaw/thrust` during MPPI oracle evaluation and
-  teacher-data generation. MPPI-only success must not be counted as PPO target
-  success. Do not mix MPPI/planner action output into PPO lanes without another
-  explicit structural packet.
+- MPPI oracle/controller work is handled by the separate
+  `level3-mppi-loop` skill. Do not implement MPPI action output, MPPI hard
+  eval, or MPPI teacher-data generation under this PPO skill.
 - The current structural roadmap is
   `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_structural_training_plan.md`.
   The latest pasted-framework synthesis is
@@ -150,12 +152,10 @@ Use this workflow for Level3 PPO train/evaluate/tune work.
   update-pressure settings, and hard-evaluates on unchanged `config/level3.toml`.
   Its best checkpoint was 10M with `18%` success, `1.42` mean gates, `81%`
   crash, and `6.991s` mean successful time. It did not beat the frontier.
-- The immediate next lane is
-  `v52_mppi_oracle_teacher_level3`, approved by
-  `experiments/level3_ppo_loop/decisions/2026-06-25_launch_v52_mppi_oracle_teacher_loop.md`.
-  This is not PPO training. Implement and hard-evaluate an MPPI oracle on
-  unchanged `config/level3.toml`; only generate PPO teacher data after MPPI
-  hard-eval evidence justifies it.
+- The next non-PPO structural lane is `v52_mppi_oracle_teacher_level3`, handled
+  by `.agents/skills/level3-mppi-loop/SKILL.md`. Do not use this PPO skill to
+  implement or evaluate MPPI; return to this skill only after an MPPI analysis
+  packet explicitly opens a PPO imitation/fine-tuning lane.
 - Early checkpoints are diagnostic health checks, not growth exams. If a lane
   creates a `1M` checkpoint, use it only for NaNs, action/observation mismatch,
   checkpoint metadata, W&B logging, PPO health, or catastrophic zero-gate

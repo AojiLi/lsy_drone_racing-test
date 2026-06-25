@@ -9,8 +9,10 @@
   `experiments/level3_ppo_loop/state.json`, analysis packets, and decision
   packets. Add only durable conclusions, hard boundaries, current blockers, and
   workflow rules here.
-- For the detailed Level3 workflow, use the repo skill
+- For detailed Level3 PPO workflow, use the repo skill
   `.agents/skills/level3-ppo-loop/SKILL.md`.
+- For Level3 MPPI oracle/controller/teacher-data workflow, use the repo skill
+  `.agents/skills/level3-mppi-loop/SKILL.md`.
 
 ## Level3 PPO Objective
 
