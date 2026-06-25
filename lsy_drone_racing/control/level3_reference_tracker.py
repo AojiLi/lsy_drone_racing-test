@@ -31,6 +31,29 @@ REFERENCE_TRACKER_PHASES = (
     "recover",
 )
 REFERENCE_TRACKER_OBS_DIM = 65
+FREE_SPACE_TRACKER_TASKS = frozenset(
+    {
+        "hover",
+        "point_hold",
+        "point_reach",
+        "brake_to_point",
+        "line_tracking",
+        "heading_tracking",
+        "multi_point_reference",
+        "l_shape_tracking",
+        "curve_tracking",
+        "zigzag_or_lemniscate_tracking",
+    }
+)
+GATE_TRACKER_TASKS = frozenset({"gate_aperture_reference", "level3"})
+REFERENCE_TRACKER_TASK_ALIASES = {
+    "point": "point_reach",
+    "gate_aperture": "gate_aperture_reference",
+}
+REFERENCE_TRACKER_TASKS = tuple(
+    sorted(FREE_SPACE_TRACKER_TASKS | GATE_TRACKER_TASKS | set(REFERENCE_TRACKER_TASK_ALIASES))
+)
+TRACKER_ENV_MODES = ("auto", "free_space", "gate_aperture", "level3")
 REFERENCE_TRACKER_REWARD_DEFAULTS = {
     "pos_error_coef": 3.0,
     "vel_error_coef": 0.6,
@@ -261,6 +284,71 @@ def safe_normalize(vector: np.ndarray, fallback: np.ndarray | None = None) -> np
     return (fallback / fallback_norm).astype(np.float32)
 
 
+def normalize_tracker_task(task: str) -> str:
+    """Return the canonical tracker task name while preserving legacy aliases."""
+    canonical = REFERENCE_TRACKER_TASK_ALIASES.get(task, task)
+    if canonical not in FREE_SPACE_TRACKER_TASKS | GATE_TRACKER_TASKS:
+        raise ValueError(f"Unsupported reference task: {task!r}")
+    return canonical
+
+
+def tracker_env_mode_from_config(config: Any, task: str, requested_mode: str = "auto") -> str:
+    """Resolve the tracker training environment mode from CLI and config."""
+    requested = str(requested_mode)
+    if requested not in TRACKER_ENV_MODES:
+        raise ValueError(f"Unsupported tracker_env_mode: {requested!r}")
+    if requested != "auto":
+        mode = requested
+    else:
+        train_cfg = config.get("train", {}) if hasattr(config, "get") else {}
+        tracker_cfg = train_cfg.get("reference_tracker", {}) if hasattr(train_cfg, "get") else {}
+        mode = str(tracker_cfg.get("env_mode", "auto"))
+        if mode == "auto":
+            mode = _default_tracker_env_mode(task)
+    if mode not in TRACKER_ENV_MODES[1:]:
+        raise ValueError(f"Unsupported tracker_env_mode: {mode!r}")
+    _validate_tracker_env_mode(task, mode)
+    return mode
+
+
+def _default_tracker_env_mode(task: str) -> str:
+    if task in FREE_SPACE_TRACKER_TASKS:
+        return "free_space"
+    if task == "gate_aperture_reference":
+        return "gate_aperture"
+    return "level3"
+
+
+def _validate_tracker_env_mode(task: str, mode: str) -> None:
+    if mode == "free_space" and task not in FREE_SPACE_TRACKER_TASKS:
+        raise ValueError(f"Task {task!r} is not valid for free_space tracker mode.")
+    if mode == "gate_aperture" and task != "gate_aperture_reference":
+        raise ValueError(f"Task {task!r} is not valid for gate_aperture tracker mode.")
+    if mode == "level3" and task != "level3":
+        raise ValueError(f"Task {task!r} is not valid for level3 tracker mode.")
+
+
+def point_on_polyline(
+    points: list[np.ndarray],
+    distance_along: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return a target point and local direction at a distance along a polyline."""
+    remaining = float(distance_along)
+    for start, end in zip(points[:-1], points[1:], strict=True):
+        segment = np.asarray(end, dtype=np.float32) - np.asarray(start, dtype=np.float32)
+        length = float(np.linalg.norm(segment))
+        if length <= 1e-6:
+            continue
+        direction = segment / length
+        if remaining <= length:
+            return (np.asarray(start, dtype=np.float32) + direction * remaining).astype(
+                np.float32
+            ), direction.astype(np.float32)
+        remaining -= length
+    last_direction = safe_normalize(points[-1] - points[-2])
+    return np.asarray(points[-1], dtype=np.float32), last_direction.astype(np.float32)
+
+
 def tracker_history_row(obs: dict[str, Any]) -> np.ndarray:
     """Return the compact local-state row used in the tracker history channels."""
     quat = np.asarray(obs["quat"], dtype=np.float32)
@@ -278,49 +366,217 @@ def tracker_history_row(obs: dict[str, Any]) -> np.ndarray:
 class ReferenceTrajectoryGenerator:
     """Generate local reference targets for tracker training and Level3 inference."""
 
-    def __init__(self, task: str = "level3"):
+    def __init__(self, task: str = "level3", dt: float = 1.0 / 50.0):
         """Select the tracker task family used for reference generation."""
-        if task not in {"hover", "point", "gate_aperture", "level3"}:
-            raise ValueError(f"Unsupported reference task: {task!r}")
-        self.task = task
+        self.task = normalize_tracker_task(task)
+        self.dt = float(dt)
         self._step = 0
+        self._origin: np.ndarray | None = None
         self._anchor: np.ndarray | None = None
 
     def reset(self, obs: dict[str, Any]) -> None:
         """Reset task anchors at episode start."""
         self._step = 0
         pos = np.asarray(obs["pos"], dtype=np.float32)
+        self._origin = np.array(
+            [pos[0], pos[1], np.clip(max(0.65, pos[2] + 0.45), 0.55, 1.25)],
+            dtype=np.float32,
+        )
         if self.task == "hover":
-            self._anchor = np.array(
-                [pos[0], pos[1], max(0.65, pos[2] + 0.35)],
-                dtype=np.float32,
-            )
-        elif self.task == "point":
-            self._anchor = pos + np.array([0.35, 0.0, 0.35], dtype=np.float32)
-            self._anchor[2] = np.clip(self._anchor[2], 0.55, 1.2)
+            self._anchor = self._origin.copy()
+        elif self.task in {"point_hold", "point_reach", "brake_to_point"}:
+            offset = np.array([0.55, 0.0, 0.05], dtype=np.float32)
+            if self.task == "brake_to_point":
+                offset = np.array([0.75, 0.0, 0.05], dtype=np.float32)
+            self._anchor = self._origin + offset
+            self._anchor[2] = np.clip(self._anchor[2], 0.55, 1.25)
         else:
             self._anchor = None
 
     def reference(self, obs: dict[str, Any]) -> ReferenceFrame:
         """Create the next local reference frame from a raw race observation."""
         self._step += 1
+        if self.task in FREE_SPACE_TRACKER_TASKS:
+            return self._free_space_reference(obs)
+        return self._gate_reference(obs)
+
+    def _free_space_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
         if self.task == "hover":
             return self._hover_reference(obs)
-        if self.task == "point":
-            return self._point_reference(obs)
-        return self._gate_reference(obs)
+        if self.task in {"point_hold", "point_reach"}:
+            return self._point_reference(obs, hold=self.task == "point_hold")
+        if self.task == "brake_to_point":
+            return self._brake_to_point_reference(obs)
+        if self.task == "line_tracking":
+            points = [self._origin, self._origin + np.array([0.9, 0.0, 0.0], dtype=np.float32)]
+            return self._polyline_reference(obs, points, speed=0.38)
+        if self.task == "heading_tracking":
+            return self._heading_reference(obs)
+        if self.task == "multi_point_reference":
+            points = [
+                self._origin,
+                self._origin + np.array([0.35, 0.00, 0.05], dtype=np.float32),
+                self._origin + np.array([0.35, 0.35, 0.05], dtype=np.float32),
+                self._origin + np.array([0.05, 0.35, 0.00], dtype=np.float32),
+            ]
+            return self._polyline_reference(obs, points, speed=0.35)
+        if self.task == "l_shape_tracking":
+            points = [
+                self._origin,
+                self._origin + np.array([0.65, 0.0, 0.0], dtype=np.float32),
+                self._origin + np.array([0.65, 0.45, 0.0], dtype=np.float32),
+            ]
+            return self._polyline_reference(obs, points, speed=0.36)
+        if self.task == "curve_tracking":
+            return self._curve_reference(obs, speed=0.34, sharp=False)
+        if self.task == "zigzag_or_lemniscate_tracking":
+            return self._curve_reference(obs, speed=0.36, sharp=True)
+        raise ValueError(f"Unsupported free-space tracker task: {self.task!r}")
 
     def _hover_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
         target = np.asarray(self._anchor, dtype=np.float32)
-        return self._make_reference(obs, target, target, target, "hover", 0, 0.0)
+        return self._make_reference(
+            obs,
+            target,
+            target,
+            target,
+            "hover",
+            0,
+            0.0,
+            use_gate_context=False,
+        )
 
-    def _point_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
+    def _point_reference(self, obs: dict[str, Any], *, hold: bool) -> ReferenceFrame:
         target = np.asarray(self._anchor, dtype=np.float32)
         pos = np.asarray(obs["pos"], dtype=np.float32)
-        direction = safe_normalize(target - pos)
-        next_point = target + direction * 0.10
-        lookahead = target + direction * 0.20
-        return self._make_reference(obs, target, next_point, lookahead, "cruise", 1, 0.45)
+        error = target - pos
+        dist = float(np.linalg.norm(error))
+        speed = 0.0 if hold and dist < 0.14 else min(0.42, max(0.08, 0.8 * dist))
+        phase = "hover" if speed == 0.0 else ("slowdown" if dist < 0.25 else "cruise")
+        phase_id = 0 if phase == "hover" else (2 if phase == "slowdown" else 1)
+        direction = safe_normalize(error)
+        next_point = target + direction * 0.08
+        lookahead = target + direction * 0.16
+        return self._make_reference(
+            obs,
+            target,
+            next_point,
+            lookahead,
+            phase,
+            phase_id,
+            speed,
+            use_gate_context=False,
+        )
+
+    def _brake_to_point_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
+        target = np.asarray(self._anchor, dtype=np.float32)
+        pos = np.asarray(obs["pos"], dtype=np.float32)
+        error = target - pos
+        dist = float(np.linalg.norm(error))
+        speed = 0.0 if dist < 0.22 else min(0.50, max(0.10, 0.55 * dist))
+        phase = "slowdown" if dist < 0.45 else "cruise"
+        phase_id = 2 if dist < 0.45 else 1
+        if speed == 0.0:
+            phase, phase_id = "hover", 0
+        direction = safe_normalize(error)
+        return self._make_reference(
+            obs,
+            target,
+            target + direction * 0.08,
+            target + direction * 0.16,
+            phase,
+            phase_id,
+            speed,
+            use_gate_context=False,
+        )
+
+    def _heading_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
+        pos = np.asarray(obs["pos"], dtype=np.float32)
+        target = np.asarray(self._origin, dtype=np.float32)
+        target[:2] = pos[:2]
+        heading_point = pos + np.array([0.35, 0.0, 0.0], dtype=np.float32)
+        return self._make_reference(
+            obs,
+            target,
+            heading_point,
+            heading_point + np.array([0.15, 0.0, 0.0], dtype=np.float32),
+            "hover",
+            0,
+            0.0,
+            desired_heading=np.array([1.0, 0.0, 0.0], dtype=np.float32),
+            use_gate_context=False,
+        )
+
+    def _polyline_reference(
+        self,
+        obs: dict[str, Any],
+        points: list[np.ndarray | None],
+        *,
+        speed: float,
+    ) -> ReferenceFrame:
+        valid_points = [np.asarray(p, dtype=np.float32) for p in points if p is not None]
+        if len(valid_points) < 2:
+            raise ValueError("polyline tracker task requires at least two points")
+        distance_along = max(0.0, (self._step - 1) * self.dt * float(speed))
+        target, direction = point_on_polyline(valid_points, distance_along)
+        next_point, _ = point_on_polyline(valid_points, distance_along + 0.12)
+        lookahead, _ = point_on_polyline(valid_points, distance_along + 0.28)
+        phase = "align" if np.linalg.norm(target - valid_points[-1]) < 0.18 else "cruise"
+        phase_id = 3 if phase == "align" else 1
+        return self._make_reference(
+            obs,
+            target,
+            next_point,
+            lookahead,
+            phase,
+            phase_id,
+            speed,
+            desired_heading=direction,
+            use_gate_context=False,
+        )
+
+    def _curve_reference(self, obs: dict[str, Any], *, speed: float, sharp: bool) -> ReferenceFrame:
+        origin = np.asarray(self._origin, dtype=np.float32)
+        t = max(0.0, (self._step - 1) * self.dt)
+        if sharp:
+            x = min(1.0, speed * t)
+            y = 0.20 * np.sin(2.0 * np.pi * x / 0.55)
+            target = origin + np.array([x, y, 0.0], dtype=np.float32)
+            x2 = min(1.0, x + 0.12)
+            y2 = 0.20 * np.sin(2.0 * np.pi * x2 / 0.55)
+            next_point = origin + np.array([x2, y2, 0.0], dtype=np.float32)
+            x3 = min(1.0, x + 0.28)
+            y3 = 0.20 * np.sin(2.0 * np.pi * x3 / 0.55)
+            lookahead = origin + np.array([x3, y3, 0.0], dtype=np.float32)
+        else:
+            radius = 0.55
+            theta = min(np.pi / 2.0, speed * t / radius)
+            target = origin + np.array(
+                [radius * np.sin(theta), radius * (1.0 - np.cos(theta)), 0.0],
+                dtype=np.float32,
+            )
+            theta2 = min(np.pi / 2.0, theta + 0.12 / radius)
+            next_point = origin + np.array(
+                [radius * np.sin(theta2), radius * (1.0 - np.cos(theta2)), 0.0],
+                dtype=np.float32,
+            )
+            theta3 = min(np.pi / 2.0, theta + 0.28 / radius)
+            lookahead = origin + np.array(
+                [radius * np.sin(theta3), radius * (1.0 - np.cos(theta3)), 0.0],
+                dtype=np.float32,
+            )
+        heading = safe_normalize(next_point - target)
+        return self._make_reference(
+            obs,
+            target,
+            next_point,
+            lookahead,
+            "cruise",
+            1,
+            speed,
+            desired_heading=heading,
+            use_gate_context=False,
+        )
 
     def _gate_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
         pos = np.asarray(obs["pos"], dtype=np.float32)
@@ -404,24 +660,35 @@ class ReferenceTrajectoryGenerator:
         phase: str,
         phase_id: int,
         desired_speed: float,
+        *,
+        desired_heading: np.ndarray | None = None,
+        use_gate_context: bool = True,
     ) -> ReferenceFrame:
         pos = np.asarray(obs["pos"], dtype=np.float32)
         to_current = np.asarray(current, dtype=np.float32) - pos
-        heading = safe_normalize(to_current[:3])
+        heading = safe_normalize(to_current[:3] if desired_heading is None else desired_heading)
         heading[2] = 0.0
         heading = safe_normalize(heading)
         desired_velocity = safe_normalize(to_current) * float(desired_speed)
-        gate_local, aperture = self._gate_context(obs)
-        obstacle_relative, obstacle_distance, obstacle_detected = (
-            self._nearest_visible_obstacle(obs)
-        )
-        target_gate = int(
-            np.clip(
-                np.asarray(obs.get("target_gate", 0)).item(),
-                0,
-                len(obs["gates_pos"]) - 1,
+        if use_gate_context:
+            gate_local, aperture = self._gate_context(obs)
+            obstacle_relative, obstacle_distance, obstacle_detected = (
+                self._nearest_visible_obstacle(obs)
             )
-        )
+            target_gate = int(
+                np.clip(
+                    np.asarray(obs.get("target_gate", 0)).item(),
+                    0,
+                    len(obs["gates_pos"]) - 1,
+                )
+            )
+        else:
+            gate_local = np.zeros(3, dtype=np.float32)
+            aperture = np.zeros(2, dtype=np.float32)
+            obstacle_relative = np.zeros(3, dtype=np.float32)
+            obstacle_distance = 10.0
+            obstacle_detected = 0.0
+            target_gate = 0
         return ReferenceFrame(
             phase=phase,
             phase_id=phase_id,
@@ -659,7 +926,7 @@ class ReferenceTrackerReward:
 
 
 class ReferenceTrackerEnv(gym.Env):
-    """Single-env wrapper that turns Level3 into a local reference-tracking task."""
+    """Single-env wrapper for Level3 and v55 tracker-training tasks."""
 
     metadata = {"render_modes": []}
 
@@ -672,13 +939,20 @@ class ReferenceTrackerEnv(gym.Env):
         seed: int = -1,
         render: bool = False,
         rp_limit_deg: float = 50.0,
+        tracker_env_mode: str = "auto",
         reward_coefficients: dict[str, float] | None = None,
         reward_model: ReferenceTrackerReward | None = None,
     ):
-        """Wrap the Level3 race env as a single-env tracker training task."""
+        """Wrap a race-compatible env as a tracker training task."""
         super().__init__()
         self.config_name = config_name
         self.config = load_config(Path(__file__).parents[2] / "config" / config_name)
+        self.task = normalize_tracker_task(task)
+        self.tracker_env_mode = tracker_env_mode_from_config(
+            self.config,
+            self.task,
+            tracker_env_mode,
+        )
         self.config.sim.render = bool(render)
         if int(seed) >= 0:
             self.config.env.seed = int(seed)
@@ -694,7 +968,10 @@ class ReferenceTrackerEnv(gym.Env):
             seed=self.config.env.seed,
         )
         self.base_env = JaxToNumpy(self.base_env)
-        self.generator = ReferenceTrajectoryGenerator(task)
+        self.generator = ReferenceTrajectoryGenerator(
+            self.task,
+            dt=1.0 / float(self.config.env.freq),
+        )
         self.observation_builder = ReferenceTrackerObservation()
         if reward_model is not None and reward_coefficients is not None:
             raise ValueError("Pass either reward_model or reward_coefficients, not both.")

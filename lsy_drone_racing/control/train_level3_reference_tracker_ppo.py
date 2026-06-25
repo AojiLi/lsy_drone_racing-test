@@ -14,9 +14,12 @@ import wandb
 from lsy_drone_racing.control.level3_reference_tracker import (
     REFERENCE_TRACKER_OBS_DIM,
     REFERENCE_TRACKER_REWARD_DEFAULTS,
+    REFERENCE_TRACKER_TASKS,
+    TRACKER_ENV_MODES,
     ReferenceTrackerEnv,
     TrackerPPOAgent,
     load_tracker_checkpoint,
+    normalize_tracker_task,
     save_tracker_checkpoint,
 )
 
@@ -34,9 +37,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="level3.toml")
     parser.add_argument(
         "--task",
-        choices=["hover", "point", "gate_aperture", "level3"],
+        choices=REFERENCE_TRACKER_TASKS,
         default="hover",
     )
+    parser.add_argument("--tracker-env-mode", choices=TRACKER_ENV_MODES, default="auto")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--total-timesteps", type=int, default=4096)
     parser.add_argument("--num-steps", type=int, default=256)
@@ -126,6 +130,7 @@ def train(args: argparse.Namespace) -> Path:
         seed=args.seed,
         render=False,
         rp_limit_deg=args.rp_limit_deg,
+        tracker_env_mode=args.tracker_env_mode,
         reward_coefficients=reward_coefficients_from_args(args),
     )
     agent = make_agent(args, device)
@@ -286,7 +291,9 @@ def checkpoint_metadata(args: argparse.Namespace) -> dict[str, object]:
     return {
         "config": args.config,
         "initial_model_path": str(args.initial_model_path) if args.initial_model_path else None,
-        "task": args.task,
+        "task": normalize_tracker_task(args.task),
+        "requested_task": args.task,
+        "tracker_env_mode": args.tracker_env_mode,
         "rp_limit_deg": float(args.rp_limit_deg),
         "reward_coefficients": reward_coefficients_from_args(args),
         "max_episode_steps": int(args.max_episode_steps),
