@@ -348,7 +348,8 @@ def run_controller(
                 action_delta_l2.append(float(np.linalg.norm(delta)))
                 obs, reward, terminated, truncated, info = env.step(action)
                 steps += 1
-                endpoint_pos = np.asarray(obs["pos"], dtype=np.float64).copy()
+                step_endpoint_pos = np.asarray(obs["pos"], dtype=np.float64).copy()
+                endpoint_pos = last_pos.copy() if terminated or truncated else step_endpoint_pos
                 rot = quat_to_rotmat(np.asarray(obs["quat"], dtype=np.float64))
                 body_z_world_z = np.clip(float(rot[2, 2]), -1.0, 1.0)
                 tilt_values.append(float(np.rad2deg(np.arccos(body_z_world_z))))

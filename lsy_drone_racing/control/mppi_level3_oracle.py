@@ -205,21 +205,31 @@ class MPPILevel3Oracle(Controller):
         target_idx = int(np.asarray(obs["target_gate"]).item())
         gates_pos = np.asarray(obs["gates_pos"], dtype=np.float64)
         gates_quat = np.asarray(obs["gates_quat"], dtype=np.float64)
-        target_pos = gates_pos[target_idx]
+        obstacles_pos = np.asarray(obs["obstacles_pos"], dtype=np.float64)
         target_rot = R.from_quat(gates_quat[target_idx])
-        gate_x_axis = target_rot.as_matrix()[:, 0]
+        gate_axes = target_rot.as_matrix()
+        gate_x_axis = gate_axes[:, 0]
+        target_pos = gates_pos[target_idx]
         local = target_rot.inv().apply(pos - target_pos)
 
-        if local[0] < -0.25:
+        xy_speed_limit = 2.2
+        if (
+            target_idx > 0
+            and local[0] < -0.45
+            and (abs(local[1]) > 0.28 or abs(local[2]) > 0.20)
+        ):
+            aim = target_pos - 0.35 * gate_x_axis
+            xy_speed_limit = 1.45
+        elif local[0] < -0.25:
             aim = target_pos + 0.30 * gate_x_axis
         elif abs(local[1]) > 0.16 or abs(local[2]) > 0.16:
             aim = target_pos - 0.18 * gate_x_axis
         else:
             aim = target_pos + 0.62 * gate_x_axis
 
-        aim = self._avoid_obstacles(pos, aim, np.asarray(obs["obstacles_pos"], dtype=np.float64))
+        aim = self._avoid_obstacles(pos, aim, obstacles_pos)
         to_aim = aim - pos
-        desired_vel_xy = np.clip(2.4 * to_aim[:2], -2.2, 2.2)
+        desired_vel_xy = np.clip(2.4 * to_aim[:2], -xy_speed_limit, xy_speed_limit)
         desired_acc = np.zeros(3, dtype=np.float64)
         desired_acc[:2] = 2.8 * (desired_vel_xy - vel[:2])
         desired_acc[2] = 5.0 * (aim[2] - pos[2]) - 4.2 * vel[2]
