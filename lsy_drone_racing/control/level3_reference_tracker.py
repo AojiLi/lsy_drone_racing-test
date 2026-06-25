@@ -31,6 +31,18 @@ REFERENCE_TRACKER_PHASES = (
     "recover",
 )
 REFERENCE_TRACKER_OBS_DIM = 65
+REFERENCE_TRACKER_REWARD_DEFAULTS = {
+    "pos_error_coef": 3.0,
+    "vel_error_coef": 0.6,
+    "heading_coef": 0.35,
+    "gate_center_coef": 1.0,
+    "obstacle_margin": 0.28,
+    "obstacle_coef": 0.8,
+    "action_coef": 0.02,
+    "action_delta_coef": 0.04,
+    "progress_bonus": 0.3,
+    "crash_penalty": 20.0,
+}
 
 
 @dataclass(frozen=True)
@@ -561,28 +573,35 @@ class ReferenceTrackerReward:
 
     def __init__(
         self,
-        pos_error_coef: float = 3.0,
-        vel_error_coef: float = 0.6,
-        heading_coef: float = 0.35,
-        gate_center_coef: float = 1.0,
-        obstacle_margin: float = 0.28,
-        obstacle_coef: float = 0.8,
-        action_coef: float = 0.02,
-        action_delta_coef: float = 0.04,
-        progress_bonus: float = 0.3,
-        crash_penalty: float = 20.0,
+        pos_error_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["pos_error_coef"],
+        vel_error_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["vel_error_coef"],
+        heading_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["heading_coef"],
+        gate_center_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["gate_center_coef"],
+        obstacle_margin: float = REFERENCE_TRACKER_REWARD_DEFAULTS["obstacle_margin"],
+        obstacle_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["obstacle_coef"],
+        action_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_coef"],
+        action_delta_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_delta_coef"],
+        progress_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["progress_bonus"],
+        crash_penalty: float = REFERENCE_TRACKER_REWARD_DEFAULTS["crash_penalty"],
     ):
         """Set reward coefficients for dense local reference tracking."""
-        self.pos_error_coef = pos_error_coef
-        self.vel_error_coef = vel_error_coef
-        self.heading_coef = heading_coef
-        self.gate_center_coef = gate_center_coef
-        self.obstacle_margin = obstacle_margin
-        self.obstacle_coef = obstacle_coef
-        self.action_coef = action_coef
-        self.action_delta_coef = action_delta_coef
-        self.progress_bonus = progress_bonus
-        self.crash_penalty = crash_penalty
+        self.pos_error_coef = float(pos_error_coef)
+        self.vel_error_coef = float(vel_error_coef)
+        self.heading_coef = float(heading_coef)
+        self.gate_center_coef = float(gate_center_coef)
+        self.obstacle_margin = float(obstacle_margin)
+        self.obstacle_coef = float(obstacle_coef)
+        self.action_coef = float(action_coef)
+        self.action_delta_coef = float(action_delta_coef)
+        self.progress_bonus = float(progress_bonus)
+        self.crash_penalty = float(crash_penalty)
+
+    def coefficients(self) -> dict[str, float]:
+        """Return reward coefficients for checkpoint metadata and diagnostics."""
+        return {
+            name: float(getattr(self, name))
+            for name in REFERENCE_TRACKER_REWARD_DEFAULTS
+        }
 
     def compute(
         self,
@@ -653,6 +672,8 @@ class ReferenceTrackerEnv(gym.Env):
         seed: int = -1,
         render: bool = False,
         rp_limit_deg: float = 50.0,
+        reward_coefficients: dict[str, float] | None = None,
+        reward_model: ReferenceTrackerReward | None = None,
     ):
         """Wrap the Level3 race env as a single-env tracker training task."""
         super().__init__()
@@ -675,7 +696,11 @@ class ReferenceTrackerEnv(gym.Env):
         self.base_env = JaxToNumpy(self.base_env)
         self.generator = ReferenceTrajectoryGenerator(task)
         self.observation_builder = ReferenceTrackerObservation()
-        self.reward_model = ReferenceTrackerReward()
+        if reward_model is not None and reward_coefficients is not None:
+            raise ValueError("Pass either reward_model or reward_coefficients, not both.")
+        self.reward_model = reward_model or ReferenceTrackerReward(
+            **(reward_coefficients or {})
+        )
         self.max_episode_steps = int(max_episode_steps)
         self.action_low, self.action_high = action_bounds_from_config(
             self.config,

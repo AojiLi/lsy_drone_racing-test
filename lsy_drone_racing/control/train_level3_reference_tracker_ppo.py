@@ -13,6 +13,7 @@ import torch.optim as optim
 import wandb
 from lsy_drone_racing.control.level3_reference_tracker import (
     REFERENCE_TRACKER_OBS_DIM,
+    REFERENCE_TRACKER_REWARD_DEFAULTS,
     ReferenceTrackerEnv,
     TrackerPPOAgent,
     load_tracker_checkpoint,
@@ -51,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
+    add_reward_arguments(parser)
     parser.add_argument("--cuda", action="store_true")
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--initial-model-path", type=Path)
@@ -62,6 +64,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb-run-id")
     parser.add_argument("--wandb-mode", default="online")
     return parser.parse_args()
+
+
+def add_reward_arguments(parser: argparse.ArgumentParser) -> None:
+    """Expose v54 tracker reward coefficients as stable CLI knobs."""
+    for name, default in REFERENCE_TRACKER_REWARD_DEFAULTS.items():
+        parser.add_argument(
+            f"--{name.replace('_', '-')}",
+            f"--{name}",
+            dest=name,
+            type=float,
+            default=default,
+        )
 
 
 def setup_wandb(args: argparse.Namespace) -> None:
@@ -112,6 +126,7 @@ def train(args: argparse.Namespace) -> Path:
         seed=args.seed,
         render=False,
         rp_limit_deg=args.rp_limit_deg,
+        reward_coefficients=reward_coefficients_from_args(args),
     )
     agent = make_agent(args, device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -273,8 +288,17 @@ def checkpoint_metadata(args: argparse.Namespace) -> dict[str, object]:
         "initial_model_path": str(args.initial_model_path) if args.initial_model_path else None,
         "task": args.task,
         "rp_limit_deg": float(args.rp_limit_deg),
+        "reward_coefficients": reward_coefficients_from_args(args),
         "max_episode_steps": int(args.max_episode_steps),
         "v54_lane": "v54_reference_trajectory_tracker_ppo",
+    }
+
+
+def reward_coefficients_from_args(args: argparse.Namespace) -> dict[str, float]:
+    """Return ReferenceTrackerReward coefficients selected by CLI arguments."""
+    return {
+        name: float(getattr(args, name))
+        for name in REFERENCE_TRACKER_REWARD_DEFAULTS
     }
 
 

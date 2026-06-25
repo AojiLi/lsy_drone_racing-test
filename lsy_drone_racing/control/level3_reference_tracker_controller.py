@@ -37,9 +37,11 @@ class Level3ReferenceTrackerController(Controller):
             raise ValueError("Level3ReferenceTrackerController requires attitude control.")
 
         self.device = torch.device("cpu")
+        self.model_path = self._resolve_model_path()
+        self.rp_limit_deg = self._checkpoint_rp_limit_deg(default=50.0)
         self.action_low, self.action_high = action_bounds_from_config(
             config,
-            rp_limit_deg=50.0,
+            rp_limit_deg=self.rp_limit_deg,
         )
         self.action_scale = (self.action_high - self.action_low) / 2.0
         self.action_mean = (self.action_high + self.action_low) / 2.0
@@ -58,7 +60,6 @@ class Level3ReferenceTrackerController(Controller):
         self._step_count = 0
         self._finished = False
         self.checkpoint_loaded = 0.0
-        self.model_path = self._resolve_model_path()
         self.agent = self._load_agent()
         self.agent.eval()
 
@@ -135,6 +136,22 @@ class Level3ReferenceTrackerController(Controller):
             return Path(env_path).expanduser().resolve()
         return Path(__file__).resolve().parent / MODEL_NAME
 
+    def _checkpoint_rp_limit_deg(self, default: float = 50.0) -> float:
+        """Read action roll/pitch envelope from checkpoint metadata when present."""
+        if not self.model_path.exists():
+            return float(default)
+        checkpoint = torch.load(self.model_path, map_location="cpu", weights_only=False)
+        if not isinstance(checkpoint, dict):
+            return float(default)
+        value = checkpoint.get("rp_limit_deg", default)
+        try:
+            rp_limit_deg = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid v54 tracker rp_limit_deg metadata: {value!r}") from exc
+        if not np.isfinite(rp_limit_deg) or rp_limit_deg <= 0.0 or rp_limit_deg > 90.0:
+            raise ValueError(f"Invalid v54 tracker rp_limit_deg metadata: {rp_limit_deg!r}")
+        return rp_limit_deg
+
     def _load_agent(self) -> TrackerPPOAgent:
         if self.model_path.exists():
             agent, metadata = load_tracker_checkpoint(self.model_path, self.device)
@@ -167,6 +184,7 @@ class Level3ReferenceTrackerController(Controller):
             "v54_tracker_desired_speed": float(self.reference.desired_speed),
             "v54_tracker_obstacle_distance_m": float(self.reference.obstacle_distance),
             "v54_tracker_checkpoint_loaded": float(self.checkpoint_loaded),
+            "v54_tracker_rp_limit_deg": float(self.rp_limit_deg),
             "v54_tracker_obs_abs_max": float(np.max(np.abs(tracker_obs))),
             "v54_tracker_action_norm_l2": float(np.linalg.norm(self._last_action_norm)),
             "v54_tracker_roll_cmd": float(action[0]),

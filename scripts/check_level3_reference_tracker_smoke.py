@@ -40,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-steps", type=int, default=80)
     parser.add_argument("--level3-steps", type=int, default=150)
     parser.add_argument("--level3-seeds", default="101-105")
+    parser.add_argument("--early-termination-step-threshold", type=int, default=50)
+    parser.add_argument("--require-long-training-ready", action="store_true")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     return parser.parse_args()
 
@@ -147,6 +149,7 @@ def run_level3_controller_seed(
     max_steps: int,
     checkpoint: Path | None,
     allow_untrained: bool,
+    early_termination_step_threshold: int,
 ) -> dict[str, Any]:
     """Run the deployed controller path on one unchanged Level3 seed."""
     previous_checkpoint_env = os.environ.get("V54_REFERENCE_TRACKER_CHECKPOINT")
@@ -181,9 +184,11 @@ def run_level3_controller_seed(
         initial_local_x = first_gate_local_x(obs)
         max_local_x = initial_local_x
         max_gate_index = 0
+        final_target_gate = 0
         diagnostics: dict[str, float] = {}
         terminated = False
         truncated = False
+        controller_finished = False
         steps = 0
         for _step in range(max_steps):
             action = controller.compute_control(obs, info)
@@ -191,6 +196,7 @@ def run_level3_controller_seed(
             obs, reward, terminated, truncated, info = env.step(action)
             steps += 1
             target_gate = int(np.asarray(obs["target_gate"]).item())
+            final_target_gate = target_gate
             max_gate_index = max(
                 max_gate_index,
                 target_gate if target_gate >= 0 else len(obs["gates_pos"]),
@@ -222,12 +228,22 @@ def run_level3_controller_seed(
             os.environ["V54_REFERENCE_TRACKER_ALLOW_UNTRAINED"] = previous_allow_env
 
     first_gate_axis_gain = float(max_local_x - initial_local_x)
+    ended_before_max_steps = bool(terminated or truncated or controller_finished)
+    early_termination = bool(
+        ended_before_max_steps
+        and steps < min(max_steps, int(early_termination_step_threshold))
+    )
     return {
         "seed": seed,
         "steps": steps,
         "finite_action": finite_action,
         "terminated": bool(terminated),
         "truncated": bool(truncated),
+        "controller_finished": bool(controller_finished),
+        "ended_before_max_steps": ended_before_max_steps,
+        "early_termination": early_termination,
+        "early_termination_step_threshold": int(early_termination_step_threshold),
+        "final_target_gate": int(final_target_gate),
         "max_gate_index": int(max_gate_index),
         "initial_first_gate_local_x": float(initial_local_x),
         "max_first_gate_local_x": float(max_local_x),
@@ -254,6 +270,7 @@ def main() -> None:
     """Run all v54 smoke checks and write a JSON report."""
     args = parse_args()
     agent = make_agent(args.checkpoint, args.allow_untrained)
+    level3_seeds = parse_seed_range(args.level3_seeds)
     task_results = [
         run_tracker_task(
             agent=agent,
@@ -271,28 +288,80 @@ def main() -> None:
             max_steps=args.level3_steps,
             checkpoint=args.checkpoint,
             allow_untrained=args.allow_untrained,
+            early_termination_step_threshold=args.early_termination_step_threshold,
         )
-        for seed in parse_seed_range(args.level3_seeds)
+        for seed in level3_seeds
     ]
+    task_all_finite = all(
+        row["finite_observation"] and row["finite_action"] and row["finite_reward"]
+        for row in task_results
+    )
+    level3_all_finite_actions = all(row["finite_action"] for row in level3_results)
     all_finite = all(
         row["finite_observation"] and row["finite_action"] and row["finite_reward"]
         for row in task_results
     ) and all(row["finite_action"] for row in level3_results)
-    any_progress = any(row["nonzero_first_gate_progress"] for row in level3_results)
     checkpoint_backed = args.checkpoint is not None and args.checkpoint.exists()
-    long_training_gate = bool(all_finite and any_progress and checkpoint_backed)
+    progress_count = sum(
+        1 for row in level3_results if row["nonzero_first_gate_progress"]
+    )
+    majority_required = len(level3_results) // 2 + 1
+    progress_majority = progress_count >= majority_required
+    gate0_pass_count = sum(1 for row in level3_results if int(row["max_gate_index"]) > 0)
+    any_gate0_passed = gate0_pass_count > 0
+    early_termination_count = sum(1 for row in level3_results if row["early_termination"])
+    ended_before_max_steps_count = sum(
+        1 for row in level3_results if row["ended_before_max_steps"]
+    )
+    step_values = [int(row["steps"]) for row in level3_results]
+    readiness_failures: list[str] = []
+    if not all_finite:
+        readiness_failures.append("non_finite_task_or_level3_values")
+    if not checkpoint_backed:
+        readiness_failures.append("missing_checkpoint_backing")
+    if not progress_majority:
+        readiness_failures.append(
+            "nonzero_first_gate_progress_not_majority"
+        )
+    if not any_gate0_passed:
+        readiness_failures.append("no_seed_passed_gate_0")
+    long_training_gate = bool(
+        all_finite
+        and checkpoint_backed
+        and progress_majority
+        and any_gate0_passed
+    )
     output = {
         "config": args.config,
         "checkpoint": str(args.checkpoint) if args.checkpoint else None,
         "allow_untrained": bool(args.allow_untrained),
         "task_steps": int(args.task_steps),
         "level3_steps": int(args.level3_steps),
-        "level3_seeds": parse_seed_range(args.level3_seeds),
+        "level3_seeds": level3_seeds,
         "all_finite": all_finite,
-        "any_nonzero_first_gate_progress": any_progress,
+        "task_all_finite": task_all_finite,
+        "level3_all_finite_actions": level3_all_finite_actions,
+        "any_nonzero_first_gate_progress": progress_count > 0,
+        "nonzero_first_gate_progress_count": progress_count,
+        "nonzero_first_gate_progress_ratio": (
+            progress_count / len(level3_results) if level3_results else 0.0
+        ),
+        "nonzero_first_gate_progress_majority": progress_majority,
+        "nonzero_first_gate_progress_majority_required": majority_required,
+        "gate0_pass_count": gate0_pass_count,
+        "any_gate0_passed": any_gate0_passed,
+        "early_termination_step_threshold": int(args.early_termination_step_threshold),
+        "early_termination_count": early_termination_count,
+        "early_termination_ratio": (
+            early_termination_count / len(level3_results) if level3_results else 0.0
+        ),
+        "ended_before_max_steps_count": ended_before_max_steps_count,
+        "min_level3_steps": min(step_values) if step_values else 0,
+        "mean_level3_steps": float(np.mean(step_values)) if step_values else 0.0,
         "checkpoint_backed": checkpoint_backed,
         "long_training_gate_passed": long_training_gate,
         "promotion_ready_for_long_training": long_training_gate,
+        "readiness_failures": readiness_failures,
         "tasks": task_results,
         "level3": level3_results,
     }
@@ -301,6 +370,8 @@ def main() -> None:
     print(json.dumps(output, indent=2, sort_keys=True))
     if not all_finite:
         raise SystemExit(1)
+    if args.require_long_training_ready and not long_training_gate:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
