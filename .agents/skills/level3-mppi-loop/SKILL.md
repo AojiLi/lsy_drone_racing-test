@@ -21,6 +21,9 @@ work.
 - Preferred v53 architecture: upper planner/MPPI/geometric route module
   generates a short reference trajectory; PPO or a low-level tracker follows
   the trajectory and outputs `[roll, pitch, yaw, thrust]`.
+- Selected first tracker: wrap the stable Level2 PPO checkpoint through a
+  virtual local-gate observation adapter:
+  `lsy_drone_racing/control/checkpoints/level2_DR_latencyobs_middlemanuever/level2_DR_latencyobs_middlemanuever_final.ckpt`.
 - Previous MPPI lane: `v52_mppi_oracle_teacher_level3`.
 - Current decision packet:
   `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
@@ -112,6 +115,9 @@ The first v53 controller should be slower and more explicit than pure PPO:
 - align in the active gate frame;
 - choose an obstacle-aware aperture point;
 - let PPO or a low-level tracker follow reference position/velocity/phase;
+- for the first PPO tracker attempt, convert the current reference point,
+  reference velocity, and desired heading into a synthetic Level2-style local
+  gate observation, then run the Level2 PPO tracker checkpoint;
 - cross the gate only after alignment and speed reduction;
 - recover after crossing before accelerating to the next gate.
 

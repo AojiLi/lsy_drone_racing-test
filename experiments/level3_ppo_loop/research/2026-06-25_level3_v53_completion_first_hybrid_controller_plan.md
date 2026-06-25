@@ -17,12 +17,34 @@ The refined architecture is:
 observed/nominal gates and obstacles
 -> upper planner or MPPI/geometric local planner
 -> short reference trajectory: target_pos, target_vel, desired_speed, phase
--> PPO or low-level trajectory tracker
+-> virtual local-gate observation adapter
+-> Level2 PPO trajectory tracker
 -> [roll, pitch, yaw, thrust]
 ```
 
 The upper planner should think about route and timing. The tracker should think
 about flying the drone body.
+
+## Selected Tracker
+
+Use the stable Level2 PPO checkpoint as the first tracker:
+
+```text
+lsy_drone_racing/control/checkpoints/level2_DR_latencyobs_middlemanuever/level2_DR_latencyobs_middlemanuever_final.ckpt
+```
+
+Observed checkpoint properties:
+
+- observation layout: `obstacle_heading_xy_v1`;
+- hidden dim: `256`;
+- actor input dim: `103`;
+- action dim: `4`;
+- action output semantics: `[roll, pitch, yaw, thrust]`.
+
+This checkpoint already has strong Level2 flight/body-control behavior. It
+should not be treated as a complete Level3 planner. Instead, the v53 controller
+should synthesize a Level2-style virtual local gate from the planner reference
+so the Level2 policy can act as a short-horizon tracker.
 
 ## Target
 
@@ -99,10 +121,24 @@ MPPI can be used as the upper planner if useful. The immediate experiment should
 not be another local MPPI cost-weight sweep; it should test whether trajectory
 factorization makes the task easier.
 
-If the current PPO checkpoint cannot directly track references without retraining,
-use a minimal deterministic tracker as a control sanity baseline, then open a
-follow-up PPO-tracker imitation/fine-tuning packet only after the planner/tracker
-interface has useful smoke/dev evidence.
+If the Level2 PPO tracker cannot directly track the synthetic virtual gate
+without retraining, use a minimal deterministic tracker as a control sanity
+baseline, then open a follow-up PPO-tracker imitation/fine-tuning packet only
+after the planner/tracker interface has useful smoke/dev evidence.
+
+## Virtual Gate Adapter
+
+The adapter should map each planner reference into the kind of local task the
+Level2 PPO understands:
+
+- reference point -> synthetic active gate center;
+- desired heading -> synthetic gate yaw/normal;
+- reference velocity and desired speed -> tracker history/velocity context;
+- obstacle-aware aperture -> local synthetic gate offset;
+- real Level3 obstacles -> preserve nearest obstacle terms when available.
+
+The adapter must be generic and recomputed online. Do not use static
+seed-specific routes.
 
 ## Evaluation Ladder
 
@@ -126,6 +162,7 @@ interface has useful smoke/dev evidence.
 ## Next Action
 
 Launch `v53_completion_first_hybrid_planner_controller` through the non-PPO
-controller workflow. Implement the planner trajectory interface first, then the
-tracker. Start with builder/checker verification, then run smoke/dev evals
-before any full validation.
+controller workflow. Implement the planner trajectory interface, the virtual
+Level2-gate adapter, and the Level2 PPO tracker wrapper. Start with
+builder/checker verification, then run smoke/dev evals before any full
+validation.

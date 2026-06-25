@@ -17,7 +17,8 @@ The user clarified the intended architecture:
 ```text
 upper planner / MPPI / geometric route module
 -> short local trajectory
--> PPO or low-level tracker
+-> virtual Level2 local-gate observation adapter
+-> Level2 PPO tracker
 -> roll/pitch/yaw/thrust
 ```
 
@@ -35,6 +36,19 @@ near-gate geometry becomes reliable only late. A planner can slow down near this
 range, observe the true local geometry, and generate a safer short trajectory.
 The tracker can then focus on following that reference.
 
+## Selected Tracker
+
+Use this Level2 PPO checkpoint as the first tracker:
+
+```text
+lsy_drone_racing/control/checkpoints/level2_DR_latencyobs_middlemanuever/level2_DR_latencyobs_middlemanuever_final.ckpt
+```
+
+It uses `obstacle_heading_xy_v1`, hidden dim `256`, actor input dim `103`, and
+outputs `[roll, pitch, yaw, thrust]`. It is chosen because it already has stable
+Level2 flight/body-control behavior. It should be wrapped as a tracker, not used
+as a full Level3 route planner.
+
 ## Implementation Meaning
 
 The v53 controller should expose and log:
@@ -46,6 +60,7 @@ The v53 controller should expose and log:
 - desired speed;
 - gate-frame local position;
 - aperture offset;
+- virtual Level2 gate center/yaw used for the tracker;
 - whether the controller is in pre-visibility, slowdown, align, cross, or
   recovery phase.
 

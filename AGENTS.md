@@ -31,7 +31,9 @@
   Speed optimization comes after reliable completion. The preferred v53
   architecture is now an upper planner/MPPI/geometric module that generates a
   short reference trajectory, with PPO or a low-level tracker following that
-  trajectory.
+  trajectory. The selected first tracker is the stable Level2 PPO checkpoint
+  wrapped through a virtual local-gate observation adapter:
+  `lsy_drone_racing/control/checkpoints/level2_DR_latencyobs_middlemanuever/level2_DR_latencyobs_middlemanuever_final.ckpt`.
 
 ## Hard Boundaries
 
@@ -208,9 +210,10 @@
   `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
   This is not PPO training and is not recorded as PPO target success. It may
   use an upper planner/state-machine/MPPI module to generate local reference
-  trajectories and a PPO/low-level tracker to follow them. Direct non-PPO action
-  output is allowed inside this lane for tracker baselines, but the preferred
-  structure is planner trajectory -> tracker -> `[roll, pitch, yaw, thrust]`.
+  trajectories and a PPO/low-level tracker to follow them. The preferred first
+  tracker path is planner reference -> virtual Level2 gate/observation adapter
+  -> Level2 PPO tracker -> `[roll, pitch, yaw, thrust]`. Direct non-PPO action
+  output is allowed inside this lane for tracker baselines.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
