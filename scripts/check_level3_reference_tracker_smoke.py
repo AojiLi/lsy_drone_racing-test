@@ -1,0 +1,307 @@
+"""Smoke-check the v54 Level3 reference-tracker PPO support."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+import gymnasium as gym
+import numpy as np
+import torch
+from gymnasium.wrappers.jax_to_numpy import JaxToNumpy
+
+from lsy_drone_racing.control.level3_reference_tracker import (
+    REFERENCE_TRACKER_OBS_DIM,
+    ReferenceTrackerEnv,
+    TrackerPPOAgent,
+    load_tracker_checkpoint,
+    quat_to_rotmat,
+)
+from lsy_drone_racing.utils import load_config, load_controller
+
+ROOT = Path(__file__).parents[1]
+DEFAULT_OUTPUT = (
+    ROOT
+    / "experiments/level3_ppo_loop/analysis/"
+    / "2026-06-25_v54_reference_tracker_smoke.json"
+)
+CONTROLLER_PATH = ROOT / "lsy_drone_racing/control/level3_reference_tracker_controller.py"
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse smoke-check CLI arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="level3.toml")
+    parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--allow-untrained", action="store_true")
+    parser.add_argument("--task-steps", type=int, default=80)
+    parser.add_argument("--level3-steps", type=int, default=150)
+    parser.add_argument("--level3-seeds", default="101-105")
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    return parser.parse_args()
+
+
+def parse_seed_range(text: str) -> list[int]:
+    """Parse comma-separated seeds and inclusive ranges."""
+    seeds: list[int] = []
+    for token in text.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start, end = token.split("-", 1)
+            seeds.extend(range(int(start), int(end) + 1))
+        else:
+            seeds.append(int(token))
+    if not seeds:
+        raise ValueError("No Level3 seeds requested.")
+    return seeds
+
+
+def make_agent(checkpoint: Path | None, allow_untrained: bool) -> TrackerPPOAgent:
+    """Load a tracker checkpoint or create an untrained finite-action policy."""
+    if checkpoint is not None and checkpoint.exists():
+        agent, _metadata = load_tracker_checkpoint(checkpoint, "cpu")
+        agent.eval()
+        return agent
+    if allow_untrained:
+        agent = TrackerPPOAgent(obs_dim=REFERENCE_TRACKER_OBS_DIM, action_dim=4)
+        agent.eval()
+        return agent
+    raise FileNotFoundError(
+        "No v54 tracker checkpoint found. Pass --checkpoint or use --allow-untrained "
+        "for finite-action smoke only."
+    )
+
+
+def deterministic_action(agent: TrackerPPOAgent, obs: np.ndarray) -> np.ndarray:
+    """Return the deterministic normalized action for a tracker observation."""
+    with torch.no_grad():
+        tensor = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)
+        action, _logprob, _entropy, _value = agent.get_action_and_value(
+            tensor,
+            deterministic=True,
+        )
+    action_np = action.squeeze(0).detach().cpu().numpy().astype(np.float32)
+    return np.clip(action_np, -1.0, 1.0)
+
+
+def run_tracker_task(
+    *,
+    agent: TrackerPPOAgent,
+    config_name: str,
+    task: str,
+    seed: int,
+    max_steps: int,
+) -> dict[str, Any]:
+    """Run one native tracker task and collect finite-value diagnostics."""
+    env = ReferenceTrackerEnv(
+        config_name=config_name,
+        task=task,
+        seed=seed,
+        max_episode_steps=max_steps,
+        render=False,
+    )
+    obs, _info = env.reset(seed=seed)
+    finite_obs = bool(np.isfinite(obs).all())
+    finite_action = True
+    finite_reward = True
+    total_reward = 0.0
+    steps = 0
+    final_target_gate = 0
+    for _step in range(max_steps):
+        action = deterministic_action(agent, obs)
+        finite_action = finite_action and bool(np.isfinite(action).all())
+        obs, reward, terminated, truncated, _info = env.step(action)
+        finite_obs = finite_obs and bool(np.isfinite(obs).all())
+        finite_reward = finite_reward and bool(np.isfinite(reward))
+        total_reward += float(reward)
+        steps += 1
+        raw_obs = env._raw_obs or {}  # noqa: SLF001 - smoke diagnostics only
+        if "target_gate" in raw_obs:
+            final_target_gate = int(np.asarray(raw_obs["target_gate"]).item())
+        if terminated or truncated:
+            break
+    diagnostics = dict(env.last_diagnostics)
+    env.close()
+    return {
+        "task": task,
+        "seed": seed,
+        "steps": steps,
+        "finite_observation": finite_obs,
+        "finite_action": finite_action,
+        "finite_reward": finite_reward,
+        "total_reward": total_reward,
+        "target_gate_after": final_target_gate,
+        "last_diagnostics": diagnostics,
+    }
+
+
+def run_level3_controller_seed(
+    *,
+    config_name: str,
+    seed: int,
+    max_steps: int,
+    checkpoint: Path | None,
+    allow_untrained: bool,
+) -> dict[str, Any]:
+    """Run the deployed controller path on one unchanged Level3 seed."""
+    previous_checkpoint_env = os.environ.get("V54_REFERENCE_TRACKER_CHECKPOINT")
+    previous_allow_env = os.environ.get("V54_REFERENCE_TRACKER_ALLOW_UNTRAINED")
+    env = None
+    try:
+        if checkpoint is not None:
+            os.environ["V54_REFERENCE_TRACKER_CHECKPOINT"] = str(checkpoint.resolve())
+        elif allow_untrained:
+            os.environ["V54_REFERENCE_TRACKER_ALLOW_UNTRAINED"] = "1"
+
+        config = load_config(ROOT / "config" / config_name)
+        config.sim.render = False
+        config.env.seed = int(seed)
+        env = gym.make(
+            config.env.id,
+            freq=config.env.freq,
+            sim_config=config.sim,
+            sensor_range=config.env.sensor_range,
+            control_mode=config.env.control_mode,
+            track=config.env.track,
+            disturbances=config.env.get("disturbances"),
+            randomizations=config.env.get("randomizations"),
+            seed=config.env.seed,
+        )
+        env = JaxToNumpy(env)
+        obs, info = env.reset(seed=seed)
+        controller_cls = load_controller(CONTROLLER_PATH)
+        controller = controller_cls(obs, info, config)
+
+        finite_action = True
+        initial_local_x = first_gate_local_x(obs)
+        max_local_x = initial_local_x
+        max_gate_index = 0
+        diagnostics: dict[str, float] = {}
+        terminated = False
+        truncated = False
+        steps = 0
+        for _step in range(max_steps):
+            action = controller.compute_control(obs, info)
+            finite_action = finite_action and bool(np.isfinite(action).all())
+            obs, reward, terminated, truncated, info = env.step(action)
+            steps += 1
+            target_gate = int(np.asarray(obs["target_gate"]).item())
+            max_gate_index = max(
+                max_gate_index,
+                target_gate if target_gate >= 0 else len(obs["gates_pos"]),
+            )
+            current_local_x = first_gate_local_x(obs)
+            if np.isfinite(current_local_x):
+                max_local_x = max(max_local_x, current_local_x)
+            controller_finished = controller.step_callback(
+                action,
+                obs,
+                reward,
+                bool(terminated),
+                bool(truncated),
+                info,
+            )
+            diagnostics = dict(controller.mppi_diagnostics())
+            if terminated or truncated or controller_finished:
+                break
+    finally:
+        if env is not None:
+            env.close()
+        if previous_checkpoint_env is None:
+            os.environ.pop("V54_REFERENCE_TRACKER_CHECKPOINT", None)
+        else:
+            os.environ["V54_REFERENCE_TRACKER_CHECKPOINT"] = previous_checkpoint_env
+        if previous_allow_env is None:
+            os.environ.pop("V54_REFERENCE_TRACKER_ALLOW_UNTRAINED", None)
+        else:
+            os.environ["V54_REFERENCE_TRACKER_ALLOW_UNTRAINED"] = previous_allow_env
+
+    first_gate_axis_gain = float(max_local_x - initial_local_x)
+    return {
+        "seed": seed,
+        "steps": steps,
+        "finite_action": finite_action,
+        "terminated": bool(terminated),
+        "truncated": bool(truncated),
+        "max_gate_index": int(max_gate_index),
+        "initial_first_gate_local_x": float(initial_local_x),
+        "max_first_gate_local_x": float(max_local_x),
+        "first_gate_axis_gain": first_gate_axis_gain,
+        "nonzero_first_gate_progress": bool(
+            first_gate_axis_gain > 0.05 or max_gate_index > 0
+        ),
+        "last_diagnostics": diagnostics,
+    }
+
+
+def first_gate_local_x(obs: dict[str, Any]) -> float:
+    """Return drone x-position in the first gate frame."""
+    gates_pos = np.asarray(obs["gates_pos"], dtype=np.float32)
+    gates_quat = np.asarray(obs["gates_quat"], dtype=np.float32)
+    if len(gates_pos) == 0:
+        return float("nan")
+    pos = np.asarray(obs["pos"], dtype=np.float32)
+    gate_rot = quat_to_rotmat(gates_quat[0])
+    return float((gate_rot.T @ (pos - gates_pos[0]))[0])
+
+
+def main() -> None:
+    """Run all v54 smoke checks and write a JSON report."""
+    args = parse_args()
+    agent = make_agent(args.checkpoint, args.allow_untrained)
+    task_results = [
+        run_tracker_task(
+            agent=agent,
+            config_name=args.config,
+            task=task,
+            seed=seed,
+            max_steps=args.task_steps,
+        )
+        for task, seed in (("hover", 1), ("point", 2), ("gate_aperture", 3))
+    ]
+    level3_results = [
+        run_level3_controller_seed(
+            config_name=args.config,
+            seed=seed,
+            max_steps=args.level3_steps,
+            checkpoint=args.checkpoint,
+            allow_untrained=args.allow_untrained,
+        )
+        for seed in parse_seed_range(args.level3_seeds)
+    ]
+    all_finite = all(
+        row["finite_observation"] and row["finite_action"] and row["finite_reward"]
+        for row in task_results
+    ) and all(row["finite_action"] for row in level3_results)
+    any_progress = any(row["nonzero_first_gate_progress"] for row in level3_results)
+    checkpoint_backed = args.checkpoint is not None and args.checkpoint.exists()
+    long_training_gate = bool(all_finite and any_progress and checkpoint_backed)
+    output = {
+        "config": args.config,
+        "checkpoint": str(args.checkpoint) if args.checkpoint else None,
+        "allow_untrained": bool(args.allow_untrained),
+        "task_steps": int(args.task_steps),
+        "level3_steps": int(args.level3_steps),
+        "level3_seeds": parse_seed_range(args.level3_seeds),
+        "all_finite": all_finite,
+        "any_nonzero_first_gate_progress": any_progress,
+        "checkpoint_backed": checkpoint_backed,
+        "long_training_gate_passed": long_training_gate,
+        "promotion_ready_for_long_training": long_training_gate,
+        "tasks": task_results,
+        "level3": level3_results,
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(output, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(output, indent=2, sort_keys=True))
+    if not all_finite:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
