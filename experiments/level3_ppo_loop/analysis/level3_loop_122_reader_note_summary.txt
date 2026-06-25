@@ -1,0 +1,19 @@
+loop122 测的是 v51：在原来的 v5 观测里，额外加入一组 planner guidance 特征。通俗说，就是让 PPO 多看到一些“局部路线意图”的提示，例如往哪个门走、附近障碍风险怎样。但要特别注意：planner 只是提供 observation，不是动作控制器；真正输出 roll/pitch/yaw/thrust 的仍然只有 PPO Actor。
+
+这一轮仍然在未改变的 config/level3.toml 上做 hard eval。Level3 赛道、门、障碍、随机化和验证种子都没有被放松，所以结果可以和之前的全局 best 公平比较。
+
+loop122 最好的 checkpoint 是 10M：成功率 18%，平均过门数 1.42，撞毁率 81%，成功样本平均时间 6.991s。时间已经接近目标的 7 秒以内，但成功率远低于目标 60%，而且平均过门数不够高。
+
+20M checkpoint 的平均过门数更高，达到 1.57，但成功率只有 16%，撞毁率 84%，成功时间 7.013s。也就是说，它看起来能多推进一点门，但没有把这种推进稳定转化成更多完赛。
+
+final checkpoint 更差，掉到 12% success、1.42 mean gates、88% crash。整条曲线是早期有一点峰值，后面没有继续变强，说明不能简单继续拉长训练到 60M 或 90M。
+
+和当前全局 best 比，loop122 没有突破。全局 best 仍然是 loop107 的 1M checkpoint：21% success、1.66 mean gates、79% crash、7.578s mean successful time。loop122 的成功时间更快一些，但成功率、过门数和撞毁率都落后。
+
+三个 review 的共同判断是：PPO 本身不是明显“没学动”。W&B 里 KL、clipfrac、entropy、explained variance 等指标都还算活跃，训练 reward 也在涨；问题是这些训练信号没有转成 hard eval 上的稳定过门和完赛。
+
+所以 main-agent 决策是暂停：hold_for_more_analysis。不要继续 v51 as-is，也不要直接按 analyzer 的 reward-number 建议开下一轮。现在更像是 planner 特征本身的语义、尺度、训练/评估一致性，或者 policy 是否真的使用了这些新输入，出了问题。
+
+下一步要诊断的是：checkpoint metadata 是否确实启用了 planner guidance；train/eval 的 planner observation slice 是否一致；planner 特征在验证种子上的分布是否过大、过小、饱和或被裁剪；v51 到底赢了哪些 seed、丢了哪些旧 frontier seed；以及新加的 planner input weights 是否真的从零开始学出了有意义的权重。
+
+一句话总结：v51 是一次合理的“给 PPO 更多路线提示”的结构尝试，但目前提示没有转化成更稳定的 Level3 完赛。暂停不是因为目标达成，而是因为继续训练前必须先弄清楚这些 planner observation 有没有被正确传入、尺度是否合适、以及 PPO 是否真的在用它们。
