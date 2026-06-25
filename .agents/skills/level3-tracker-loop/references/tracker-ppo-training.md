@@ -84,6 +84,30 @@ Start with fixed/easy references. Then randomize start state, endpoint, speed,
 curvature, and point timing. Add disturbance, latency, and domain
 randomization only after nominal tracking works.
 
+## Training Budget Guidance
+
+Tiny runs are plumbing checks, not learning evidence. The local tracker trainer
+defaults to `--total-timesteps 4096`, which is useful for smoke tests only.
+
+Source-backed scale:
+
+- safe-control-gym quadrotor PPO configs use about `1M` environment steps as a
+  small-task/default floor.
+- DATT-style quadrotor trajectory tracking is in the `15M-25M` step range.
+- OmniDrones task examples report `5M` frames for FlyThrough and `20M` frames
+  for Track with large parallel simulation.
+- agile quadrotor PPO tracker/controller comparisons report around `50M`
+  environment interactions.
+- full drone racing, obstacle-rich generalization, or vision-based racing often
+  uses `100M+` interactions.
+
+For this repo, use explicit stage budgets from
+`experiments/level3_ppo_loop/tracker_qualification_gates.json`. Treat the
+default stage budget as the first real maturation chunk, not a failure ceiling.
+If milestone checkpoints are still improving after the default chunk, prefer a
+same-stage extension decision before changing reward, observation, network
+structure, or planner logic.
+
 ## Reward Guidance
 
 Keep tracker reward local and measurable:

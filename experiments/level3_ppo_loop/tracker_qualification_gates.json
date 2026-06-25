@@ -14,6 +14,29 @@
     "generated_artifacts_in_git": false,
     "stage_gate_semantics": "all required_metrics must pass before next_stage is unlocked"
   },
+  "training_policy": {
+    "short_smoke_purpose": "Only verify command plumbing, W&B, checkpoint writing, evaluator loading, finite observations/actions, and gate-checker behavior.",
+    "smoke_timesteps_max": 100000,
+    "do_not_judge_learning_from_smoke": true,
+    "learning_failure_requires_maturation_chunk": true,
+    "allowed_smoke_failure_reasons": [
+      "nan_or_non_finite_action",
+      "nan_or_non_finite_observation",
+      "trainer_exception",
+      "evaluator_exception",
+      "checkpoint_metadata_invalid",
+      "config_level3_toml_changed"
+    ],
+    "milestone_eval_required": true,
+    "default_maturation_is_not_failure_ceiling": true,
+    "research_backed_budget_memory": {
+      "simple_quadrotor_tracking_floor": "1M environment steps is a small-task/default floor, not enough to reject a tracker skill when metrics are still improving.",
+      "reference_tracker_range": "15M-50M environment interactions is common for published quadrotor trajectory-tracking or agile-control PPO-style work.",
+      "full_racing_or_obstacle_generalization_range": "100M+ environment interactions is common for full racing, obstacle-rich, vision, or broad generalization policies."
+    },
+    "extension_rule": "If a stage misses its gate after default maturation but milestone checkpoints or W&B curves are still improving, prefer a same-stage extension chunk after the three-review decision packet instead of immediately changing reward, observation, PPO structure, or declaring the stage failed.",
+    "budget_review_rule": "If changing stage budgets or rejecting a stage for undertraining, run a research/budget review against papers, GitHub configs, W&B curves, and local milestone curves before the decision packet."
+  },
   "stages": [
     {
       "id": "hover",
@@ -21,6 +44,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "hover",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 1000000,
+        "research_extension_timesteps": 5000000,
+        "min_timesteps_before_learning_failure": 1000000,
+        "checkpoint_interval_timesteps": 250000,
+        "evaluate_all_milestones": true
+      },
       "min_eval_episodes": 20,
       "next_stage": "point_hold",
       "required_metrics": [
@@ -40,6 +71,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "point_hold",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 2000000,
+        "research_extension_timesteps": 5000000,
+        "min_timesteps_before_learning_failure": 1000000,
+        "checkpoint_interval_timesteps": 500000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "hover",
       "min_eval_episodes": 20,
       "next_stage": "point_reach",
@@ -61,6 +100,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "point_reach",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 4000000,
+        "research_extension_timesteps": 8000000,
+        "min_timesteps_before_learning_failure": 3000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "point_hold",
       "min_eval_episodes": 20,
       "next_stage": "brake_to_point",
@@ -81,6 +128,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "brake_to_point",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 4000000,
+        "research_extension_timesteps": 10000000,
+        "min_timesteps_before_learning_failure": 3000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "point_reach",
       "min_eval_episodes": 20,
       "next_stage": "line_tracking",
@@ -101,6 +156,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "line_tracking",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 5000000,
+        "research_extension_timesteps": 10000000,
+        "min_timesteps_before_learning_failure": 3000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "brake_to_point",
       "min_eval_episodes": 20,
       "next_stage": "heading_tracking",
@@ -121,6 +184,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "heading_tracking",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 4000000,
+        "research_extension_timesteps": 10000000,
+        "min_timesteps_before_learning_failure": 3000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "line_tracking",
       "min_eval_episodes": 20,
       "next_stage": "multi_point_reference",
@@ -141,6 +212,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "multi_point_reference",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 8000000,
+        "research_extension_timesteps": 15000000,
+        "min_timesteps_before_learning_failure": 5000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "heading_tracking",
       "min_eval_episodes": 20,
       "next_stage": "l_shape_tracking",
@@ -161,6 +240,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "l_shape_tracking",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 8000000,
+        "research_extension_timesteps": 15000000,
+        "min_timesteps_before_learning_failure": 5000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "multi_point_reference",
       "min_eval_episodes": 20,
       "next_stage": "curve_tracking",
@@ -181,6 +268,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "curve_tracking",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 10000000,
+        "research_extension_timesteps": 20000000,
+        "min_timesteps_before_learning_failure": 5000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "l_shape_tracking",
       "min_eval_episodes": 20,
       "next_stage": "zigzag_or_lemniscate_tracking",
@@ -201,6 +296,14 @@
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
       "task": "zigzag_or_lemniscate_tracking",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 12000000,
+        "research_extension_timesteps": 25000000,
+        "min_timesteps_before_learning_failure": 5000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "curve_tracking",
       "min_eval_episodes": 20,
       "next_stage": "gate_aperture_reference",
@@ -221,6 +324,14 @@
       "environment": "gate_aperture",
       "config": "config/level3_tracker_gate_aperture.toml",
       "task": "gate_aperture_reference",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 15000000,
+        "research_extension_timesteps": 25000000,
+        "min_timesteps_before_learning_failure": 5000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
       "prerequisite_stage": "zigzag_or_lemniscate_tracking",
       "min_eval_episodes": 30,
       "next_stage": "planner_integration_smoke",
@@ -241,6 +352,15 @@
       "environment": "level3",
       "config": "config/level3.toml",
       "task": "level3",
+      "training_budget": {
+        "preflight_smoke_timesteps": 0,
+        "default_maturation_timesteps": 0,
+        "research_extension_timesteps": 0,
+        "min_timesteps_before_learning_failure": 0,
+        "checkpoint_interval_timesteps": 0,
+        "evaluate_all_milestones": false,
+        "note": "No new long training in this stage; evaluate the qualified tracker with the deployed upper planner on unchanged config/level3.toml."
+      },
       "prerequisite_stage": "gate_aperture_reference",
       "min_eval_episodes": 20,
       "next_stage": "manual_long_level3_training_review",

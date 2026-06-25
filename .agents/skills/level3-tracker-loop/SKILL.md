@@ -73,6 +73,16 @@ experiments/level3_ppo_loop/research/2026-06-25_v55_tracker_training_environment
 Use it when deciding whether tracker training should run in free space, a
 gate-aperture mini environment, or unchanged `config/level3.toml` smoke.
 
+Current v55 training-budget research:
+
+```text
+experiments/level3_ppo_loop/research/2026-06-25_v55_tracker_training_budget_research.md
+```
+
+Use it when deciding whether a tracker stage has been trained long enough,
+whether to extend the same stage, or whether a failure justifies changing
+reward, curriculum, observation, PPO structure, or planner integration.
+
 Current v55 machine-readable completion gates:
 
 ```text
@@ -263,6 +273,63 @@ must verify unchanged `config/level3.toml`.
 Do not approve planner-driven Level3 long training until all 12 stage gates pass
 and `planner_integration_smoke` passes on unchanged `config/level3.toml`.
 
+## Long-Stage Training Policy
+
+Short smoke runs are only plumbing checks. They verify that the trainer,
+checkpoint writer, W&B logging, evaluator, and gate checker can run. They are
+not enough evidence to decide that PPO did or did not learn a tracker skill.
+
+For each learning stage:
+
+1. Run a short preflight smoke using the stage's
+   `training_budget.preflight_smoke_timesteps` from
+   `experiments/level3_ppo_loop/tracker_qualification_gates.json`.
+2. If smoke fails due to NaNs, non-finite actions/observations, trainer or
+   evaluator errors, invalid checkpoint metadata, or `config/level3.toml`
+   mutation, treat it as a semantic/plumbing failure and use builder/checker.
+3. If smoke is clean, run a bounded stage-maturation chunk with explicit
+   `--total-timesteps`, W&B enabled, and `--checkpoint-interval` from the stage
+   `training_budget`.
+4. Evaluate milestone checkpoints, not only the final checkpoint.
+5. Judge stage completion only from checkpoint-backed milestone evaluation plus
+   the stage gate checker.
+
+Do not mark a learning stage failed based only on `<=100000` timesteps unless
+the failure is a semantic/plumbing failure such as NaNs, non-finite actions,
+broken evaluation, invalid checkpoint metadata, or `config/level3.toml`
+changes. Tiny runs can reject broken code; they cannot reject PPO learning.
+
+Default stage-maturation budgets are machine-readable in the gate spec:
+
+```text
+hover: 1M
+point_hold: 2M
+point_reach, brake_to_point, heading_tracking: 4M
+line_tracking: 5M
+multi_point_reference, l_shape_tracking: 8M
+curve_tracking: 10M
+zigzag_or_lemniscate_tracking: 12M
+gate_aperture_reference: 15M
+planner_integration_smoke: no new training, evaluate only
+```
+
+These are bounded chunks, not infinite training approval. If a stage still
+fails after its default maturation chunk, run the three failure-review subagents
+before changing reward, curriculum, PPO hyperparameters, network size, or the
+budget. At least one review must explicitly answer whether the failure is more
+consistent with undertraining, bad reward/metrics, bad curriculum difficulty,
+PPO instability, or insufficient observation/control authority.
+
+When changing the budget table or rejecting a stage as undertrained, create a
+research/budget packet under `experiments/level3_ppo_loop/research/` using:
+
+- local W&B and milestone curves;
+- local Level2/Level3 step-curve experience;
+- papers and GitHub examples for quadrotor tracking or drone racing PPO;
+- hardware/runtime constraints.
+
+The main agent, not the research subagent, owns the final budget decision.
+
 ## Training Guidance
 
 - Prefer a dedicated tracker qualification script or task mode over direct
@@ -281,7 +348,9 @@ and `planner_integration_smoke` passes on unchanged `config/level3.toml`.
 - During analysis, inspect PPO diagnostics such as approximate KL, clip
   fraction, entropy/action std, value loss, explained variance, and reward
   scale relative to value clipping.
-- Keep training chunks bounded until qualification metrics improve.
+- Keep training chunks bounded but explicit. The trainer default
+  `--total-timesteps 4096` is only a smoke value; every real learning run must
+  set `--total-timesteps` and `--checkpoint-interval`.
 - Use W&B for live PPO metrics and tracker diagnostics.
 - Keep generated checkpoints, smoke JSONs, W&B directories, logs, caches, and
   trajectory dumps out of git.
