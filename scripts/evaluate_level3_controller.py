@@ -315,7 +315,9 @@ def run_controller(
             last_target_before = target_gate
             last_target_after = target_gate
             last_pos = np.asarray(obs["pos"], dtype=np.float64).copy()
+            last_vel = np.asarray(obs["vel"], dtype=np.float64).copy()
             endpoint_pos = last_pos.copy()
+            endpoint_vel = last_vel.copy()
             gates_pos = np.asarray(obs["gates_pos"], dtype=np.float64).copy()
             gates_quat = np.asarray(obs["gates_quat"], dtype=np.float64).copy()
             obstacles_pos = np.asarray(obs["obstacles_pos"], dtype=np.float64).copy()
@@ -329,6 +331,7 @@ def run_controller(
             while True:
                 last_target_before = int(np.asarray(obs["target_gate"]).item())
                 last_pos = np.asarray(obs["pos"], dtype=np.float64).copy()
+                last_vel = np.asarray(obs["vel"], dtype=np.float64).copy()
                 action = np.asarray(controller.compute_control(obs, info), dtype=np.float64)
                 if action.shape != (4,) or not np.isfinite(action).all():
                     finite_action = False
@@ -349,7 +352,9 @@ def run_controller(
                 obs, reward, terminated, truncated, info = env.step(action)
                 steps += 1
                 step_endpoint_pos = np.asarray(obs["pos"], dtype=np.float64).copy()
+                step_endpoint_vel = np.asarray(obs["vel"], dtype=np.float64).copy()
                 endpoint_pos = last_pos.copy() if terminated or truncated else step_endpoint_pos
+                endpoint_vel = last_vel.copy() if terminated or truncated else step_endpoint_vel
                 rot = quat_to_rotmat(np.asarray(obs["quat"], dtype=np.float64))
                 body_z_world_z = np.clip(float(rot[2, 2]), -1.0, 1.0)
                 tilt_values.append(float(np.rad2deg(np.arccos(body_z_world_z))))
@@ -379,6 +384,12 @@ def run_controller(
                 previous_action_norm = action_norm
 
             n_gates = int(np.asarray(obs["gates_pos"]).shape[0])
+            if 0 <= last_target_before < n_gates:
+                target_local_vel = R.from_quat(gates_quat[last_target_before]).inv().apply(
+                    endpoint_vel
+                )
+            else:
+                target_local_vel = np.full(3, float("nan"))
             row = {
                 "controller": label,
                 "controller_file": str(controller_file.resolve().relative_to(ROOT)),
@@ -391,6 +402,10 @@ def run_controller(
                 "finite_action": finite_action,
                 "steps": steps,
                 "time_s": steps / float(config.env.freq),
+                "endpoint_speed_mps": float(np.linalg.norm(endpoint_vel)),
+                "target_local_vx": float(target_local_vel[0]),
+                "target_local_vy": float(target_local_vel[1]),
+                "target_local_vz": float(target_local_vel[2]),
                 "target_gate": last_target_before,
                 "target_gate_after": last_target_after,
                 "total_gates": n_gates,
@@ -454,6 +469,16 @@ def run_controller(
         "p90_time_s_success": safe_percentile([float(row["time_s"]) for row in successes], 90),
         "mean_smooth_penalty_per_step": safe_mean(
             [float(row["smooth_penalty_per_step"]) for row in rows]
+        ),
+        "mean_endpoint_speed_mps": safe_mean([float(row["endpoint_speed_mps"]) for row in rows]),
+        "mean_abs_target_local_vx": safe_mean(
+            [abs(float(row["target_local_vx"])) for row in rows]
+        ),
+        "mean_abs_target_local_vy": safe_mean(
+            [abs(float(row["target_local_vy"])) for row in rows]
+        ),
+        "mean_abs_target_local_vz": safe_mean(
+            [abs(float(row["target_local_vz"])) for row in rows]
         ),
         "mean_action_delta_l2": safe_mean([float(row["mean_action_delta_l2"]) for row in rows]),
         "mean_max_tilt_deg": safe_mean([float(row["max_tilt_deg"]) for row in rows]),
