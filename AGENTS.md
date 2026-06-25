@@ -23,6 +23,12 @@
   reward and W&B curves are diagnostics, not acceptance criteria.
 - Final acceptance and `state.json` `best` must always come from hard eval on
   unchanged `config/level3.toml`.
+- Current completion-first controller objective: the user has approved a
+  non-pure-PPO Level3 controller lane whose first priority is finishing
+  unchanged `config/level3.toml`. For that lane, success rate is the primary
+  screen, and a slower `15s-20s` successful time is acceptable as an
+  intermediate milestone if the built-in 30s environment timeout permits it.
+  Speed optimization comes after reliable completion.
 
 ## Hard Boundaries
 
@@ -34,9 +40,12 @@
   allowed a deterministic planner-guidance module as deployed observation
   computation only. v52 explicitly approves a separate MPPI oracle/teacher loop
   that may output actions during MPPI evaluation and teacher-data generation.
+  The 2026-06-25 completion-first approval explicitly allows a separate
+  non-PPO hybrid/controller lane to output actions directly, including
+  planner/state-machine/MPPI actions, as long as it remains separate from PPO
+  training results and is hard-evaluated on unchanged `config/level3.toml`.
   Do not mix MPPI/planner action output into PPO lanes, add static seed replay,
-  or add inference-time safety shields unless a later explicit structural
-  packet approves them.
+  or weaken the target track.
 - Training curricula and alternate train configs are allowed only as named
   structural lanes. They must still be hard-evaluated on `config/level3.toml`.
 - Do not overwrite `notebooks/train_level3_ppo.ipynb` unless the user explicitly
@@ -171,6 +180,8 @@
   `experiments/level3_ppo_loop/research/2026-06-22_level3_framework_pasted_structural_update.md`.
 - Current MPPI oracle/teacher plan:
   `experiments/level3_ppo_loop/research/2026-06-25_level3_v52_mppi_oracle_teacher_plan.md`.
+- Current completion-first hybrid controller plan:
+  `experiments/level3_ppo_loop/research/2026-06-25_level3_v53_completion_first_hybrid_controller_plan.md`.
 - Roadmap priority order: PPO correctness, clean longer-rollout baseline,
   observation/return normalization, asymmetric privileged critic,
   gate-phase reset curriculum, prioritized level replay, GRU, reward numbers,
@@ -189,12 +200,13 @@
   beat the current global best.
 - The loop122 post-run gate was resolved by:
   `experiments/level3_ppo_loop/decisions/2026-06-25_loop122_hold_for_v51_planner_diagnostics.md`.
-- The immediate next lane is
-  `v52_mppi_oracle_teacher_level3`, approved by:
-  `experiments/level3_ppo_loop/decisions/2026-06-25_launch_v52_mppi_oracle_teacher_loop.md`.
-  This is not PPO training. First implement and hard-evaluate an MPPI oracle on
-  unchanged `config/level3.toml`; only generate PPO teacher data after MPPI
-  evidence justifies it.
+- The immediate next controller lane is
+  `v53_completion_first_hybrid_planner_controller`, approved by:
+  `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
+  This is not PPO training and is not recorded as PPO target success. It may
+  use a direct planner/state-machine/action controller to prioritize safe
+  completion on unchanged `config/level3.toml`, with slower successful times
+  accepted as an intermediate milestone.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
@@ -230,6 +242,9 @@
 - v51 planner-guidance observation did not beat the frontier and must not be
   continued as-is. Further planner-as-observation work requires diagnostics;
   the current next route is the separate v52 MPPI oracle/teacher loop.
+- v52 local MPPI tuning did not produce nonzero success and should not be
+  continued as a weight-tuning exercise. The next route is a completion-first
+  controller redesign, not more local MPPI coefficient sweeps.
 
 ## Git And Generated Files
 

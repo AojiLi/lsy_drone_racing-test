@@ -3,21 +3,26 @@ name: level3-mppi-loop
 description: Use when implementing, evaluating, tuning, or analyzing the Level3 MPPI oracle/teacher loop for drone racing on unchanged config/level3.toml, including MPPI controller work, non-PPO controller evaluation, hard-eval reports, and teacher-data gating for later PPO imitation. Use instead of level3-ppo-loop when the task is about MPPI, sampling-based control, oracle controllers, teacher trajectories, BC/DAgger data from MPPI, or checking whether MPPI can pass Level3 before PPO training.
 ---
 
-# Level3 MPPI Loop
+# Level3 MPPI / Non-PPO Controller Loop
 
-Use this workflow for the separate MPPI oracle/teacher lane. This skill is not
-for ordinary PPO reward tuning or PPO training loops; use `$level3-ppo-loop` for
-PPO-only work.
+Use this workflow for the separate MPPI oracle/teacher lane and for
+completion-first non-PPO Level3 controller work. This skill is not for ordinary
+PPO reward tuning or PPO training loops; use `$level3-ppo-loop` for PPO-only
+work.
 
 ## Contract
 
 - Target config: `config/level3.toml`.
-- Target gate: success rate `>= 0.60` and mean successful time `<= 7.0s`.
-- Current approved lane: `v52_mppi_oracle_teacher_level3`.
+- Racing target gate: success rate `>= 0.60` and mean successful time `<= 7.0s`.
+- Current completion-first lane: `v53_completion_first_hybrid_planner_controller`.
+- Completion-first screen: prioritize `>= 0.60` success on unchanged
+  `config/level3.toml`; `15s-20s` successful time is acceptable as an
+  intermediate milestone if the built-in 30s timeout permits it.
+- Previous MPPI lane: `v52_mppi_oracle_teacher_level3`.
 - Current decision packet:
-  `experiments/level3_ppo_loop/decisions/2026-06-25_launch_v52_mppi_oracle_teacher_loop.md`.
+  `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
 - Current research packet:
-  `experiments/level3_ppo_loop/research/2026-06-25_level3_v52_mppi_oracle_teacher_plan.md`.
+  `experiments/level3_ppo_loop/research/2026-06-25_level3_v53_completion_first_hybrid_controller_plan.md`.
 - Current state file remains:
   `experiments/level3_ppo_loop/state.json`.
 - MPPI-only success is controller/oracle evidence. Do not record it as PPO
@@ -27,8 +32,8 @@ PPO-only work.
 
 - Never edit `config/level3.toml` geometry, gates, obstacles, randomization, or
   validation seed split to make the task easier.
-- MPPI may output `[roll, pitch, yaw, thrust]` only inside this approved
-  MPPI oracle/teacher lane.
+- MPPI, planner, or hybrid state-machine controllers may output
+  `[roll, pitch, yaw, thrust]` only inside the approved non-PPO controller lane.
 - Do not mix MPPI action output, safety shields, fallback controllers, or
   static seed replay into PPO lanes without a new explicit packet.
 - Do not launch PPO BC, DAgger, or fine-tuning until an MPPI analysis packet
@@ -54,7 +59,8 @@ packet win.
 
 1. **Implementation/preflight**
    - Add or update the smallest useful MPPI oracle controller, expected path:
-     `lsy_drone_racing/control/mppi_level3_oracle.py`.
+     `lsy_drone_racing/control/mppi_level3_oracle.py` or
+     `lsy_drone_racing/control/level3_hybrid_planner_controller.py`.
    - Add or adapt a non-PPO controller evaluator, expected path:
      `scripts/evaluate_level3_controller.py`.
    - Keep metrics aligned with the existing hard evaluator: success, mean
@@ -89,6 +95,20 @@ packet win.
      `launch_named_structural_lane`, or `start_teacher_dataset_generation`.
    - Write a plain Chinese reader note under `drone_notes/level3_loops/`.
    - Update state, commit intended small files, and push to `aojili-test/main`.
+
+## Completion-First Hybrid Defaults
+
+The first v53 controller should be slower and more explicit than PPO:
+
+- takeoff/stabilize;
+- cruise to a pre-gate waypoint;
+- slow down near local visibility range;
+- align in the active gate frame;
+- choose an obstacle-aware aperture point;
+- cross the gate only after alignment;
+- recover after crossing before accelerating to the next gate.
+
+Direct action output is allowed in this lane. Keep it separate from PPO metrics.
 
 ## MPPI Design Defaults
 
