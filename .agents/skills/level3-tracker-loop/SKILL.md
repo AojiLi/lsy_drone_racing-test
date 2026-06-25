@@ -87,6 +87,15 @@ pixi run -e tests python scripts/check_level3_tracker_stage_gate.py \
   --metrics-json <stage_eval_metrics.json>
 ```
 
+Generate the stage metrics JSON with:
+
+```bash
+pixi run -e gpu python scripts/evaluate_level3_tracker_stage.py \
+  --stage <stage_id> \
+  --checkpoint <tracker_checkpoint.ckpt> \
+  --output <stage_eval_metrics.json>
+```
+
 When starting any stage after `hover`, add `--require-prerequisites` and pass a
 history JSON that marks prior stages as passed. The stage checker must pass
 before the next stage is unlocked.
@@ -207,6 +216,52 @@ If these fail, write a hold packet. Do not give a fake long-training command.
 8. Write a plain Chinese reader note under `drone_notes/level3_loops/`.
 9. Update `state.json`.
 10. Commit intended small files and push to `aojili-test/main`.
+
+## Autonomous 12-Stage Goal Protocol
+
+When the user launches a `/goal` for the full tracker ladder, run exactly one
+stage at a time:
+
+```text
+train current stage
+-> evaluate current stage with scripts/evaluate_level3_tracker_stage.py
+-> check current stage with scripts/check_level3_tracker_stage_gate.py
+-> if pass, update state and unlock next stage
+-> if fail, analyze, change the smallest useful thing, and retry the same stage
+```
+
+The current stage is the first item in
+`experiments/level3_ppo_loop/tracker_qualification_gates.json` that is not
+listed in `state.json` `reference_tracker_ppo.v55_stage_gates.passed_stages`.
+Never skip a stage unless a new decision packet explicitly justifies it.
+
+On a failed stage gate, spawn exactly three analysis subagents before changing
+training structure or reward:
+
+- `tracker_eval_metrics`: inspect the stage metrics JSON, gate failures, episode
+  rows, crash/termination patterns, overshoot, terminal speed, and action
+  smoothness.
+- `tracker_wandb_ppo`: inspect W&B curves for the stage run: episode return,
+  tracker reward components, policy loss, value loss, entropy, clip fraction,
+  and signs of undertraining or PPO instability.
+- `tracker_structure_research`: inspect whether the fix should be more
+  training time, reward numbers, curriculum difficulty, observation features,
+  PPO hyperparameters, or a small code/config correction. Use local evidence
+  first and external research only when it materially changes the decision.
+
+The main agent must synthesize those reviews into a decision packet under
+`experiments/level3_ppo_loop/decisions/` before retrying. Allowed decisions are:
+`continue_same_stage_more_steps`, `change_tracker_reward_numbers`,
+`change_tracker_curriculum_or_eval`, `launch_tracker_structural_fix`, or
+`hold_for_user_review`.
+
+If the decision changes observation layout, reward semantics, trainer behavior,
+evaluator semantics, controller behavior, or loop orchestration, use the
+builder/checker gate before training again. The checker must be read-only and
+must verify unchanged `config/level3.toml`.
+
+Do not approve planner-driven Level3 long training until all 12 stage gates pass
+and `planner_integration_smoke` passes on unchanged `config/level3.toml`.
 
 ## Training Guidance
 

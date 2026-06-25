@@ -588,7 +588,7 @@ class ReferenceTrajectoryGenerator:
         gate_local = gate_rot.T @ (pos - gate_pos)
         aperture = self._aperture_yz(obs, target_gate, gate_rot)
 
-        if self.task == "gate_aperture":
+        if self.task == "gate_aperture_reference":
             phase, phase_id, local_point, speed = self._gate_aperture_phase(gate_local, aperture)
         else:
             phase, phase_id, local_point, speed = self._level3_phase(gate_local, aperture)

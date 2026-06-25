@@ -48,6 +48,19 @@ def test_free_space_reference_ignores_dummy_gate_and_obstacle() -> None:
     assert reference.desired_speed > 0.0
 
 
+def test_gate_aperture_reference_uses_gate_aperture_phase() -> None:
+    obs = sample_obs()
+    obs["pos"] = np.array([0.0, 0.0, 0.75], dtype=np.float32)
+    obs["gates_pos"] = np.array([[0.5, 0.0, 0.75]], dtype=np.float32)
+    obs["obstacles_visited"] = np.array([False])
+    generator = ReferenceTrajectoryGenerator("gate_aperture_reference")
+    generator.reset(obs)
+    reference = generator.reference(obs)
+
+    assert reference.phase == "align"
+    assert reference.phase_id == 3
+
+
 def test_tracker_training_configs_resolve_modes() -> None:
     free_config = load_config(ROOT / "config/level3_tracker_free_space.toml")
     gate_config = load_config(ROOT / "config/level3_tracker_gate_aperture.toml")
