@@ -351,6 +351,14 @@ def point_on_polyline(
     return np.asarray(points[-1], dtype=np.float32), last_direction.astype(np.float32)
 
 
+def polyline_length(points: list[np.ndarray]) -> float:
+    """Return total length of a polyline."""
+    total = 0.0
+    for start, end in zip(points[:-1], points[1:], strict=True):
+        total += float(np.linalg.norm(np.asarray(end) - np.asarray(start)))
+    return total
+
+
 def tracker_history_row(obs: dict[str, Any]) -> np.ndarray:
     """Return the compact local-state row used in the tracker history channels."""
     quat = np.asarray(obs["quat"], dtype=np.float32)
@@ -555,6 +563,21 @@ class ReferenceTrajectoryGenerator:
         if len(valid_points) < 2:
             raise ValueError("polyline tracker task requires at least two points")
         distance_along = max(0.0, (self._step - 1) * self.dt * float(speed))
+        total_length = polyline_length(valid_points)
+        if distance_along >= total_length:
+            terminal = valid_points[-1]
+            direction = safe_normalize(valid_points[-1] - valid_points[-2])
+            return self._make_reference(
+                obs,
+                terminal,
+                terminal,
+                terminal,
+                "terminal_hold",
+                0,
+                0.0,
+                desired_heading=direction,
+                use_gate_context=False,
+            )
         target, direction = point_on_polyline(valid_points, distance_along)
         next_point, _ = point_on_polyline(valid_points, distance_along + 0.12)
         lookahead, _ = point_on_polyline(valid_points, distance_along + 0.28)

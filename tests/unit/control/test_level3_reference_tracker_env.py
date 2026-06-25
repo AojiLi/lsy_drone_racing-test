@@ -50,6 +50,28 @@ def test_free_space_reference_ignores_dummy_gate_and_obstacle() -> None:
     assert reference.desired_speed > 0.0
 
 
+def test_polyline_reference_terminal_hold_zeroes_desired_speed() -> None:
+    obs = sample_obs()
+    obs["pos"] = np.array([0.9, 0.0, 0.65], dtype=np.float32)
+    generator = ReferenceTrajectoryGenerator("line_tracking")
+    generator.reset(obs)
+
+    reference = None
+    steps_past_line_end = int(np.ceil(0.9 / (0.38 * generator.dt))) + 3
+    for _ in range(steps_past_line_end):
+        reference = generator.reference(obs)
+
+    assert reference is not None
+    assert reference.phase == "terminal_hold"
+    assert reference.desired_speed == pytest.approx(0.0)
+    np.testing.assert_allclose(reference.desired_velocity, np.zeros(3), atol=1e-6)
+    np.testing.assert_allclose(
+        reference.current_point,
+        np.array([0.9, 0.0, 0.65], dtype=np.float32),
+        atol=1e-6,
+    )
+
+
 def test_hover_reference_guides_toward_airborne_anchor_until_near() -> None:
     obs = sample_obs()
     generator = ReferenceTrajectoryGenerator("hover")
