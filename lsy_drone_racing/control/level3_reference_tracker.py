@@ -66,7 +66,7 @@ REFERENCE_TRACKER_REWARD_DEFAULTS = {
     "action_coef": 0.02,
     "action_delta_coef": 0.04,
     "progress_bonus": 0.3,
-    "crash_penalty": 20.0,
+    "crash_penalty": 250.0,
 }
 
 
@@ -405,10 +405,13 @@ class ReferenceTrajectoryGenerator:
         """Reset task anchors at episode start."""
         self._step = 0
         pos = np.asarray(obs["pos"], dtype=np.float32)
-        self._origin = np.array(
-            [pos[0], pos[1], np.clip(max(0.65, pos[2] + 0.45), 0.55, 1.25)],
-            dtype=np.float32,
-        )
+        if self.task in FREE_SPACE_TRACKER_TASKS:
+            self._origin = np.array([0.0, 0.0, 0.65], dtype=np.float32)
+        else:
+            self._origin = np.array(
+                [pos[0], pos[1], np.clip(max(0.65, pos[2] + 0.45), 0.55, 1.25)],
+                dtype=np.float32,
+            )
         if self.task == "hover":
             self._anchor = self._origin.copy()
         elif self.task in {"point_hold", "point_reach", "brake_to_point"}:
@@ -462,14 +465,21 @@ class ReferenceTrajectoryGenerator:
 
     def _hover_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
         target = np.asarray(self._anchor, dtype=np.float32)
+        pos = np.asarray(obs["pos"], dtype=np.float32)
+        error = target - pos
+        dist = float(np.linalg.norm(error))
+        speed = 0.0 if dist < 0.10 else min(0.35, max(0.06, 0.9 * dist))
+        phase = "hover" if speed == 0.0 else ("slowdown" if dist < 0.22 else "cruise")
+        phase_id = 0 if phase == "hover" else (2 if phase == "slowdown" else 1)
+        direction = safe_normalize(error)
         return self._make_reference(
             obs,
             target,
-            target,
-            target,
-            "hover",
-            0,
-            0.0,
+            target + direction * 0.06,
+            target + direction * 0.12,
+            phase,
+            phase_id,
+            speed,
             use_gate_context=False,
         )
 

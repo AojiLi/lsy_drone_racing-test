@@ -50,6 +50,24 @@ def test_free_space_reference_ignores_dummy_gate_and_obstacle() -> None:
     assert reference.desired_speed > 0.0
 
 
+def test_hover_reference_guides_toward_airborne_anchor_until_near() -> None:
+    obs = sample_obs()
+    generator = ReferenceTrajectoryGenerator("hover")
+    generator.reset(obs)
+
+    reference = generator.reference(obs)
+    assert reference.current_point[2] == pytest.approx(0.65)
+    assert reference.desired_speed > 0.0
+    assert reference.desired_velocity[2] > 0.0
+    assert reference.phase in {"cruise", "slowdown"}
+
+    obs["pos"] = reference.current_point.copy()
+    near_reference = generator.reference(obs)
+    assert near_reference.desired_speed == pytest.approx(0.0)
+    np.testing.assert_allclose(near_reference.desired_velocity, np.zeros(3), atol=1e-6)
+    assert near_reference.phase == "hover"
+
+
 def test_gate_aperture_reference_uses_gate_aperture_phase() -> None:
     obs = sample_obs()
     obs["pos"] = np.array([0.0, 0.0, 0.75], dtype=np.float32)
@@ -68,6 +86,11 @@ def test_tracker_training_configs_resolve_modes() -> None:
     gate_config = load_config(ROOT / "config/level3_tracker_gate_aperture.toml")
 
     assert tracker_env_mode_from_config(free_config, "line_tracking") == "free_space"
+    np.testing.assert_allclose(
+        np.asarray(free_config.env.track.drones[0]["pos"], dtype=np.float32),
+        np.array([0.0, 0.0, 0.65], dtype=np.float32),
+        atol=1e-6,
+    )
     assert (
         tracker_env_mode_from_config(gate_config, "gate_aperture_reference")
         == "gate_aperture"

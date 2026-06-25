@@ -239,6 +239,8 @@ def train(args: argparse.Namespace) -> Path:
 
         batch_indices = np.arange(batch_size)
         clipfracs: list[float] = []
+        approx_kls: list[float] = []
+        old_approx_kls: list[float] = []
         for _epoch in range(args.update_epochs):
             np.random.shuffle(batch_indices)
             for start in range(0, batch_size, minibatch_size):
@@ -253,6 +255,8 @@ def train(args: argparse.Namespace) -> Path:
                     clipfracs.append(
                         float(((ratio - 1.0).abs() > args.clip_coef).float().mean().item())
                     )
+                    old_approx_kls.append(float((-logratio).mean().item()))
+                    approx_kls.append(float(((ratio - 1.0) - logratio).mean().item()))
                 mb_advantages = b_advantages[mb_idx]
                 mb_advantages = (mb_advantages - mb_advantages.mean()) / (
                     mb_advantages.std(unbiased=False) + 1e-8
@@ -274,6 +278,14 @@ def train(args: argparse.Namespace) -> Path:
 
         if args.wandb_enabled:
             sps = int(global_step / max(time.time() - start_time, 1e-6))
+            y_pred = values_buf.reshape(batch_size).detach()
+            y_true = b_returns.detach()
+            var_y = torch.var(y_true, unbiased=False)
+            explained_variance = (
+                torch.tensor(0.0, device=device)
+                if var_y <= 1e-8
+                else 1.0 - torch.var(y_true - y_pred, unbiased=False) / var_y
+            )
             wandb.log(
                 {
                     "global_step": global_step,
@@ -282,6 +294,11 @@ def train(args: argparse.Namespace) -> Path:
                     "train/policy_loss": float(pg_loss.item()),
                     "train/entropy": float(entropy_loss.item()),
                     "train/clipfrac": float(np.mean(clipfracs)) if clipfracs else 0.0,
+                    "train/approx_kl": float(np.mean(approx_kls)) if approx_kls else 0.0,
+                    "train/old_approx_kl": float(np.mean(old_approx_kls))
+                    if old_approx_kls
+                    else 0.0,
+                    "train/explained_variance": float(explained_variance.item()),
                     "train/SPS": sps,
                 }
             )
