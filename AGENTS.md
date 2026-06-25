@@ -28,12 +28,13 @@
   unchanged `config/level3.toml`. For that lane, success rate is the primary
   screen, and a slower `15s-20s` successful time is acceptable as an
   intermediate milestone if the built-in 30s environment timeout permits it.
-  Speed optimization comes after reliable completion. The preferred v53
-  architecture is now an upper planner/MPPI/geometric module that generates a
-  short reference trajectory, with PPO or a low-level tracker following that
-  trajectory. The selected first tracker is the stable Level2 PPO checkpoint
-  wrapped through a virtual local-gate observation adapter:
-  `lsy_drone_racing/control/checkpoints/level2_DR_latencyobs_middlemanuever/level2_DR_latencyobs_middlemanuever_final.ckpt`.
+  Speed optimization comes after reliable completion. The preferred next
+  architecture is v54: an upper planner/geometric module generates a short
+  local reference trajectory, and a native reference-tracking PPO low-level
+  controller follows that trajectory. The v53 attempt to wrap the stable
+  Level2 PPO checkpoint through a virtual local-gate adapter was action-finite
+  but failed first-gate progress on seeds `101-105`, so it is no longer the
+  primary route.
 
 ## Hard Boundaries
 
@@ -187,6 +188,8 @@
   `experiments/level3_ppo_loop/research/2026-06-25_level3_v52_mppi_oracle_teacher_plan.md`.
 - Current completion-first hybrid controller plan:
   `experiments/level3_ppo_loop/research/2026-06-25_level3_v53_completion_first_hybrid_controller_plan.md`.
+- Current reference-tracker PPO plan:
+  `experiments/level3_ppo_loop/research/2026-06-25_level3_v54_reference_tracker_ppo_plan.md`.
 - Roadmap priority order: PPO correctness, clean longer-rollout baseline,
   observation/return normalization, asymmetric privileged critic,
   gate-phase reset curriculum, prioritized level replay, GRU, reward numbers,
@@ -205,15 +208,20 @@
   beat the current global best.
 - The loop122 post-run gate was resolved by:
   `experiments/level3_ppo_loop/decisions/2026-06-25_loop122_hold_for_v51_planner_diagnostics.md`.
-- The immediate next controller lane is
-  `v53_completion_first_hybrid_planner_controller`, approved by:
-  `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
-  This is not PPO training and is not recorded as PPO target success. It may
-  use an upper planner/state-machine/MPPI module to generate local reference
-  trajectories and a PPO/low-level tracker to follow them. The preferred first
-  tracker path is planner reference -> virtual Level2 gate/observation adapter
-  -> Level2 PPO tracker -> `[roll, pitch, yaw, thrust]`. Direct non-PPO action
-  output is allowed inside this lane for tracker baselines.
+- v53 completion-first hybrid controller smoke implemented planner reference
+  -> virtual Level2 gate adapter -> Level2 PPO tracker. It was action-finite
+  but scored `0%` success and `0.00` mean gates on seeds `101-105`; do not
+  promote it to dev `1-20` or continue virtual-gate adapter tuning as the
+  primary route without a new explicit decision.
+- The immediate next controller/training-support lane is
+  `v54_reference_trajectory_tracker_ppo`, approved by:
+  `experiments/level3_ppo_loop/decisions/2026-06-25_launch_v54_reference_tracker_ppo.md`.
+  This lane trains a native PPO low-level tracker for hover, point tracking,
+  local trajectory tracking, heading alignment, gate-aperture centering, and
+  obstacle-aware low-speed control. The upper planner owns route choice,
+  nominal far-field guidance, slowdown near `0.7m-1.0m`, visible-geometry
+  replanning, and reference trajectory generation. Do not launch long training
+  until builder/checker support and hover/point/gate-aperture smoke checks pass.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

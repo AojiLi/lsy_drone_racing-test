@@ -14,21 +14,20 @@ work.
 
 - Target config: `config/level3.toml`.
 - Racing target gate: success rate `>= 0.60` and mean successful time `<= 7.0s`.
-- Current completion-first lane: `v53_completion_first_hybrid_planner_controller`.
+- Current completion-first non-PPO lane status: v53 virtual Level2-gate adapter
+  smoke was action-finite but failed first-gate progress on seeds `101-105`.
+  It is not the primary next route.
 - Completion-first screen: prioritize `>= 0.60` success on unchanged
   `config/level3.toml`; `15s-20s` successful time is acceptable as an
   intermediate milestone if the built-in 30s timeout permits it.
-- Preferred v53 architecture: upper planner/MPPI/geometric route module
-  generates a short reference trajectory; PPO or a low-level tracker follows
-  the trajectory and outputs `[roll, pitch, yaw, thrust]`.
-- Selected first tracker: wrap the stable Level2 PPO checkpoint through a
-  virtual local-gate observation adapter:
-  `lsy_drone_racing/control/checkpoints/level2_DR_latencyobs_middlemanuever/level2_DR_latencyobs_middlemanuever_final.ckpt`.
+- Current preferred route is v54 under `$level3-ppo-loop`: an upper planner
+  generates a short reference trajectory, and a native reference-tracking PPO
+  low-level controller follows it.
 - Previous MPPI lane: `v52_mppi_oracle_teacher_level3`.
-- Current decision packet:
-  `experiments/level3_ppo_loop/decisions/2026-06-25_user_approves_completion_first_hybrid_controller.md`.
-- Current research packet:
-  `experiments/level3_ppo_loop/research/2026-06-25_level3_v53_completion_first_hybrid_controller_plan.md`.
+- Current v54 decision packet:
+  `experiments/level3_ppo_loop/decisions/2026-06-25_launch_v54_reference_tracker_ppo.md`.
+- Current v54 research packet:
+  `experiments/level3_ppo_loop/research/2026-06-25_level3_v54_reference_tracker_ppo_plan.md`.
 - Current state file remains:
   `experiments/level3_ppo_loop/state.json`.
 - MPPI-only success is controller/oracle evidence. Do not record it as PPO
@@ -55,8 +54,8 @@ Before acting, read:
 1. `AGENTS.md`;
 2. this skill;
 3. `experiments/level3_ppo_loop/state.json`;
-4. the v52 decision packet;
-5. the v52 research packet.
+4. the latest state decision packet;
+5. the relevant v52/v53/v54 research packet for the requested lane.
 
 If these conflict, `config/level3.toml` immutability and the latest state/decision
 packet win.
@@ -104,7 +103,9 @@ packet win.
 
 ## Completion-First Hybrid Defaults
 
-The first v53 controller should be slower and more explicit than pure PPO:
+The v53 virtual-gate adapter is no longer the primary route. If explicitly
+revisited, the controller should still be slower and more explicit than pure
+PPO:
 
 - takeoff/stabilize;
 - cruise to a pre-gate waypoint;

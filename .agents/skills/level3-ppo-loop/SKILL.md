@@ -152,10 +152,19 @@ trajectories, or MPPI-generated PPO imitation data, use
   update-pressure settings, and hard-evaluates on unchanged `config/level3.toml`.
   Its best checkpoint was 10M with `18%` success, `1.42` mean gates, `81%`
   crash, and `6.991s` mean successful time. It did not beat the frontier.
-- The next non-PPO structural lane is `v52_mppi_oracle_teacher_level3`, handled
-  by `.agents/skills/level3-mppi-loop/SKILL.md`. Do not use this PPO skill to
-  implement or evaluate MPPI; return to this skill only after an MPPI analysis
-  packet explicitly opens a PPO imitation/fine-tuning lane.
+- v52/v53 non-PPO controller exploration did not produce a promoted controller.
+  The v53 virtual Level2-gate adapter was action-finite on seeds `101-105`, but
+  scored `0%` success and `0.00` mean gates. Do not continue virtual-gate
+  adapter tuning as the primary route.
+- The immediate next PPO structural lane is
+  `v54_reference_trajectory_tracker_ppo`, approved by
+  `experiments/level3_ppo_loop/decisions/2026-06-25_launch_v54_reference_tracker_ppo.md`.
+  This lane trains a native low-level PPO tracker for hover, point tracking,
+  local reference trajectory tracking, heading alignment, gate-aperture
+  centering, and obstacle-aware low-speed control. The upper planner owns route
+  choice, slowdown near `0.7m-1.0m`, visible-geometry replanning, and reference
+  generation. Do not launch long training until builder/checker support and
+  hover/point/gate-aperture smoke checks pass.
 - Early checkpoints are diagnostic health checks, not growth exams. If a lane
   creates a `1M` checkpoint, use it only for NaNs, action/observation mismatch,
   checkpoint metadata, W&B logging, PPO health, or catastrophic zero-gate
