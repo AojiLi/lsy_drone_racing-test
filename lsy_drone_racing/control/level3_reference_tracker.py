@@ -578,6 +578,110 @@ def _mean_diagnostics(rows: list[dict[str, float]]) -> dict[str, float]:
     return {key: float(np.mean([row[key] for row in rows if key in row])) for key in keys}
 
 
+def _safe_normalize_batch(vectors: np.ndarray, fallback: np.ndarray | None = None) -> np.ndarray:
+    """Normalize a batch of 3D vectors with per-row fallbacks for near-zero rows."""
+    vec = np.asarray(vectors, dtype=np.float32)
+    if vec.ndim != 2 or vec.shape[1] != 3:
+        raise ValueError(f"Expected vector batch with shape (N, 3), got {vec.shape}")
+    if fallback is None:
+        fallback_arr = np.tile(np.array([1.0, 0.0, 0.0], dtype=np.float32), (vec.shape[0], 1))
+    else:
+        fallback_arr = np.asarray(fallback, dtype=np.float32)
+        if fallback_arr.shape == (3,):
+            fallback_arr = np.tile(fallback_arr, (vec.shape[0], 1))
+        if fallback_arr.shape != vec.shape:
+            raise ValueError(f"Expected fallback shape {vec.shape}, got {fallback_arr.shape}")
+    norms = np.linalg.norm(vec, axis=1, keepdims=True)
+    fallback_norms = np.maximum(np.linalg.norm(fallback_arr, axis=1, keepdims=True), 1e-6)
+    return np.where(norms > 1e-6, vec / np.maximum(norms, 1e-6), fallback_arr / fallback_norms)
+
+
+def _quat_to_rotmat_batch(quats: np.ndarray) -> np.ndarray:
+    """Convert a batch of xyzw quaternions into body-to-world rotation matrices."""
+    quat = np.asarray(quats, dtype=np.float32)
+    if quat.ndim != 2 or quat.shape[1] != 4:
+        raise ValueError(f"Expected quaternion batch with shape (N, 4), got {quat.shape}")
+    x, y, z, w = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
+    xx, yy, zz = x * x, y * y, z * z
+    xy, xz, yz = x * y, x * z, y * z
+    wx, wy, wz = w * x, w * y, w * z
+    rot = np.empty((quat.shape[0], 3, 3), dtype=np.float32)
+    rot[:, 0, 0] = 1.0 - 2.0 * (yy + zz)
+    rot[:, 0, 1] = 2.0 * (xy - wz)
+    rot[:, 0, 2] = 2.0 * (xz + wy)
+    rot[:, 1, 0] = 2.0 * (xy + wz)
+    rot[:, 1, 1] = 1.0 - 2.0 * (xx + zz)
+    rot[:, 1, 2] = 2.0 * (yz - wx)
+    rot[:, 2, 0] = 2.0 * (xz - wy)
+    rot[:, 2, 1] = 2.0 * (yz + wx)
+    rot[:, 2, 2] = 1.0 - 2.0 * (xx + yy)
+    return rot
+
+
+def _tracker_history_rows_batch(obs: dict[str, Any]) -> np.ndarray:
+    """Return compact local-state history rows for a vector observation batch."""
+    quat = np.asarray(obs["quat"], dtype=np.float32)
+    rot_t = np.swapaxes(_quat_to_rotmat_batch(quat), 1, 2)
+    vel_body = np.einsum("nij,nj->ni", rot_t, np.asarray(obs["vel"], dtype=np.float32))
+    return np.concatenate(
+        [
+            np.asarray(obs["pos"], dtype=np.float32)[:, 2:3],
+            vel_body.astype(np.float32),
+            np.asarray(obs["ang_vel"], dtype=np.float32),
+        ],
+        axis=1,
+    ).astype(np.float32)
+
+
+def _three_point_polyline_lengths(points: np.ndarray) -> np.ndarray:
+    """Return total lengths for a batch of three-point polylines."""
+    segments = (
+        np.asarray(points, dtype=np.float32)[:, 1:] - np.asarray(points, dtype=np.float32)[:, :-1]
+    )
+    return np.sum(np.linalg.norm(segments, axis=2), axis=1).astype(np.float32)
+
+
+def _point_on_three_point_polyline_batch(
+    points: np.ndarray, distance_along: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return batched points and directions on three-point polylines."""
+    pts = np.asarray(points, dtype=np.float32)
+    distance = np.asarray(distance_along, dtype=np.float32)
+    if pts.ndim != 3 or pts.shape[1:] != (3, 3):
+        raise ValueError(f"Expected points shape (N, 3, 3), got {pts.shape}")
+    seg0 = pts[:, 1] - pts[:, 0]
+    seg1 = pts[:, 2] - pts[:, 1]
+    len0 = np.linalg.norm(seg0, axis=1)
+    len1 = np.linalg.norm(seg1, axis=1)
+    dir0 = _safe_normalize_batch(seg0)
+    dir1 = _safe_normalize_batch(seg1, fallback=dir0)
+    total = len0 + len1
+    clamped = np.clip(distance, 0.0, total)
+    use_first = clamped <= len0
+    first_remaining = np.minimum(clamped, len0)
+    second_remaining = np.minimum(np.maximum(clamped - len0, 0.0), len1)
+    first_point = pts[:, 0] + dir0 * first_remaining[:, None]
+    second_point = pts[:, 1] + dir1 * second_remaining[:, None]
+    point = np.where(use_first[:, None], first_point, second_point)
+    direction = np.where(use_first[:, None], dir0, dir1)
+    return point.astype(np.float32), direction.astype(np.float32)
+
+
+def _command_polyline_reference_batch(
+    points: np.ndarray, *, distance: np.ndarray, speed: np.ndarray, dt: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return v60 current/next/lookahead references for batched command plans."""
+    length = _three_point_polyline_lengths(points)
+    distance = np.minimum(np.asarray(distance, dtype=np.float32), length)
+    speed = np.asarray(speed, dtype=np.float32)
+    next_distance = np.minimum(length, distance + np.maximum(speed * float(dt) * 4.0, 0.015))
+    lookahead_distance = np.minimum(length, distance + np.maximum(speed * float(dt) * 10.0, 0.040))
+    current, heading = _point_on_three_point_polyline_batch(points, distance)
+    next_point, _ = _point_on_three_point_polyline_batch(points, next_distance)
+    lookahead, _ = _point_on_three_point_polyline_batch(points, lookahead_distance)
+    return current, next_point, lookahead, heading
+
+
 class ReferenceTrajectoryGenerator:
     """Generate local reference targets for tracker training and Level3 inference."""
 
@@ -2180,6 +2284,16 @@ class ReferenceTrackerVectorEnv:
         self._memories: list[TrackerMemory | None] = [None] * self.num_envs
         self._steps = np.zeros(self.num_envs, dtype=np.int32)
         self.last_diagnostics: dict[str, float] = {}
+        self._fast_command_enabled = (
+            self.task == "reference_command_no_gate_reward"
+            and self.observation_layout == COMMAND_REFERENCE_TRACKER_LAYOUT
+            and isinstance(self.reward_model, ReferenceCommandReward)
+        )
+        self._fast_command_steps = np.zeros(self.num_envs, dtype=np.int32)
+        self._fast_last_action_norm = np.zeros((self.num_envs, 4), dtype=np.float32)
+        self._fast_history: np.ndarray | None = None
+        self._fast_reference: dict[str, np.ndarray] | None = None
+        self._fast_plans: dict[str, np.ndarray] | None = None
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -2188,6 +2302,12 @@ class ReferenceTrackerVectorEnv:
         raw_obs, info = self.base_env.reset(seed=seed, options=options)
         raw_obs = _to_numpy_tree(raw_obs)
         info = _to_numpy_tree(info)
+        if self._fast_command_enabled:
+            obs_batch = self._reset_fast_command_state(raw_obs, seed=seed)
+            self._raw_obs = raw_obs
+            self._steps = np.zeros(self.num_envs, dtype=np.int32)
+            self.last_diagnostics = {}
+            return obs_batch, info
         rows = []
         for env_idx in range(self.num_envs):
             obs_i = _tree_index(raw_obs, env_idx)
@@ -2225,6 +2345,16 @@ class ReferenceTrackerVectorEnv:
         truncations = np.asarray(truncated, dtype=bool).reshape(self.num_envs)
         self._steps += 1
         truncations = truncations | (self._steps >= self.max_episode_steps)
+
+        if self._fast_command_enabled:
+            return self._step_fast_command(
+                prev_obs_batch=prev_obs_batch,
+                raw_obs=raw_obs,
+                info=info,
+                action_norm=action_norm,
+                terminations=terminations,
+                truncations=truncations,
+            )
 
         rewards = np.zeros(self.num_envs, dtype=np.float32)
         obs_rows = []
@@ -2275,6 +2405,578 @@ class ReferenceTrackerVectorEnv:
             truncations.astype(bool),
             info,
         )
+
+    def _reset_fast_command_state(
+        self, raw_obs: dict[str, Any], *, seed: int | None = None
+    ) -> np.ndarray:
+        """Reset vectorized v60 command-tracker state without per-step object loops."""
+        self._fast_command_steps = np.zeros(self.num_envs, dtype=np.int32)
+        self._fast_last_action_norm = np.zeros((self.num_envs, 4), dtype=np.float32)
+        history_row = _tracker_history_rows_batch(raw_obs)
+        self._fast_history = np.repeat(
+            history_row[:, None, :], REFERENCE_TRACKER_HISTORY, axis=1
+        ).astype(np.float32)
+        self._ensure_fast_plan_arrays()
+        self._reset_fast_command_indices(np.arange(self.num_envs), raw_obs, seed=seed)
+        self._fast_reference = self._fast_command_reference_batch()
+        return self._fast_command_observation_batch(raw_obs, self._fast_reference)
+
+    def _ensure_fast_plan_arrays(self) -> None:
+        """Allocate batched command-plan arrays used by the v60 fast path."""
+        if self._fast_plans is not None:
+            return
+        self._fast_plans = {
+            "pass_points": np.zeros((self.num_envs, 3, 3), dtype=np.float32),
+            "brake_point": np.zeros((self.num_envs, 3), dtype=np.float32),
+            "slow_points": np.zeros((self.num_envs, 3, 3), dtype=np.float32),
+            "recover_points": np.zeros((self.num_envs, 3, 3), dtype=np.float32),
+            "pass_speed": np.zeros(self.num_envs, dtype=np.float32),
+            "brake_entry_speed": np.zeros(self.num_envs, dtype=np.float32),
+            "hold_speed": np.zeros(self.num_envs, dtype=np.float32),
+            "slow_speed": np.zeros(self.num_envs, dtype=np.float32),
+            "recover_speed": np.zeros(self.num_envs, dtype=np.float32),
+            "pass_steps": np.zeros(self.num_envs, dtype=np.int32),
+            "pass_cruise_steps": np.zeros(self.num_envs, dtype=np.int32),
+            "pass_decel_steps": np.zeros(self.num_envs, dtype=np.int32),
+            "pass_decel_start_m": np.zeros(self.num_envs, dtype=np.float32),
+            "hold_steps": np.zeros(self.num_envs, dtype=np.int32),
+            "slow_steps": np.zeros(self.num_envs, dtype=np.int32),
+            "recover_steps": np.zeros(self.num_envs, dtype=np.int32),
+            "total_steps": np.zeros(self.num_envs, dtype=np.int32),
+            "approach_heading": np.zeros((self.num_envs, 3), dtype=np.float32),
+        }
+
+    def _reset_fast_command_indices(
+        self, indices: np.ndarray, raw_obs: dict[str, Any], *, seed: int | None = None
+    ) -> None:
+        """Resample command plans for a small set of reset vector worlds."""
+        self._ensure_fast_plan_arrays()
+        assert self._fast_plans is not None
+        for env_idx in np.asarray(indices, dtype=np.int32):
+            obs_i = _tree_index(raw_obs, int(env_idx))
+            generator_seed = None if seed is None else int(seed) + int(env_idx) * 10007
+            self.generators[int(env_idx)].reset(obs_i, seed=generator_seed)
+            plan = self.generators[int(env_idx)]._command_plan  # noqa: SLF001
+            if plan is None:
+                raise RuntimeError("v60 fast command generator did not create a plan.")
+            self._assign_fast_command_plan(int(env_idx), plan)
+            self._fast_command_steps[int(env_idx)] = 0
+
+    def _assign_fast_command_plan(self, env_idx: int, plan: ReferenceCommandPlan) -> None:
+        """Copy one sampled command plan into the batched fast-path arrays."""
+        assert self._fast_plans is not None
+        self._fast_plans["pass_points"][env_idx] = np.stack(plan.pass_points).astype(np.float32)
+        self._fast_plans["brake_point"][env_idx] = np.asarray(plan.brake_point, dtype=np.float32)
+        self._fast_plans["slow_points"][env_idx] = np.stack(plan.slow_points).astype(np.float32)
+        self._fast_plans["recover_points"][env_idx] = np.stack(plan.recover_points).astype(
+            np.float32
+        )
+        for name in (
+            "pass_speed",
+            "brake_entry_speed",
+            "hold_speed",
+            "slow_speed",
+            "recover_speed",
+            "pass_decel_start_m",
+        ):
+            self._fast_plans[name][env_idx] = float(getattr(plan, name))
+        for name in (
+            "pass_steps",
+            "pass_cruise_steps",
+            "pass_decel_steps",
+            "hold_steps",
+            "slow_steps",
+            "recover_steps",
+        ):
+            self._fast_plans[name][env_idx] = int(getattr(plan, name))
+        self._fast_plans["total_steps"][env_idx] = int(plan.total_steps)
+        self._fast_plans["approach_heading"][env_idx] = np.asarray(
+            plan.approach_heading, dtype=np.float32
+        )
+
+    def _fast_command_reference_batch(self) -> dict[str, np.ndarray]:
+        """Return batched v60 command references for the current command steps."""
+        assert self._fast_plans is not None
+        plans = self._fast_plans
+        step = self._fast_command_steps.astype(np.int32)
+        pass_steps = plans["pass_steps"].astype(np.int32)
+        hold_end = pass_steps + plans["hold_steps"].astype(np.int32)
+        slow_end = hold_end + plans["slow_steps"].astype(np.int32)
+        total_steps = plans["total_steps"].astype(np.int32)
+
+        pass_mask = step < pass_steps
+        hold_mask = (step >= pass_steps) & (step < hold_end)
+        slow_mask = (step >= hold_end) & (step < slow_end)
+        recover_mask = (step >= slow_end) & (step < total_steps)
+        terminal_mask = ~(pass_mask | hold_mask | slow_mask | recover_mask)
+
+        pass_distance, pass_speed = self._fast_pass_distance_and_speed(step)
+        pass_current, pass_next, pass_lookahead, pass_heading = _command_polyline_reference_batch(
+            plans["pass_points"],
+            distance=pass_distance,
+            speed=pass_speed,
+            dt=1.0 / self.config.env.freq,
+        )
+        hold_current = plans["brake_point"]
+        hold_next = plans["brake_point"] + plans["approach_heading"] * 0.01
+        hold_lookahead = plans["brake_point"] + plans["approach_heading"] * 0.02
+        hold_heading = plans["approach_heading"]
+        hold_speed = plans["hold_speed"]
+
+        slow_step = np.maximum(step - hold_end, 0)
+        slow_distance = (
+            slow_step.astype(np.float32) * float(1.0 / self.config.env.freq) * plans["slow_speed"]
+        )
+        slow_current, slow_next, slow_lookahead, slow_heading = _command_polyline_reference_batch(
+            plans["slow_points"],
+            distance=slow_distance,
+            speed=plans["slow_speed"],
+            dt=1.0 / self.config.env.freq,
+        )
+
+        recover_step = np.maximum(step - slow_end, 0)
+        recover_speed = self._fast_recover_speed(recover_step)
+        recover_distance = (
+            recover_step.astype(np.float32) * float(1.0 / self.config.env.freq) * recover_speed
+        )
+        recover_current, recover_next, recover_lookahead, recover_heading = (
+            _command_polyline_reference_batch(
+                plans["recover_points"],
+                distance=recover_distance,
+                speed=recover_speed,
+                dt=1.0 / self.config.env.freq,
+            )
+        )
+
+        terminal_current = plans["recover_points"][:, -1]
+        terminal_heading = _safe_normalize_batch(
+            plans["recover_points"][:, -1] - plans["recover_points"][:, -2],
+            fallback=plans["approach_heading"],
+        )
+        terminal_next = terminal_current + terminal_heading * 0.01
+        terminal_lookahead = terminal_current + terminal_heading * 0.02
+
+        current = pass_current.copy()
+        next_point = pass_next.copy()
+        lookahead = pass_lookahead.copy()
+        heading = pass_heading.copy()
+        speed = pass_speed.copy()
+        phase_id = np.where(step >= plans["pass_cruise_steps"], 2, 1).astype(np.int32)
+        waypoint_ids = np.zeros(self.num_envs, dtype=np.int32)
+
+        for mask, values in (
+            (hold_mask, (hold_current, hold_next, hold_lookahead, hold_heading, hold_speed, 2, 1)),
+            (
+                slow_mask,
+                (slow_current, slow_next, slow_lookahead, slow_heading, plans["slow_speed"], 4, 2),
+            ),
+            (
+                recover_mask,
+                (
+                    recover_current,
+                    recover_next,
+                    recover_lookahead,
+                    recover_heading,
+                    recover_speed,
+                    5,
+                    3,
+                ),
+            ),
+            (
+                terminal_mask,
+                (
+                    terminal_current,
+                    terminal_next,
+                    terminal_lookahead,
+                    terminal_heading,
+                    hold_speed,
+                    0,
+                    1,
+                ),
+            ),
+        ):
+            if not np.any(mask):
+                continue
+            current[mask] = values[0][mask]
+            next_point[mask] = values[1][mask]
+            lookahead[mask] = values[2][mask]
+            heading[mask] = values[3][mask]
+            speed[mask] = values[4][mask]
+            phase_id[mask] = int(values[5])
+            waypoint_ids[mask] = int(values[6])
+
+        horizon = lookahead - current
+        horizon_direction = _safe_normalize_batch(horizon, fallback=heading)
+        desired_velocity = horizon_direction * speed[:, None]
+        hold_like = waypoint_ids == waypoint_type_id("hold_or_brake")
+        desired_velocity[hold_like] = 0.0
+        stop_signal = hold_like.astype(np.float32)
+        brake_mask = hold_like.astype(np.float32)
+        slow_through_mask = (waypoint_ids == waypoint_type_id("low_speed_through")).astype(
+            np.float32
+        )
+        desired_heading = _safe_normalize_batch(heading)
+        desired_heading[:, 2] = 0.0
+        desired_heading = _safe_normalize_batch(desired_heading)
+        return {
+            "current_point": current.astype(np.float32),
+            "next_point": next_point.astype(np.float32),
+            "lookahead_point": lookahead.astype(np.float32),
+            "desired_velocity": desired_velocity.astype(np.float32),
+            "desired_heading": desired_heading.astype(np.float32),
+            "desired_speed": speed.astype(np.float32),
+            "phase_id": phase_id.astype(np.int32),
+            "target_gate": np.zeros(self.num_envs, dtype=np.float32),
+            "waypoint_type_id": waypoint_ids.astype(np.int32),
+            "stop_signal": stop_signal,
+            "brake_mask": brake_mask,
+            "slow_through_mask": slow_through_mask,
+        }
+
+    def _fast_pass_distance_and_speed(self, step: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Vectorized version of the v60 pass-through deceleration ramp."""
+        assert self._fast_plans is not None
+        plans = self._fast_plans
+        step = np.asarray(step, dtype=np.int32)
+        cruise = step < plans["pass_cruise_steps"]
+        cruise_distance = (
+            step.astype(np.float32) * float(1.0 / self.config.env.freq) * plans["pass_speed"]
+        )
+        decel_step = np.minimum(
+            np.maximum(step - plans["pass_cruise_steps"], 0), plans["pass_decel_steps"]
+        ).astype(np.float32)
+        decel_steps = np.maximum(plans["pass_decel_steps"].astype(np.float32), 1.0)
+        u = np.clip(decel_step / decel_steps, 0.0, 1.0)
+        smooth = u * u * (3.0 - 2.0 * u)
+        speed = plans["pass_speed"] + (plans["brake_entry_speed"] - plans["pass_speed"]) * smooth
+        smooth_integral = u**3 - 0.5 * u**4
+        decel_distance = (
+            decel_steps
+            * float(1.0 / self.config.env.freq)
+            * (
+                plans["pass_speed"] * u
+                + (plans["brake_entry_speed"] - plans["pass_speed"]) * smooth_integral
+            )
+        )
+        length = _three_point_polyline_lengths(plans["pass_points"])
+        distance = np.where(
+            cruise,
+            cruise_distance,
+            np.minimum(length, plans["pass_decel_start_m"] + decel_distance),
+        )
+        speed = np.where(cruise, plans["pass_speed"], speed)
+        return distance.astype(np.float32), speed.astype(np.float32)
+
+    def _fast_recover_speed(self, phase_step: np.ndarray) -> np.ndarray:
+        """Vectorized smooth speed recovery for v60 command references."""
+        assert self._fast_plans is not None
+        plans = self._fast_plans
+        alpha = np.clip(
+            phase_step.astype(np.float32)
+            / np.maximum(plans["recover_steps"].astype(np.float32), 1.0),
+            0.0,
+            1.0,
+        )
+        smooth = alpha * alpha * (3.0 - 2.0 * alpha)
+        speed = plans["slow_speed"] + (plans["recover_speed"] - plans["slow_speed"]) * smooth
+        return speed.astype(np.float32)
+
+    def _fast_command_observation_batch(
+        self, raw_obs: dict[str, Any], reference: dict[str, np.ndarray]
+    ) -> np.ndarray:
+        """Build clean command-v3 tracker observations for all vector worlds at once."""
+        if self._fast_history is None:
+            raise RuntimeError("v60 fast command history is uninitialized.")
+        pos = np.asarray(raw_obs["pos"], dtype=np.float32)
+        vel = np.asarray(raw_obs["vel"], dtype=np.float32)
+        ang_vel = np.asarray(raw_obs["ang_vel"], dtype=np.float32)
+        rot = _quat_to_rotmat_batch(np.asarray(raw_obs["quat"], dtype=np.float32))
+        rot_t = np.swapaxes(rot, 1, 2)
+        ref_points = np.concatenate(
+            [
+                np.einsum("nij,nj->ni", rot_t, reference["current_point"] - pos),
+                np.einsum("nij,nj->ni", rot_t, reference["next_point"] - pos),
+                np.einsum("nij,nj->ni", rot_t, reference["lookahead_point"] - pos),
+            ],
+            axis=1,
+        )
+        desired_velocity_body = np.einsum("nij,nj->ni", rot_t, reference["desired_velocity"])
+        heading_body = np.einsum("nij,nj->ni", rot_t, reference["desired_heading"])
+        heading_error = np.stack([heading_body[:, 1], heading_body[:, 0]], axis=1)
+        waypoint_one_hot = np.zeros(
+            (self.num_envs, len(REFERENCE_TRACKER_WAYPOINT_TYPES)), dtype=np.float32
+        )
+        waypoint_one_hot[
+            np.arange(self.num_envs),
+            np.clip(reference["waypoint_type_id"], 0, len(REFERENCE_TRACKER_WAYPOINT_TYPES) - 1),
+        ] = 1.0
+        semantic = np.concatenate(
+            [
+                waypoint_one_hot,
+                reference["stop_signal"][:, None],
+                reference["brake_mask"][:, None],
+                reference["slow_through_mask"][:, None],
+            ],
+            axis=1,
+        )
+        flat = np.concatenate(
+            [
+                pos[:, 2:3],
+                np.einsum("nij,nj->ni", rot_t, vel),
+                ang_vel,
+                rot.reshape(self.num_envs, 9),
+                ref_points,
+                desired_velocity_body,
+                reference["desired_speed"][:, None],
+                heading_error,
+                self._fast_last_action_norm,
+                self._fast_history.reshape(self.num_envs, -1),
+                semantic,
+            ],
+            axis=1,
+        ).astype(np.float32)
+        if flat.shape != (self.num_envs, REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM):
+            raise ValueError(
+                "v60 fast observation dim mismatch: "
+                f"{flat.shape} != {(self.num_envs, REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM)}"
+            )
+        if not np.isfinite(flat).all():
+            raise ValueError("v60 fast observation contains non-finite values")
+        return flat
+
+    def _step_fast_command(
+        self,
+        *,
+        prev_obs_batch: dict[str, Any],
+        raw_obs: dict[str, Any],
+        info: dict[str, Any],
+        action_norm: np.ndarray,
+        terminations: np.ndarray,
+        truncations: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+        """Fast vectorized step for clean v60 command-tracker training."""
+        if self._fast_reference is None or self._fast_history is None:
+            raise RuntimeError("v60 fast command state is uninitialized.")
+        final_obs = self._final_observation_batch(raw_obs, info)
+        rewards, diagnostics = self._fast_command_reward_batch(
+            prev_obs=prev_obs_batch,
+            obs=final_obs,
+            reference=self._fast_reference,
+            action_norm=action_norm,
+            prev_action_norm=self._fast_last_action_norm,
+            terminated=terminations,
+            truncated=truncations,
+        )
+        done = terminations | truncations
+        self._update_fast_command_memory(raw_obs, final_obs, action_norm, done)
+        self._fast_command_steps = self._fast_command_steps + 1
+        done_indices = np.flatnonzero(done)
+        if len(done_indices):
+            self._reset_fast_command_indices(done_indices, raw_obs, seed=None)
+            self._fast_command_steps[done_indices] = 0
+            self._steps[done_indices] = 0
+        self._fast_reference = self._fast_command_reference_batch()
+        obs_rows = self._fast_command_observation_batch(raw_obs, self._fast_reference)
+        self._raw_obs = raw_obs
+        self.last_diagnostics = diagnostics | {
+            "tracker/phase_id": float(np.mean(self._fast_reference["phase_id"])),
+            "tracker/target_gate": 0.0,
+            "tracker/reward": float(np.mean(rewards)),
+        }
+        return (
+            obs_rows,
+            rewards.astype(np.float32),
+            terminations.astype(bool),
+            truncations.astype(bool),
+            info,
+        )
+
+    def _update_fast_command_memory(
+        self,
+        raw_obs: dict[str, Any],
+        final_obs: dict[str, Any],
+        action_norm: np.ndarray,
+        done: np.ndarray,
+    ) -> None:
+        """Update last-action and short history for the vectorized v60 path."""
+        if self._fast_history is None:
+            raise RuntimeError("v60 fast command history is uninitialized.")
+        final_rows = _tracker_history_rows_batch(final_obs)
+        shifted = np.concatenate([self._fast_history[:, 1:, :], final_rows[:, None, :]], axis=1)
+        reset_rows = _tracker_history_rows_batch(raw_obs)
+        reset_history = np.repeat(reset_rows[:, None, :], REFERENCE_TRACKER_HISTORY, axis=1)
+        done_mask = np.asarray(done, dtype=bool)[:, None, None]
+        self._fast_history = np.where(done_mask, reset_history, shifted).astype(np.float32)
+        self._fast_last_action_norm = np.where(
+            np.asarray(done, dtype=bool)[:, None],
+            np.zeros_like(action_norm, dtype=np.float32),
+            np.clip(action_norm, -1.0, 1.0),
+        ).astype(np.float32)
+
+    def _fast_command_reward_batch(
+        self,
+        *,
+        prev_obs: dict[str, Any],
+        obs: dict[str, Any],
+        reference: dict[str, np.ndarray],
+        action_norm: np.ndarray,
+        prev_action_norm: np.ndarray,
+        terminated: np.ndarray,
+        truncated: np.ndarray,
+    ) -> tuple[np.ndarray, dict[str, float]]:
+        """Compute clean v60 command rewards for all vector worlds at once."""
+        if not isinstance(self.reward_model, ReferenceCommandReward):
+            raise RuntimeError("v60 fast reward requires ReferenceCommandReward.")
+        model = self.reward_model
+        pos = np.asarray(obs["pos"], dtype=np.float32)
+        prev_pos = np.asarray(prev_obs["pos"], dtype=np.float32)
+        vel = np.asarray(obs["vel"], dtype=np.float32)
+        pos_error = np.linalg.norm(reference["current_point"] - pos, axis=1)
+        prev_error = np.linalg.norm(reference["current_point"] - prev_pos, axis=1)
+        vel_error = np.linalg.norm(reference["desired_velocity"] - vel, axis=1)
+        desired_heading = _safe_normalize_batch(reference["desired_heading"])
+        current_heading = _quat_to_rotmat_batch(np.asarray(obs["quat"], dtype=np.float32))[:, :, 0]
+        current_heading[:, 2] = 0.0
+        current_heading = _safe_normalize_batch(current_heading)
+        heading_error = 1.0 - np.clip(np.sum(desired_heading * current_heading, axis=1), -1.0, 1.0)
+        action_penalty = np.mean(np.square(action_norm), axis=1)
+        delta_penalty = np.mean(np.square(action_norm - prev_action_norm), axis=1)
+
+        speed = np.linalg.norm(vel, axis=1)
+        desired_speed = reference["desired_speed"]
+        desired_speed_error = np.abs(speed - desired_speed)
+        brake_hold_speed_excess = np.maximum(0.0, speed - 0.12) * reference["brake_mask"]
+        slow_through_speed_error = desired_speed_error * reference["slow_through_mask"]
+        slow_through_stop_error = np.maximum(0.0, 0.12 - speed) * reference["slow_through_mask"]
+        recover_mask = (reference["waypoint_type_id"] == waypoint_type_id("recover_speed")).astype(
+            np.float32
+        )
+        recover_speed_error = desired_speed_error * recover_mask
+
+        trajectory = self._fast_command_trajectory_terms(
+            prev_pos=prev_pos,
+            pos=pos,
+            vel=vel,
+            reference=reference,
+            pos_error=pos_error,
+            prev_error=prev_error,
+        )
+        rewards = (
+            -model.pos_error_coef * trajectory["command_position_error"]
+            - model.vel_error_coef * trajectory["command_velocity_error"]
+            - model.heading_coef * heading_error
+            - model.action_coef * action_penalty
+            - model.action_delta_coef * delta_penalty
+            + model.progress_bonus * trajectory["command_progress_m"]
+            - model.trajectory_cross_track_coef * trajectory["command_cross_track_error"]
+            - model.trajectory_along_speed_coef * trajectory["moving_along_speed_error"]
+            - model.trajectory_reverse_speed_coef * trajectory["moving_reverse_speed"]
+            - model.trajectory_overshoot_coef * trajectory["brake_hold_overshoot"]
+            - model.semantic_brake_speed_coef * brake_hold_speed_excess
+            - model.semantic_slow_speed_coef * slow_through_speed_error
+            - model.semantic_slow_stop_coef * slow_through_stop_error
+            - model.semantic_recover_speed_coef * recover_speed_error
+        )
+        rewards = rewards.astype(np.float32)
+        rewards[np.asarray(terminated, dtype=bool) & ~np.asarray(truncated, dtype=bool)] -= float(
+            model.crash_penalty
+        )
+        diagnostics = {
+            "tracker/pos_error": float(np.mean(pos_error)),
+            "tracker/vel_error": float(np.mean(vel_error)),
+            "tracker/command_position_error": float(np.mean(trajectory["command_position_error"])),
+            "tracker/command_velocity_error": float(np.mean(trajectory["command_velocity_error"])),
+            "tracker/trajectory_cross_track_error": float(
+                np.mean(trajectory["trajectory_cross_track_error"])
+            ),
+            "tracker/command_cross_track_error": float(
+                np.mean(trajectory["command_cross_track_error"])
+            ),
+            "tracker/trajectory_along_m": float(np.mean(trajectory["trajectory_along_m"])),
+            "tracker/trajectory_along_speed": float(np.mean(trajectory["trajectory_along_speed"])),
+            "tracker/moving_along_speed_error": float(
+                np.mean(trajectory["moving_along_speed_error"])
+            ),
+            "tracker/moving_reverse_speed": float(np.mean(trajectory["moving_reverse_speed"])),
+            "tracker/brake_hold_overshoot": float(np.mean(trajectory["brake_hold_overshoot"])),
+            "tracker/command_progress": float(np.mean(trajectory["command_progress_m"])),
+            "tracker/heading_error": float(np.mean(heading_error)),
+            "tracker/action_penalty": float(np.mean(action_penalty)),
+            "tracker/action_delta_penalty": float(np.mean(delta_penalty)),
+            "tracker/waypoint_type_id": float(np.mean(reference["waypoint_type_id"])),
+            "tracker/stop_signal": float(np.mean(reference["stop_signal"])),
+            "tracker/brake_mask": float(np.mean(reference["brake_mask"])),
+            "tracker/slow_through_mask": float(np.mean(reference["slow_through_mask"])),
+            "tracker/desired_speed_error": float(np.mean(desired_speed_error)),
+            "tracker/brake_hold_speed_excess": float(np.mean(brake_hold_speed_excess)),
+            "tracker/slow_through_speed_error": float(np.mean(slow_through_speed_error)),
+            "tracker/slow_through_stop_error": float(np.mean(slow_through_stop_error)),
+            "tracker/recover_speed_error": float(np.mean(recover_speed_error)),
+        }
+        return rewards, diagnostics
+
+    @staticmethod
+    def _fast_command_trajectory_terms(
+        *,
+        prev_pos: np.ndarray,
+        pos: np.ndarray,
+        vel: np.ndarray,
+        reference: dict[str, np.ndarray],
+        pos_error: np.ndarray,
+        prev_error: np.ndarray,
+    ) -> dict[str, np.ndarray]:
+        """Vectorized clean v60 trajectory terms."""
+        segment = reference["lookahead_point"] - reference["current_point"]
+        next_segment = reference["next_point"] - reference["current_point"]
+        use_next = np.linalg.norm(segment, axis=1) < 1e-5
+        segment = np.where(use_next[:, None], next_segment, segment)
+        direction = _safe_normalize_batch(segment, fallback=reference["desired_heading"])
+        rel = pos - reference["current_point"]
+        prev_rel = prev_pos - reference["current_point"]
+        along = np.sum(rel * direction, axis=1)
+        prev_along = np.sum(prev_rel * direction, axis=1)
+        cross_track = np.linalg.norm(rel - along[:, None] * direction, axis=1)
+        along_speed = np.sum(vel * direction, axis=1)
+        hold_mask = np.clip(np.maximum(reference["stop_signal"], reference["brake_mask"]), 0.0, 1.0)
+        moving_mask = 1.0 - hold_mask
+        desired_speed = reference["desired_speed"]
+        desired_trajectory_velocity = direction * desired_speed[:, None] * moving_mask[:, None]
+        command_velocity_error = np.linalg.norm(vel - desired_trajectory_velocity, axis=1)
+        command_position_error = hold_mask * pos_error + moving_mask * (
+            0.35 * pos_error + 0.65 * cross_track
+        )
+        point_progress = prev_error - pos_error
+        trajectory_progress = along - prev_along
+        command_progress = hold_mask * point_progress + moving_mask * trajectory_progress
+        return {
+            "command_position_error": command_position_error.astype(np.float32),
+            "command_velocity_error": command_velocity_error.astype(np.float32),
+            "trajectory_cross_track_error": cross_track.astype(np.float32),
+            "command_cross_track_error": (cross_track * moving_mask).astype(np.float32),
+            "trajectory_along_m": along.astype(np.float32),
+            "trajectory_along_speed": along_speed.astype(np.float32),
+            "moving_along_speed_error": (np.abs(along_speed - desired_speed) * moving_mask).astype(
+                np.float32
+            ),
+            "moving_reverse_speed": (np.maximum(0.0, -along_speed) * moving_mask).astype(
+                np.float32
+            ),
+            "brake_hold_overshoot": (np.maximum(0.0, along) * hold_mask).astype(np.float32),
+            "command_progress_m": command_progress.astype(np.float32),
+        }
+
+    @staticmethod
+    def _final_observation_batch(raw_obs: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+        """Return final-observation batch when vector autoreset supplies one."""
+        if isinstance(info, dict) and "final_observation" in info:
+            final_obs = info["final_observation"]
+            if isinstance(final_obs, dict):
+                return final_obs
+        if isinstance(info, dict) and "reset_observations" in info:
+            reset_obs = info["reset_observations"]
+            if isinstance(reset_obs, dict):
+                return reset_obs
+        return raw_obs
 
     def close(self) -> None:
         """Close the wrapped vector environment."""

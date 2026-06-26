@@ -977,6 +977,40 @@ def test_reference_tracker_vector_env_reset_step_shapes() -> None:
         env.close()
 
 
+def test_reference_command_vector_env_uses_fast_clean_command_path() -> None:
+    env = ReferenceTrackerVectorEnv(
+        config_name="level3_tracker_free_space.toml",
+        task="reference_command_no_gate_reward",
+        tracker_env_mode="free_space",
+        num_envs=3,
+        max_episode_steps=12,
+        seed=123,
+        jax_device="cpu",
+    )
+    try:
+        assert env._fast_command_enabled  # noqa: SLF001
+        obs, _info = env.reset(seed=123)
+        assert obs.shape == (3, REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM)
+        assert np.isfinite(obs).all()
+
+        next_obs, reward, terminated, truncated, _info = env.step(
+            np.zeros((3, 4), dtype=np.float32)
+        )
+
+        assert next_obs.shape == (3, REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM)
+        assert reward.shape == (3,)
+        assert terminated.shape == (3,)
+        assert truncated.shape == (3,)
+        assert np.isfinite(next_obs).all()
+        assert np.isfinite(reward).all()
+        assert "tracker/command_position_error" in env.last_diagnostics
+        assert "tracker/trajectory_cross_track_error" in env.last_diagnostics
+        assert "tracker/gate_yz_error" not in env.last_diagnostics
+        assert "tracker/obstacle_penalty" not in env.last_diagnostics
+    finally:
+        env.close()
+
+
 def test_gate_completion_reward_adds_cross_and_recovery_events() -> None:
     prev_obs = sample_obs()
     obs = sample_obs()
