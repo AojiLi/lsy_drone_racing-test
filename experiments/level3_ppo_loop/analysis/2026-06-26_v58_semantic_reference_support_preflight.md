@@ -22,7 +22,10 @@ geometry.
   `level3_reference_tracker_semantic_v2`.
 - Preserved the old layout:
   `level3_reference_tracker_v1`, `REFERENCE_TRACKER_OBS_DIM=65`.
-- Added explicit waypoint intent fields for v58:
+- Preserved the existing concrete driving command channels as the primary v58
+  interface: current/next/lookahead reference points, desired velocity, desired
+  speed, and desired heading.
+- Added auxiliary waypoint intent fields for v58:
   `through`, `brake_or_hold`, `slow_through`, `recover`, plus `stop_signal`,
   `brake_mask`, and `slow_through_mask`.
 - Added `semantic_planner_reference` as a free-space tracker task.
@@ -40,7 +43,9 @@ zigzag_or_lemniscate_tracking
   -> planner_integration_smoke
 ```
 
-`gate_aperture_reference` remains optional diagnostic only.
+`gate_aperture_reference` remains optional diagnostic only. V58 should be
+trained and analyzed as horizon/speed/heading following with auxiliary semantic
+masks, not as label classification.
 
 ## Compatibility
 

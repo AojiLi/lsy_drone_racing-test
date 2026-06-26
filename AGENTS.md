@@ -50,7 +50,9 @@
   brake/hold alignment point, a low-speed through point, or a recovery point.
   Reference inputs should include current/next/lookahead points plus desired
   velocity/speed/heading and waypoint intent such as `waypoint_type`,
-  `stop_signal`, or `brake_mask`.
+  `stop_signal`, or `brake_mask`. The concrete future points, speed/velocity,
+  and heading are the primary driving command; waypoint labels/masks are
+  auxiliary hints only.
 
 ## Hard Boundaries
 

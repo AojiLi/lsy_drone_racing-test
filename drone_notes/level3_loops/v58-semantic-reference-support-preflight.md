@@ -11,10 +11,10 @@
 而是能看到：
 
 ```text
-这个点是路过点 through
-这个点要刹车/停稳 brake_or_hold
-这个点要低速穿过 slow_through
-这个点是恢复速度 recover
+后面几个点在哪里
+应该多快
+应该朝哪里
+辅助提示：through / brake_or_hold / slow_through / recover
 ```
 
 ## 为什么要做这个
@@ -22,7 +22,7 @@
 之前 v57a 已经把 planner 的 reference jump 从大跳变压小了，但是 gate0
 pass 没有明显变好，contact 还是很高。
 
-这说明问题可能不是单纯“路线画得不连续”，而是底层 tracker 不知道每个点的语义。
+这说明问题可能不是单纯“路线画得不连续”，而是底层 tracker 看到的驾驶指令还不够明确。
 
 比如 planner 说：
 
@@ -33,6 +33,15 @@ pass 没有明显变好，contact 还是很高。
 ```
 
 如果 PPO 只看到一个普通 reference point，它可能把所有点都当成“冲过去的点”，于是门前刹不住。
+
+更准确地说，v58 的核心不是让 PPO 学标签，而是让 PPO 看懂具体驾驶指令：
+
+```text
+future reference points + desired speed/velocity + desired heading
+```
+
+`waypoint_type` / mask 只是辅助提示。真正决定飞机怎么飞的是短 horizon
+轨迹、速度和朝向。
 
 ## 这次改了什么
 
@@ -60,6 +69,23 @@ slow_through_mask
 ```
 
 也就是说，PPO 以后能明确知道“这个点到底该怎么飞”。
+
+但不要把它理解成“靠标签飞”。比如：
+
+```text
+brake_or_hold:
+  当前点和后面点几乎不动
+  期望速度约 0.05m/s
+  期望朝向对准目标
+
+slow_through:
+  当前点在门洞
+  后面点继续穿过门
+  期望速度约 0.30m/s
+  期望朝向沿门法线
+```
+
+PPO 应该主要跟踪这些具体数值，mask 只是帮它更容易区分场景。
 
 ## 兼容性
 

@@ -64,6 +64,17 @@ next_point
 lookahead_point
 ```
 
+The concrete flight command is primary. A waypoint label or mask is only an
+auxiliary hint. Do not train or analyze v58 as if the PPO should infer behavior
+from `waypoint_type` alone. The reference horizon, desired speed/velocity, and
+desired heading should already make the intended maneuver visible:
+
+```text
+brake/hold: current point and near-future points barely move, desired speed is low
+slow-through: future points continue through the aperture, desired speed is low but nonzero
+recover: future points move away from the constrained segment, speed ramps up smoothly
+```
+
 The tracker must learn distinct behaviors:
 
 ```text
@@ -73,9 +84,10 @@ slow_through: do not stop dead, but cross at about 0.25-0.35 m/s
 recover: resume speed gradually after the constrained segment
 ```
 
-Do not reduce v58 to ordinary point chasing. If every reference point has the
-same semantics, the tracker can learn to rush through all points and still fail
-Level3 by overshooting, failing to brake, or contacting near the gate plane.
+Do not reduce v58 to ordinary point chasing, and do not reduce it to label
+classification. If every reference horizon looks like a pass-through command,
+the tracker can learn to rush through all points and still fail Level3 by
+overshooting, failing to brake, or contacting near the gate plane.
 
 Planner integration smoke should start with the deterministic
 `GeometricSlowGatePlanner` in
@@ -199,8 +211,9 @@ not a repeat of the generic ladder. Use:
 v58_tracker_semantic_planner_reference_training
 ```
 
-This stage should train on planner-like short trajectories with waypoint
-intent. Minimal reference families:
+This stage should train on planner-like short trajectories where the concrete
+future points, speed, velocity, and heading encode the maneuver. Waypoint masks
+are auxiliary. Minimal reference families:
 
 - far cruise `through` points with target speed about `0.6-1.0m/s`;
 - pre-gate align `brake_or_hold` points with target speed about `0.0-0.1m/s`;
@@ -209,10 +222,11 @@ intent. Minimal reference families:
 - mixed sequences such as
   `through -> brake_or_hold -> slow_through -> recover`.
 
-The observation, reward, and evaluation must make the semantic intent visible
-or measurable. If the current actor observation cannot represent waypoint type,
-stop/hold intent, or brake intent, v58 must include a small observation-layout
-change with builder/checker approval before long training.
+The observation, reward, and evaluation must make the intended flight command
+visible or measurable. If current/next/lookahead points, desired
+speed/velocity, desired heading, and optional waypoint masks cannot represent
+stop/hold intent or slow-through intent, v58 must include a small
+observation-layout change with builder/checker approval before long training.
 
 ## Metrics
 
@@ -467,11 +481,12 @@ hold point, or a low-speed through point.
 ```
 
 The first v58 implementation target should add task support, observation
-features if needed, reward terms, and evaluation metrics for semantic
-planner-like reference segments. Acceptance is not Level3 success rate. It is
-evidence that the tracker can execute `through`, `brake_or_hold`,
-`slow_through`, and `recover` commands with bounded tracking error, low
-overshoot, and correct speed behavior.
+features if needed, reward terms, and evaluation metrics for planner-like
+reference segments. Acceptance is not Level3 success rate. It is evidence that
+the tracker can follow the concrete horizon/speed/heading commands for
+`through`, `brake_or_hold`, `slow_through`, and `recover` with bounded tracking
+error, low overshoot, and correct speed behavior. The semantic mask is a
+supporting signal, not the main driving instruction.
 
 As of the v55 architecture clarification, `gate_aperture_reference` is no longer
 part of the required ladder. Do not continue reward-shaped gate-aperture PPO

@@ -38,9 +38,11 @@ Key checks:
 - Old v55 zigzag checkpoint remains v1 loadable.
 - Planner smoke still uses v1 by default and runs on unchanged
   `config/level3.toml`.
-- New semantic task exposes explicit waypoint intent:
-  `through`, `brake_or_hold`, `slow_through`, `recover`, plus stop/brake/slow
-  masks.
+- New semantic task exposes concrete planner-like commands through
+  current/next/lookahead reference points, desired velocity/speed, and desired
+  heading. `through`, `brake_or_hold`, `slow_through`, `recover`, plus
+  stop/brake/slow masks are auxiliary hints, not the primary driving
+  instruction.
 - Trainer and evaluator handle dynamic obs_dim.
 - Focused tests passed: `33 passed, 1 warning`.
 - Tiny semantic trainer smoke saved a checkpoint under `/tmp`.
@@ -116,10 +118,10 @@ pixi run -e gpu python scripts/check_level3_tracker_stage_gate.py \
   --output experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v58_semantic_preflight_smoke_gate.json
 ```
 
-The gate is not expected to pass after one 1024x32 rollout batch. This command checks
-plumbing, W&B logging, checkpoint metadata, v2 evaluator loading, and semantic
-metrics. If plumbing is clean, a later decision can approve a real maturation
-chunk.
+The gate is not expected to pass after one 1024x32 rollout batch. This command
+checks plumbing, W&B logging, checkpoint metadata, v2 evaluator loading,
+horizon/speed/heading command metrics, and auxiliary semantic-mask metrics. If
+plumbing is clean, a later decision can approve a real maturation chunk.
 
 ## Maturation Direction After Preflight
 

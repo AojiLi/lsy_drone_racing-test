@@ -96,6 +96,36 @@ def test_semantic_reference_task_emits_explicit_waypoint_intents() -> None:
     assert 0.25 <= slow.desired_speed <= 0.35
 
 
+def test_semantic_reference_intent_is_encoded_by_horizon_speed_and_heading() -> None:
+    obs = sample_obs()
+    generator = ReferenceTrajectoryGenerator("semantic_planner_reference")
+    generator.reset(obs)
+
+    references = [generator.reference(obs) for _ in range(130)]
+    through = references[0]
+    brake = references[30]
+    slow = references[70]
+    recover = references[115]
+
+    assert through.waypoint_type == "through"
+    assert np.linalg.norm(through.next_point - through.current_point) > 0.04
+    assert through.desired_speed == pytest.approx(0.62)
+
+    assert brake.waypoint_type == "brake_or_hold"
+    np.testing.assert_allclose(brake.next_point, brake.current_point, atol=1e-6)
+    assert np.linalg.norm(brake.lookahead_point - brake.current_point) > 0.20
+    assert brake.desired_speed == pytest.approx(0.05)
+
+    assert slow.waypoint_type == "slow_through"
+    assert np.linalg.norm(slow.next_point - slow.current_point) > 0.04
+    assert slow.desired_speed == pytest.approx(0.30)
+    assert slow.desired_heading[0] > 0.9
+
+    assert recover.waypoint_type == "recover"
+    assert np.linalg.norm(recover.next_point - recover.current_point) > 0.04
+    assert recover.desired_speed == pytest.approx(0.48)
+
+
 def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Path) -> None:
     v1_path = tmp_path / "tracker_v1.ckpt"
     v2_path = tmp_path / "tracker_v2.ckpt"

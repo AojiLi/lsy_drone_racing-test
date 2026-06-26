@@ -60,7 +60,7 @@ servo law:
 - local gate-aperture geometry only for gate-aperture tasks.
 
 For planner-driven Level3, the reference should include semantic intent, not
-only geometry. Treat this as the durable v58 interface requirement:
+only a single target point. Treat this as the durable v58 interface requirement:
 
 ```text
 reference_point
@@ -72,6 +72,13 @@ desired_heading
 waypoint_type / stop_signal / brake_mask
 ```
 
+The main instruction should come from the trajectory horizon, speed/velocity,
+and heading. Waypoint type or masks are auxiliary hints, not a replacement for
+concrete flight commands. For example, a brake/hold command should look like a
+nearly stationary short horizon with low desired speed and alignment heading;
+a slow-through command should look like future points passing through the
+aperture with low but nonzero speed and a through-gate heading.
+
 Recommended waypoint semantics:
 
 - `through`: pass smoothly through the point at the commanded speed;
@@ -81,9 +88,11 @@ Recommended waypoint semantics:
   stopping dead;
 - `recover`: leave the constrained segment and restore speed gradually.
 
-If the actor cannot observe the semantic intent, it may treat every waypoint as
-a pass-through point. That matches the v57a failure pattern: references became
-continuous, but actual phase4 speed stayed too high and contacts persisted.
+If the actor cannot observe the future reference horizon, desired speed, and
+heading clearly enough, it may treat every waypoint as a pass-through point.
+That matches the v57a failure pattern: references became continuous, but actual
+phase4 speed stayed too high and contacts persisted. A waypoint label alone is
+not sufficient evidence that the command is trackable.
 
 If using asymmetric PPO later, the critic may receive privileged exact state,
 dynamics randomization values, or full reference state during training only.
@@ -109,8 +118,9 @@ Use this order unless a decision packet justifies a different one:
 `gate_aperture_reference` is now optional diagnostic only. Use it when a
 planner-generated pre-gate/aperture/post-gate reference appears untrackable and
 needs isolation, but do not make it a mandatory reward-shaped training stage.
-`semantic_planner_reference` is the required v58 stage for waypoint intent:
-through, brake/hold, slow-through, and recover.
+`semantic_planner_reference` is the required v58 stage for planner-like command
+intent: future reference points, desired speed/velocity, desired heading, and
+auxiliary masks for through, brake/hold, slow-through, and recover.
 
 Start with fixed/easy references. Then randomize start state, endpoint, speed,
 curvature, and point timing. Add disturbance, latency, and domain
@@ -175,6 +185,10 @@ For semantic waypoint training, split reward by intended waypoint behavior:
 Avoid full-race global progress reward during early tracker qualification. It
 can hide the real failure mode: the policy may move forward without being able
 to stop, align, or follow the reference precisely.
+
+Do not reward the presence of a label by itself. Reward the measurable behavior
+implied by the concrete command: position/horizon tracking, desired-speed
+tracking, heading tracking, low overshoot, and smooth actions.
 
 ## Metrics And Gates
 

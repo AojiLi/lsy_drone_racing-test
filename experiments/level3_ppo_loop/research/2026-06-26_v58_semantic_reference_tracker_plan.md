@@ -25,7 +25,7 @@ semantics of each reference point.
 
 ## Core Hypothesis
 
-V58 should not train a generic point tracker. It should train a semantic
+V58 should not train a generic point tracker. It should train a planner-command
 trajectory tracker:
 
 ```text
@@ -39,8 +39,11 @@ where to go
 what this waypoint means
 ```
 
-Without semantic intent, the tracker can treat every point as a pass-through
-target and rush through brake/alignment points.
+The most important part is not a label. The important part is the concrete
+short-horizon command: future reference points, desired speed/velocity, and
+desired heading. A waypoint label or mask is only an auxiliary hint. Without a
+clear future horizon and speed/heading command, the tracker can treat every
+point as a pass-through target and rush through brake/alignment points.
 
 ## Reference Interface
 
@@ -56,6 +59,15 @@ desired_heading
 waypoint_type / stop_signal / brake_mask
 ```
 
+Priority order:
+
+```text
+1. future reference points
+2. desired speed / desired velocity
+3. desired heading
+4. auxiliary waypoint masks
+```
+
 Suggested waypoint semantics:
 
 | Semantics | Intended behavior | Typical speed |
@@ -64,6 +76,15 @@ Suggested waypoint semantics:
 | `brake_or_hold` | slow down, hold/alignment-stabilize | `0.0-0.1m/s` |
 | `slow_through` | cross slowly without stopping dead | `0.25-0.35m/s` |
 | `recover` | restore speed gradually after constraint | increasing from slow |
+
+Concrete command examples:
+
+- `brake_or_hold`: current target is the alignment point, near-future points
+  barely move, desired speed is about `0.05m/s`, and desired heading aligns
+  with the gate.
+- `slow_through`: current target is the aperture center, next/lookahead points
+  continue through the gate, desired speed is about `0.30m/s`, and desired
+  heading follows the gate normal.
 
 ## Training Curriculum
 
@@ -120,7 +141,8 @@ packet:
    - desired speed / desired velocity may be necessary but not sufficient.
 4. Which reward terms prevent the tracker from treating all points as
    pass-through?
-5. Which evaluator metrics detect wrong waypoint semantics?
+5. Which evaluator metrics detect wrong waypoint semantics and wrong concrete
+   command following?
 
 ## Guardrails
 
