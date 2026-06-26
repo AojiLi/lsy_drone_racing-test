@@ -89,6 +89,35 @@ classification. If every reference horizon looks like a pass-through command,
 the tracker can learn to rush through all points and still fail Level3 by
 overshooting, failing to brake, or contacting near the gate plane.
 
+For v59, the tracker may gain a small local safety reflex, but it must not
+become an autonomous Level3 racer. Treat this as:
+
+```text
+planner: decides the route, slowdown, and reference horizon
+tracker: follows the reference horizon
+local safety reflex: only nudges behavior near collision margins
+```
+
+Allowed v59 safety inputs are lightweight local quantities such as nearest
+visible obstacle relative position, obstacle distance/detected, and, only after
+builder/checker approval, a small gate-frame clearance or nearest-frame
+direction feature. Do not add full target-gate semantics, gate progress, gate
+pass phase, finish state, or stage progress as tracker-reflex inputs. Those
+signals make the bottom policy drift toward solving the race itself.
+
+Keep the reward dominated by reference following:
+
+```text
+80-90%: position/horizon tracking, velocity or speed tracking, heading tracking,
+        smooth actions, braking/hold behavior when commanded
+10-20%: crash, near-obstacle, or near-frame safety penalties, active mainly
+        inside a safety margin
+```
+
+Do not add gate-pass, finish, race-progress, or stage-progress bonuses to v59.
+The intended behavior is "track the planner command, but do not collide when a
+small local correction is available", not "learn a second gate-passing policy".
+
 Planner integration smoke should start with the deterministic
 `GeometricSlowGatePlanner` in
 `lsy_drone_racing/control/level3_reference_tracker.py`, not MPPI/MPC. It is a
@@ -505,6 +534,18 @@ As of v57a, the cross-entry reference discontinuity has been reduced from about
 remained too high. That result is the trigger for v58 semantic tracker
 training: train the bottom policy to brake, hold, slow-through, and recover
 according to planner intent.
+
+The next optional extension after v58 is:
+
+```text
+v59_reference_tracker_with_local_safety_reflex
+```
+
+Use v59 only if semantic reference training or planner smoke still shows
+contact caused by small local obstacle/frame errors after the reference command
+itself is continuous and trackable. The first v59 check should audit existing
+obstacle-relative observation and obstacle-penalty support before changing the
+observation layout. Keep gate/race progress rewards disabled for this lane.
 
 For the next planner-only gate-front tuning lane, use the repo skill:
 

@@ -53,6 +53,13 @@
   `stop_signal`, or `brake_mask`. The concrete future points, speed/velocity,
   and heading are the primary driving command; waypoint labels/masks are
   auxiliary hints only.
+- Current v59 tracker proposal: after v58 semantic support is proven, allow a
+  small local safety reflex in the tracker. The tracker still follows planner
+  references as its main job; safety features such as nearest obstacle relative
+  position/distance, and possibly minimal gate-frame clearance, are auxiliary
+  collision-margin inputs. Do not add gate-pass, finish, race-progress, or
+  stage-progress rewards to this tracker lane, and do not make the bottom PPO
+  learn an autonomous gate-passing strategy.
 
 ## Hard Boundaries
 
@@ -294,6 +301,11 @@
   `v58_tracker_semantic_planner_reference_training`: make the bottom tracker
   understand planner waypoint semantics (`through`, `brake_or_hold`,
   `slow_through`, `recover`) before another ordinary planner threshold sweep.
+- v59 has been recorded as a future extension, not the immediate training
+  command: `v59_reference_tracker_with_local_safety_reflex` keeps reference
+  tracking dominant and adds only weak local obstacle/frame safety penalties or
+  inputs if v58/planner-smoke evidence shows contact persists despite
+  trackable references.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
