@@ -37,3 +37,12 @@ config/level3.toml 不变
 
 它不训练 PPO，不换 checkpoint，不改 reward，不改 Level3 赛道。  
 通俗讲：先把“门前慢下来、对准、穿过去”这件事调成稳定动作。
+
+两个硬规则：
+
+```text
+只有环境里的 target_gate 真的变化，才算 planner 可以进入 recover / next gate。
+自定义 pass checker 只能用来分析，不能用来让 planner 提前认为过门。
+```
+
+还有一个 loop 规则：每轮只改一个旋钮。比如这一轮只改 align 条件，就不要同时改 cross speed 和 recover。否则结果变好或变坏时，我们不知道是哪一刀造成的。

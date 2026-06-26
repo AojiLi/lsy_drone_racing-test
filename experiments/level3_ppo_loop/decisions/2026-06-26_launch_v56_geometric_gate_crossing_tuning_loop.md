@@ -17,6 +17,17 @@ Use the new repo skill:
 This loop is planner-only. Do not train PPO, change the tracker checkpoint,
 change reward, add MPPI, or modify `config/level3.toml`.
 
+Core semantic guard:
+
+```text
+Do not optimize by making the planner skip or reinterpret environment gate-pass
+semantics. Only an environment target_gate transition counts as a real gate
+pass for planner control flow.
+```
+
+Custom pass checkers may be used for diagnostics only. They must not trigger
+recover, next-gate logic, or any deployed planner state transition.
+
 ## Baseline
 
 The v55 500-step trace diagnostic used:
@@ -60,15 +71,17 @@ config/level3.toml unchanged
 ## Task Order
 
 1. Align stabilization:
-   require low aperture Y/Z error and modest gate-axis speed before cross.
+   require low aperture Y/Z error and explicitly measured modest gate-local X
+   speed before cross.
 2. Cross slowdown:
    reduce cross desired speed and smooth the cross reference.
 3. Near-plane backout:
    if near gate plane but far off aperture, go back to pre-gate align instead
    of forcing a crossing.
 4. Recover after real gate switch:
-   do not enter recover based only on local X; require target-gate change or an
-   explicit pass trace condition.
+   do not enter recover based only on local X. In the same `target_gate`, recover
+   is forbidden; if local X is past the plane but the environment did not switch
+   gates, continue slow cross/hold or back out to pre-gate align.
 5. Formal 500-step smoke gate:
    rerun fixed seeds `101-120` and classify trace failures.
 
@@ -80,6 +93,9 @@ Every v56 iteration must write:
 - a decision packet under `experiments/level3_ppo_loop/decisions/`;
 - a plain Chinese note under `drone_notes/level3_loops/`;
 - a state update in `experiments/level3_ppo_loop/state.json`.
+
+Every v56 iteration may change only one planner strategy knob unless its
+decision packet explicitly explains why two changes cannot be separated.
 
 Commit and push intended small files. Keep large trace/metrics JSONs ignored
 unless the user explicitly asks to commit them.

@@ -271,7 +271,9 @@
   deterministic gate-front planner policy until the smoke target reaches
   `gate0_pass_count >= 10/20`, contact terminations `<= 8/20`, and first-gate
   progress `20/20`. Do not start PPO training or long Level3 training during
-  this loop.
+  this loop. Only an environment `target_gate` transition counts as a real gate
+  pass for planner control flow; custom pass-checker logic is diagnostic only.
+  Change only one planner strategy knob per v56 iteration.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

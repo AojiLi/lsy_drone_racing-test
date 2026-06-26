@@ -1,6 +1,6 @@
 ---
 name: level3-geometric-planner-loop
-description: Use when tuning, evaluating, or diagnosing the deterministic GeometricSlowGatePlanner gate-crossing strategy for Level3 on unchanged config/level3.toml, especially v56_geometric_gate_crossing_tuning_loop work involving align stabilization, cross speed, near-plane backout, recover-after-real-gate-switch logic, per-step trace metrics, or fixed seeds 101-120 planner smoke. Use this instead of level3-ppo-loop when the task says not to train PPO and only to adjust geometric planner/reference generation.
+description: Use when tuning, evaluating, or diagnosing the deterministic GeometricSlowGatePlanner gate-crossing strategy for Level3 on unchanged config/level3.toml, especially v56_geometric_gate_crossing_tuning_loop work involving align stabilization, gate-local speed metrics, cross speed, near-plane backout, recover-after-environment-target-gate-switch logic, per-step trace metrics, or fixed seeds 101-120 planner smoke. Use this instead of level3-ppo-loop when the task says not to train PPO and only to adjust geometric planner/reference generation.
 ---
 
 # Level3 Geometric Planner Loop
@@ -51,6 +51,19 @@ config/level3.toml unchanged
 If this gate passes, write a decision packet to promote to multi-gate planner
 smoke. Do not call this a Level3 completion result.
 
+## Hard Principles
+
+- Optimize planner references, not environment semantics.
+- Count a real gate pass only when the environment `target_gate` changes.
+- Use custom gate-pass trace conditions only for diagnostics, never for planner
+  control flow, recover entry, or next-gate logic.
+- For the same `target_gate`, do not enter recover. If local X is past the gate
+  plane but `target_gate` did not change, continue slow cross/hold or back out
+  to pre-gate align.
+- Change one planner strategy knob per iteration. Do not combine align gates,
+  cross speed, backout logic, and recover semantics in the same attempt unless
+  a decision packet explicitly explains why the changes cannot be separated.
+
 ## Required Loop Shape
 
 Run one bounded planner-tuning iteration at a time:
@@ -58,6 +71,7 @@ Run one bounded planner-tuning iteration at a time:
 ```text
 read latest trace analysis/state
 -> choose exactly one v56 task hypothesis
+-> identify the single strategy knob allowed to change this iteration
 -> builder changes only planner/evaluator diagnostics needed for that task
 -> checker verifies tests, trace metrics, and unchanged config/level3.toml
 -> run 500-step planner smoke on seeds 101-120
@@ -81,13 +95,14 @@ Allowed changes:
 
 ```text
 enter cross only when aperture Y/Z error is below about 0.18m-0.22m
-and gate-axis speed is modest
+and gate-local X speed is explicitly measured as modest
 otherwise keep align or back out to pre-gate
 ```
 
 Metrics:
 
 ```text
+gate_local_vx or per-step delta gate_local_x is emitted/computable
 near_plane_yz_error_median <= 0.22
 cross_entry_yz_error_p75 <= 0.25
 wrong_cross_entry_count <= 3/20
@@ -141,8 +156,8 @@ Problem: local X alone can make the planner behave as if the gate was passed.
 Allowed changes:
 
 ```text
-enter recover / next-gate logic only after target_gate actually changes
-or an explicit gate-pass trace condition is satisfied
+enter recover / next-gate logic only after the environment target_gate changes
+diagnostic pass-checker logic must not trigger recover
 ```
 
 Metrics:
@@ -196,6 +211,7 @@ Also report:
 ```text
 gate0 pass seeds
 termination reason counts
+gate-local X speed or delta-X distribution near align/cross entry
 near-plane Y/Z error for pass versus fail seeds
 cross-entry Y/Z error distribution
 recover-before-switch count
