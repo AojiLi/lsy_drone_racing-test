@@ -248,6 +248,12 @@
   switching, pre/aperture/post/recovery references, and simple visible-obstacle
   waypoint offsets. It must output references only; the PPO tracker remains the
   only action source.
+- Formal planner smoke with `GeometricSlowGatePlanner` and the zigzag-qualified
+  tracker checkpoint passed on seeds `101-120`: `20/20` first-gate progress,
+  `1` gate0 pass on seed `113`, `2/20` early terminations, finite actions, and
+  unchanged `config/level3.toml`. The next unlocked stage is
+  `manual_long_level3_training_review`; do not launch long training without that
+  review packet.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
