@@ -59,6 +59,32 @@ servo law:
 - reference phase or time encoding when switching points;
 - local gate-aperture geometry only for gate-aperture tasks.
 
+For planner-driven Level3, the reference should include semantic intent, not
+only geometry. Treat this as the durable v58 interface requirement:
+
+```text
+reference_point
+next_point
+lookahead_point
+desired_velocity
+desired_speed
+desired_heading
+waypoint_type / stop_signal / brake_mask
+```
+
+Recommended waypoint semantics:
+
+- `through`: pass smoothly through the point at the commanded speed;
+- `brake_or_hold`: slow to about `0.0-0.1m/s`, reduce overshoot, and stabilize
+  heading/alignment;
+- `slow_through`: continue through the point at about `0.25-0.35m/s` without
+  stopping dead;
+- `recover`: leave the constrained segment and restore speed gradually.
+
+If the actor cannot observe the semantic intent, it may treat every waypoint as
+a pass-through point. That matches the v57a failure pattern: references became
+continuous, but actual phase4 speed stayed too high and contacts persisted.
+
 If using asymmetric PPO later, the critic may receive privileged exact state,
 dynamics randomization values, or full reference state during training only.
 The deployed actor must still use only deployed observations.
@@ -134,6 +160,15 @@ Keep tracker reward local and measurable:
 - action norm and action-delta smoothness;
 - uprightness, spin/body-rate limits, and crash/timeout penalties.
 
+For semantic waypoint training, split reward by intended waypoint behavior:
+
+- `through`: reward smooth path following and speed tracking, not stopping;
+- `brake_or_hold`: reward low terminal speed, low overshoot, and short dwell
+  stability near the target;
+- `slow_through`: reward crossing at the commanded low speed, penalizing both
+  rushing through and stopping dead;
+- `recover`: reward gradual speed restoration and smooth action changes.
+
 Avoid full-race global progress reward during early tracker qualification. It
 can hide the real failure mode: the policy may move forward without being able
 to stop, align, or follow the reference precisely.
@@ -157,6 +192,16 @@ Every rung should report:
 For optional gate-aperture diagnostics and required planner smoke, add valid
 plane crossing, aperture margin, post-gate recovery, first-gate progress, and
 gate-0 pass count.
+
+For v58 semantic planner-like references, add per-semantics metrics:
+
+- error and speed error by waypoint type;
+- brake/hold terminal speed;
+- slow-through speed in the constrained segment;
+- overshoot after brake/hold targets;
+- dwell stability for hold targets;
+- wrong behavior counts, such as rushing through a brake point or stopping at a
+  slow-through point.
 
 Do not approve long planner-driven Level3 training until the tracker passes the
 required free-space tracker gates through `zigzag_or_lemniscate_tracking` and

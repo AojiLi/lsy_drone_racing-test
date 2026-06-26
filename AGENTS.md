@@ -44,6 +44,13 @@
   completion. Train and qualify hover, point, line, L-shape, curve, braking,
   heading, and multi-point reference tracking before treating planner+tracker
   Level3 gate pass as the primary exam.
+- Current v58 tracker objective: train the bottom PPO on semantic
+  planner-like reference trajectories, not generic point chasing. The tracker
+  must observe and respond to whether a waypoint is a pass-through point, a
+  brake/hold alignment point, a low-speed through point, or a recovery point.
+  Reference inputs should include current/next/lookahead points plus desired
+  velocity/speed/heading and waypoint intent such as `waypoint_type`,
+  `stop_signal`, or `brake_mask`.
 
 ## Hard Boundaries
 
@@ -277,6 +284,14 @@
   `planner_integration_smoke` gate checker is only a compatibility/plumbing
   check for v56; do not treat its `passed=true` result as v56 success unless
   the stronger v56 target also passes.
+- v57a fixed the phase3 -> phase4 planner reference discontinuity. The jump
+  fell from about `0.740m` to `0.280m`, reference error from `0.783m` to
+  `0.340m`, and action delta from `0.727` to `0.491`, while `gate0 pass`
+  stayed `2/20`, contact stayed `20/20`, and near-plane phase4 speed remained
+  too high. The next proposed lane is
+  `v58_tracker_semantic_planner_reference_training`: make the bottom tracker
+  understand planner waypoint semantics (`through`, `brake_or_hold`,
+  `slow_through`, `recover`) before another ordinary planner threshold sweep.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

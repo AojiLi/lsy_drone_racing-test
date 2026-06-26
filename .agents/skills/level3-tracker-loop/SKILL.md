@@ -50,6 +50,33 @@ tracker quality:
 Do not use Level3 gate pass as the first tracker learning exam. Use gate pass as
 an integration test after the tracker passes reference-following exams.
 
+For v58 and later, "reference following" means following a semantic short
+trajectory, not blindly chasing a single point. The planner must tell the
+tracker both geometry and intent:
+
+```text
+reference_point
+desired_velocity
+desired_speed
+desired_heading
+waypoint_type / stop_signal / brake_mask
+next_point
+lookahead_point
+```
+
+The tracker must learn distinct behaviors:
+
+```text
+through: keep moving smoothly through the point
+brake_or_hold: slow to about 0.0-0.1 m/s and stabilize/alignment-hold
+slow_through: do not stop dead, but cross at about 0.25-0.35 m/s
+recover: resume speed gradually after the constrained segment
+```
+
+Do not reduce v58 to ordinary point chasing. If every reference point has the
+same semantics, the tracker can learn to rush through all points and still fail
+Level3 by overshooting, failing to brake, or contacting near the gate plane.
+
 Planner integration smoke should start with the deterministic
 `GeometricSlowGatePlanner` in
 `lsy_drone_racing/control/level3_reference_tracker.py`, not MPPI/MPC. It is a
@@ -162,6 +189,28 @@ planner-generated pre-gate -> aperture -> post-gate reference is trackable, but
 it is not a required tracker-training stage. The planner owns aperture crossing
 semantics; the bottom PPO owns reference tracking.
 
+After v57a, the next tracker lane should be a named semantic-reference stage,
+not a repeat of the generic ladder. Use:
+
+```text
+v58_tracker_semantic_planner_reference_training
+```
+
+This stage should train on planner-like short trajectories with waypoint
+intent. Minimal reference families:
+
+- far cruise `through` points with target speed about `0.6-1.0m/s`;
+- pre-gate align `brake_or_hold` points with target speed about `0.0-0.1m/s`;
+- aperture `slow_through` points with target speed about `0.25-0.35m/s`;
+- post-gate `through/recover` points that restore speed gradually;
+- mixed sequences such as
+  `through -> brake_or_hold -> slow_through -> recover`.
+
+The observation, reward, and evaluation must make the semantic intent visible
+or measurable. If the current actor observation cannot represent waypoint type,
+stop/hold intent, or brake intent, v58 must include a small observation-layout
+change with builder/checker approval before long training.
+
 ## Metrics
 
 Every tracker qualification analysis must report the relevant subset of:
@@ -180,6 +229,18 @@ Every tracker qualification analysis must report the relevant subset of:
 - W&B run URL;
 - checkpoint path;
 - exact task command and seed range.
+
+For semantic planner-like reference training, additionally report:
+
+- per-waypoint-type position and velocity error;
+- brake/hold terminal speed and dwell stability;
+- slow-through speed error through the aperture-like segment;
+- overshoot after brake/hold points;
+- velocity reduction from approach speed to commanded slow-through speed;
+- wrong-semantics failures, such as rushing through brake points or stopping
+  dead at slow-through points;
+- waypoint-type confusion rates if an explicit classifier/one-hot interface is
+  used.
 
 For planner integration smoke, additionally report:
 
@@ -389,28 +450,24 @@ The main agent, not the research subagent, owns the final budget decision.
 Given the current state, the next useful lane is:
 
 ```text
-v55_tracker_qualification_curriculum
+v58_tracker_semantic_planner_reference_training
 ```
 
-Its first implementation target should add task support and evaluation metrics
-for:
+The v55 qualification ladder is already useful evidence that the tracker can
+follow basic free-space references, but v57/v57a showed that Level3 failure now
+depends on planner-like reference semantics:
 
 ```text
-point_hold
-point_reach
-line_tracking
-brake_to_point
-heading_tracking
-multi_point_reference
-l_shape_tracking
-curve_tracking
-zigzag_or_lemniscate_tracking
-optional gate_aperture_reference diagnostic only
+the tracker must know whether a waypoint is a pass-through point, a braking /
+hold point, or a low-speed through point.
 ```
 
-The first acceptance target is not a Level3 success rate. It is evidence that
-the tracker can follow references accurately enough for an upper planner to be
-meaningful.
+The first v58 implementation target should add task support, observation
+features if needed, reward terms, and evaluation metrics for semantic
+planner-like reference segments. Acceptance is not Level3 success rate. It is
+evidence that the tracker can execute `through`, `brake_or_hold`,
+`slow_through`, and `recover` commands with bounded tracking error, low
+overshoot, and correct speed behavior.
 
 As of the v55 architecture clarification, `gate_aperture_reference` is no longer
 part of the required ladder. Do not continue reward-shaped gate-aperture PPO
@@ -423,6 +480,12 @@ deterministic gate-frame planner with phase hysteresis, near-gate slowdown,
 pre-gate alignment, pre/aperture/post/recovery references, and a simple visible
 obstacle waypoint offset. If planner smoke fails, inspect the generated
 references before adding MPPI or retraining the tracker.
+
+As of v57a, the cross-entry reference discontinuity has been reduced from about
+`0.74m` to `0.28m`, but gate0 pass/contact did not improve and phase4 speed
+remained too high. That result is the trigger for v58 semantic tracker
+training: train the bottom policy to brake, hold, slow-through, and recover
+according to planner intent.
 
 For the next planner-only gate-front tuning lane, use the repo skill:
 
