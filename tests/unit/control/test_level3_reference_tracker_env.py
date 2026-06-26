@@ -140,8 +140,8 @@ def test_level3_geometric_planner_advances_conservatively() -> None:
     assert cross.current_point[0] > 0.0
 
     obs["pos"] = np.array([0.34, 0.0, 0.75], dtype=np.float32)
-    recover = generator.reference(obs)
-    assert recover.phase == "recover"
+    still_cross = generator.reference(obs)
+    assert still_cross.phase == "cross"
 
 
 def test_level3_geometric_planner_requires_alignment_before_crossing() -> None:
@@ -211,6 +211,22 @@ def test_level3_geometric_planner_uses_hysteresis_and_gate_reset() -> None:
     reset_to_next_gate = generator.reference(obs)
     assert reset_to_next_gate.phase == "cruise"
     assert reset_to_next_gate.target_gate == 1
+
+
+def test_level3_geometric_planner_forbids_same_target_recover() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
+    obs["obstacles_visited"] = np.array([False])
+    generator = ReferenceTrajectoryGenerator("level3")
+
+    obs["pos"] = np.array([-0.20, 0.0, 0.75], dtype=np.float32)
+    generator.reset(obs)
+    assert generator.reference(obs).phase == "cross"
+
+    obs["pos"] = np.array([0.70, 0.0, 0.75], dtype=np.float32)
+    same_target_after_plane = generator.reference(obs)
+    assert same_target_after_plane.target_gate == 0
+    assert same_target_after_plane.phase == "cross"
 
 
 def test_level3_geometric_planner_offsets_visible_obstacle_on_segment() -> None:

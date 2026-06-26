@@ -942,8 +942,6 @@ class GeometricSlowGatePlanner:
     @classmethod
     def _initial_phase_id(cls, gate_local: np.ndarray) -> int:
         x = float(gate_local[0])
-        if x > 0.30:
-            return 5
         if x > -0.24:
             return 4
         if x > -0.72:
@@ -972,9 +970,7 @@ class GeometricSlowGatePlanner:
         slow_enough = gate_speed <= cls.ALIGN_TO_CROSS_MAX_GATE_X_SPEED_MPS
         if phase <= 3 and x > -0.34 and aligned_enough and slow_enough:
             phase = 4
-        if phase <= 4 and x > 0.30:
-            phase = 5
-        return int(np.clip(phase, 1, 5))
+        return int(np.clip(phase, 1, 4))
 
     @staticmethod
     def _gate_axis_speed(obs: dict[str, Any]) -> float:
