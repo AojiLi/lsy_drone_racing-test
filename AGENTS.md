@@ -66,7 +66,9 @@
   clustered near the stop point with near-zero velocity; point spacing should
   match `desired_speed * dt`; direction, height, curvature, speed, phase
   duration, braking distance, slow-through distance, and recovery angle should
-  be randomized.
+  be randomized. Do not jump directly from cruise to hold: the approach must
+  include a brake ramp that tapers pass-through speed down before the
+  stationary hold horizon.
 - Current v59 tracker proposal: after v60 no-gate command tracking is proven, allow a
   small local safety reflex in the tracker. The tracker still follows planner
   references as its main job; safety features such as nearest obstacle relative
@@ -317,7 +319,8 @@
   tracker to follow generic trajectory commands with hold/low-speed behavior
   but no gate/aperture/race reward. Its generator should resemble a conservative
   planner approach: smooth cruise, slowdown/hold, low-speed-through, and smooth
-  recovery, with dense low-jump reference horizons.
+  recovery, with dense low-jump reference horizons and an explicit deceleration
+  zone before hold/brake.
 - v59 remains a future extension, not the immediate training command:
   `v59_reference_tracker_with_local_safety_reflex` keeps reference tracking
   dominant and adds only weak local obstacle/frame safety penalties or inputs

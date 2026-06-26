@@ -96,6 +96,14 @@ tracker learns generic command following rather than a single fixed route.
 Keep the sequence shaped like the future conservative Level3 planner: cruise,
 slowdown/hold, low-speed-through, and smooth speed recovery.
 
+Brake intent should start before the hold point. Avoid an abrupt transition
+from high-speed `pass_through` to zero-velocity `hold_or_brake`; instead, the
+approach command should taper speed and reference spacing over a deceleration
+zone. A good default for v60 is to cruise around `0.55-0.78m/s`, then ramp down
+to roughly `0.15-0.24m/s` before entering the hold/brake horizon. This gives the
+policy a learnable "prepare to stop" command rather than requiring it to cancel
+inertia instantly at the phase boundary.
+
 Recommended generic command intents:
 
 - `pass_through`: pass smoothly through the point at the commanded speed;

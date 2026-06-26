@@ -139,10 +139,14 @@ class ReferenceCommandPlan:
     slow_points: tuple[np.ndarray, ...]
     recover_points: tuple[np.ndarray, ...]
     pass_speed: float
+    brake_entry_speed: float
     hold_speed: float
     slow_speed: float
     recover_speed: float
     pass_steps: int
+    pass_cruise_steps: int
+    pass_decel_steps: int
+    pass_decel_start_m: float
     hold_steps: int
     slow_steps: int
     recover_steps: int
@@ -820,11 +824,12 @@ class ReferenceTrajectoryGenerator:
         plan = self._command_plan
         step = max(0, self._step - 1)
         if step < plan.pass_steps:
-            current, next_point, lookahead, heading = self._command_polyline_reference(
-                plan.pass_points, step=step, speed=plan.pass_speed
+            distance, speed = self._pass_deceleration_distance_and_speed(plan, step)
+            current, next_point, lookahead, heading = self._command_polyline_reference_at_distance(
+                plan.pass_points, distance=distance, speed=speed
             )
             waypoint_type = "pass_through"
-            phase, phase_id, speed = "cruise", 1, plan.pass_speed
+            phase, phase_id = ("slowdown", 2) if step >= plan.pass_cruise_steps else ("cruise", 1)
         elif step < plan.pass_steps + plan.hold_steps:
             current = plan.brake_point
             next_point = plan.brake_point + plan.approach_heading * 0.01
@@ -887,6 +892,7 @@ class ReferenceTrajectoryGenerator:
         up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
         pass_speed = float(self._rng.uniform(0.55, 0.78))
+        brake_entry_speed = float(self._rng.uniform(0.15, 0.24))
         hold_speed = float(self._rng.uniform(0.02, 0.07))
         slow_speed = float(self._rng.uniform(0.25, 0.35))
         recover_speed = float(self._rng.uniform(0.42, 0.62))
@@ -943,7 +949,18 @@ class ReferenceTrajectoryGenerator:
         pass_points = (origin, pass_mid, brake_point)
         slow_points = (brake_point, slow_mid, slow_end)
         recover_points = (slow_end, recover_mid, recover_end)
-        pass_steps = self._steps_for_polyline(pass_points, pass_speed, min_steps=18)
+        pass_length = polyline_length(list(pass_points))
+        decel_start_fraction = float(self._rng.uniform(0.52, 0.68))
+        pass_decel_start_m = pass_length * decel_start_fraction
+        pass_cruise_steps = max(
+            8, int(np.ceil(pass_decel_start_m / max(pass_speed * self.dt, 1e-4)))
+        )
+        pass_decel_length = max(0.0, pass_length - pass_decel_start_m)
+        pass_decel_avg_speed = 0.5 * (pass_speed + brake_entry_speed)
+        pass_decel_steps = max(
+            18, int(np.ceil(pass_decel_length / max(pass_decel_avg_speed * self.dt, 1e-4)))
+        )
+        pass_steps = pass_cruise_steps + pass_decel_steps
         hold_steps = int(self._rng.integers(28, 48))
         slow_steps = self._steps_for_polyline(slow_points, slow_speed, min_steps=30)
         avg_recover_speed = 0.5 * (slow_speed + recover_speed)
@@ -954,10 +971,14 @@ class ReferenceTrajectoryGenerator:
             slow_points=slow_points,
             recover_points=recover_points,
             pass_speed=pass_speed,
+            brake_entry_speed=brake_entry_speed,
             hold_speed=hold_speed,
             slow_speed=slow_speed,
             recover_speed=recover_speed,
             pass_steps=pass_steps,
+            pass_cruise_steps=pass_cruise_steps,
+            pass_decel_steps=pass_decel_steps,
+            pass_decel_start_m=pass_decel_start_m,
             hold_steps=hold_steps,
             slow_steps=slow_steps,
             recover_steps=recover_steps,
@@ -975,6 +996,11 @@ class ReferenceTrajectoryGenerator:
         self, points: tuple[np.ndarray, ...], *, step: int, speed: float
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         distance = max(0.0, int(step) * self.dt * float(speed))
+        return self._command_polyline_reference_at_distance(points, distance=distance, speed=speed)
+
+    def _command_polyline_reference_at_distance(
+        self, points: tuple[np.ndarray, ...], *, distance: float, speed: float
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         length = polyline_length(list(points))
         current, heading = point_on_polyline(list(points), min(distance, length))
         next_distance = min(length, distance + max(float(speed) * self.dt * 4.0, 0.015))
@@ -982,6 +1008,24 @@ class ReferenceTrajectoryGenerator:
         next_point, _ = point_on_polyline(list(points), next_distance)
         lookahead, _ = point_on_polyline(list(points), lookahead_distance)
         return current, next_point, lookahead, heading
+
+    def _pass_deceleration_distance_and_speed(
+        self, plan: ReferenceCommandPlan, step: int
+    ) -> tuple[float, float]:
+        if step < plan.pass_cruise_steps:
+            return float(step) * self.dt * plan.pass_speed, plan.pass_speed
+        decel_step = min(max(0, step - plan.pass_cruise_steps), plan.pass_decel_steps)
+        u = float(np.clip(decel_step / max(1, plan.pass_decel_steps), 0.0, 1.0))
+        smooth = u * u * (3.0 - 2.0 * u)
+        speed = plan.pass_speed + (plan.brake_entry_speed - plan.pass_speed) * smooth
+        smooth_integral = u**3 - 0.5 * u**4
+        decel_distance = (
+            plan.pass_decel_steps
+            * self.dt
+            * (plan.pass_speed * u + (plan.brake_entry_speed - plan.pass_speed) * smooth_integral)
+        )
+        length = polyline_length(list(plan.pass_points))
+        return min(length, plan.pass_decel_start_m + decel_distance), float(speed)
 
     def _recover_command_speed(self, plan: ReferenceCommandPlan, phase_step: int) -> float:
         alpha = float(np.clip(phase_step / max(1, plan.recover_steps), 0.0, 1.0))

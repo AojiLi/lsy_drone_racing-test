@@ -241,6 +241,38 @@ def test_reference_command_generator_is_dense_continuous_and_randomized() -> Non
     assert not np.allclose(ref_a.lookahead_point, ref_b.lookahead_point)
 
 
+def test_reference_command_pass_phase_ramps_down_before_hold() -> None:
+    obs = sample_obs()
+    generator = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
+    generator.reset(obs, seed=23)
+    references = [generator.reference(obs) for _ in range(220)]
+
+    first_hold_idx = next(
+        idx
+        for idx, reference in enumerate(references)
+        if reference.waypoint_type == "hold_or_brake"
+    )
+    pass_refs = references[:first_hold_idx]
+    pass_speeds = np.array([reference.desired_speed for reference in pass_refs], dtype=np.float32)
+
+    assert len(pass_refs) > 30
+    assert float(pass_speeds[0]) >= 0.55
+    assert float(pass_speeds[-1]) <= 0.25
+    assert references[first_hold_idx].desired_speed < pass_speeds[-1]
+
+    decel_start_idx = int(np.argmax(pass_speeds < pass_speeds[0] - 0.03))
+    assert decel_start_idx > 0
+    decel_tail = pass_speeds[decel_start_idx:]
+    assert np.all(np.diff(decel_tail) <= 1e-5)
+
+    final_pass = pass_refs[-1]
+    first_hold = references[first_hold_idx]
+    assert np.linalg.norm(final_pass.current_point - first_hold.current_point) <= 0.04
+    assert final_pass.phase == "slowdown"
+    assert first_hold.waypoint_type == "hold_or_brake"
+    np.testing.assert_allclose(first_hold.desired_velocity, np.zeros(3), atol=1e-6)
+
+
 def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> None:
     args = Namespace(
         task="reference_command_no_gate_reward",

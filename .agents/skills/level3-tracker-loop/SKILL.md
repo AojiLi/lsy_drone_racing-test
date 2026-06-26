@@ -137,6 +137,12 @@ speed, phase duration, braking distance, slow-through distance, and recovery
 angle so the tracker learns generic command following rather than one memorized
 path. The sequence should resemble a conservative Level3 planner approach:
 smooth cruise, slowdown/hold, low-speed-through, then smooth recovery.
+Do not switch abruptly from cruise speed to zero-speed hold. The pass-through
+approach must include a deceleration ramp before `hold_or_brake`: desired speed
+should taper from roughly `0.55-0.78m/s` down to about `0.15-0.24m/s`, with
+reference-point spacing shrinking consistently, before the stationary hold
+horizon takes over. This teaches "fly -> slow down -> stop", not "fly -> panic
+stop".
 
 For v59, the tracker may gain a small local safety reflex, but it must not
 become an autonomous Level3 racer. Treat this as:
