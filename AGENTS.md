@@ -235,6 +235,13 @@
   training. Use `.agents/skills/level3-tracker-loop/SKILL.md`. Do not approve a
   manual long-training command until tracker qualification and strict
   planner-integration smoke pass.
+- v55 gate-aperture reward shaping is no longer a required tracker stage.
+  Because the upper planner owns pre-gate/aperture/post-gate reference
+  generation, the bottom PPO tracker only needs to prove free-space trajectory
+  following. After `zigzag_or_lemniscate_tracking`, go directly to
+  `planner_integration_smoke` on unchanged `config/level3.toml`; use
+  `gate_aperture_reference` only as an optional diagnostic if planner-generated
+  references appear untrackable.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

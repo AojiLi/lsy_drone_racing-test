@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "lane": "v55_tracker_qualification_curriculum",
-  "purpose": "Completion gates for the Level3 low-level PPO reference tracker. A stage may only unlock the next stage after all required metrics pass.",
+  "purpose": "Completion gates for the Level3 low-level PPO reference tracker. The required ladder proves free-space trajectory tracking, then moves directly to planner integration smoke. Gate-aperture reference is optional diagnostic only.",
   "hard_boundary": {
     "final_eval_config": "config/level3.toml",
     "target_track_mutable": false,
@@ -12,7 +12,7 @@
     "checkpoint_backed_required": true,
     "all_finite_required": true,
     "generated_artifacts_in_git": false,
-    "stage_gate_semantics": "all required_metrics must pass before next_stage is unlocked"
+    "stage_gate_semantics": "all required_metrics must pass before next_stage is unlocked for required stages; optional_diagnostic stages do not block planner_integration_smoke"
   },
   "training_policy": {
     "short_smoke_purpose": "Only verify command plumbing, W&B, checkpoint writing, evaluator loading, finite observations/actions, and gate-checker behavior.",
@@ -319,7 +319,7 @@
       },
       "prerequisite_stage": "curve_tracking",
       "min_eval_episodes": 20,
-      "next_stage": "gate_aperture_reference",
+      "next_stage": "planner_integration_smoke",
       "required_metrics": [
         {"name": "checkpoint_backed", "op": "==", "value": true},
         {"name": "all_finite", "op": "==", "value": true},
@@ -332,36 +332,8 @@
       ]
     },
     {
-      "id": "gate_aperture_reference",
-      "order": 11,
-      "environment": "gate_aperture",
-      "config": "config/level3_tracker_gate_aperture.toml",
-      "task": "gate_aperture_reference",
-      "training_budget": {
-        "preflight_smoke_timesteps": 4096,
-        "default_maturation_timesteps": 15000000,
-        "research_extension_timesteps": 25000000,
-        "min_timesteps_before_learning_failure": 5000000,
-        "checkpoint_interval_timesteps": 1000000,
-        "evaluate_all_milestones": true
-      },
-      "prerequisite_stage": "zigzag_or_lemniscate_tracking",
-      "min_eval_episodes": 30,
-      "next_stage": "planner_integration_smoke",
-      "required_metrics": [
-        {"name": "checkpoint_backed", "op": "==", "value": true},
-        {"name": "all_finite", "op": "==", "value": true},
-        {"name": "valid_aperture_cross_rate", "op": ">=", "value": 0.7},
-        {"name": "post_gate_recovery_rate", "op": ">=", "value": 0.6},
-        {"name": "crash_rate", "op": "<=", "value": 0.1},
-        {"name": "mean_aperture_yz_error_m", "op": "<=", "value": 0.18},
-        {"name": "p90_aperture_yz_error_m", "op": "<=", "value": 0.32},
-        {"name": "mean_post_gate_speed_mps", "op": "<=", "value": 0.65}
-      ]
-    },
-    {
       "id": "planner_integration_smoke",
-      "order": 12,
+      "order": 11,
       "environment": "level3",
       "config": "config/level3.toml",
       "task": "level3",
@@ -374,7 +346,7 @@
         "evaluate_all_milestones": false,
         "note": "No new long training in this stage; evaluate the qualified tracker with the deployed upper planner on unchanged config/level3.toml."
       },
-      "prerequisite_stage": "gate_aperture_reference",
+      "prerequisite_stage": "zigzag_or_lemniscate_tracking",
       "min_eval_episodes": 20,
       "next_stage": "manual_long_level3_training_review",
       "required_metrics": [
@@ -384,6 +356,37 @@
         {"name": "nonzero_first_gate_progress_ratio", "op": ">=", "value": 0.5},
         {"name": "gate0_pass_count", "op": ">=", "value": 1},
         {"name": "early_termination_ratio", "op": "<=", "value": 0.6}
+      ]
+    },
+    {
+      "id": "gate_aperture_reference",
+      "order": 90,
+      "environment": "gate_aperture",
+      "config": "config/level3_tracker_gate_aperture.toml",
+      "task": "gate_aperture_reference",
+      "optional_diagnostic": true,
+      "blocking": false,
+      "diagnostic_note": "Use only to inspect whether planner-generated pre-gate/aperture/post-gate references are trackable. Do not require this reward-shaped mini task before planner_integration_smoke.",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 0,
+        "research_extension_timesteps": 0,
+        "min_timesteps_before_learning_failure": 0,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true
+      },
+      "prerequisite_stage": "zigzag_or_lemniscate_tracking",
+      "min_eval_episodes": 30,
+      "next_stage": null,
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "valid_aperture_cross_rate", "op": ">=", "value": 0.7},
+        {"name": "post_gate_recovery_rate", "op": ">=", "value": 0.6},
+        {"name": "crash_rate", "op": "<=", "value": 0.1},
+        {"name": "mean_aperture_yz_error_m", "op": "<=", "value": 0.18},
+        {"name": "p90_aperture_yz_error_m", "op": "<=", "value": 0.32},
+        {"name": "mean_post_gate_speed_mps", "op": "<=", "value": 0.65}
       ]
     }
   ]

@@ -1,6 +1,6 @@
 ---
 name: level3-tracker-loop
-description: Use when training, evaluating, tuning, or analyzing the v54 Level3 low-level PPO reference tracker as a trajectory-following controller, before planner integration. Use for tracker qualification curricula such as hover, point hold, point reach, straight-line tracking, L-shaped tracking, curved trajectory tracking, braking-to-point, heading tracking, multi-point reference following, gate-aperture reference following, and deciding whether the tracker is ready for a planner-driven Level3 run. Use this instead of level3-ppo-loop when the question is about proving the bottom PPO can accurately, smoothly, and stably follow reference points/trajectories rather than directly optimizing Level3 gate-pass success.
+description: Use when training, evaluating, tuning, or analyzing the v54/v55 Level3 low-level PPO reference tracker as a trajectory-following controller, before planner integration. Use for tracker qualification curricula such as hover, point hold, point reach, straight-line tracking, L-shaped tracking, curved trajectory tracking, braking-to-point, heading tracking, multi-point reference following, optional gate-aperture diagnostics, and deciding whether the tracker is ready for a planner-driven Level3 run. Use this instead of level3-ppo-loop when the question is about proving the bottom PPO can accurately, smoothly, and stably follow reference points/trajectories rather than directly optimizing Level3 gate-pass success.
 ---
 
 # Level3 Tracker Loop
@@ -146,11 +146,13 @@ packet explains why the lower rungs are already proven.
 10. `zigzag_or_lemniscate_tracking`
     - follow sharper but still short held-out curves;
     - require low tracking error without unstable corrective actions.
-11. `gate_aperture_reference`
-    - follow pre-gate -> aperture -> post-gate reference points;
-    - this is still a tracker exam, not full Level3 racing.
-12. `planner_integration_smoke`
+11. `planner_integration_smoke`
     - run unchanged `config/level3.toml` with the upper planner and tracker.
+
+Optional diagnostic: `gate_aperture_reference` may be used to inspect whether a
+planner-generated pre-gate -> aperture -> post-gate reference is trackable, but
+it is not a required tracker-training stage. The planner owns aperture crossing
+semantics; the bottom PPO owns reference tracking.
 
 ## Metrics
 
@@ -191,8 +193,8 @@ Do not approve planner-driven long Level3 training until all are true:
 - hover/point/line tasks show low final error and no systematic crash;
 - multi-point/L/curve tasks show bounded overshoot and smooth action changes;
 - braking task shows low terminal speed near the target;
-- gate-aperture reference task demonstrates crossing or phase completion in the
-  tracker-specific mini task;
+- the first 10 free-space tracker stages through `zigzag_or_lemniscate_tracking`
+  are checkpoint-backed and passed;
 - planner integration smoke on unchanged `config/level3.toml` seeds at least
   `101-120` has majority first-gate progress and at least one gate-0 pass.
 
@@ -227,7 +229,7 @@ If these fail, write a hold packet. Do not give a fake long-training command.
 9. Update `state.json`.
 10. Commit intended small files and push to `aojili-test/main`.
 
-## Autonomous 12-Stage Goal Protocol
+## Autonomous Required-Stage Goal Protocol
 
 When the user launches a `/goal` for the full tracker ladder, run exactly one
 stage at a time:
@@ -240,10 +242,10 @@ train current stage
 -> if fail, analyze, change the smallest useful thing, and retry the same stage
 ```
 
-The current stage is the first item in
-`experiments/level3_ppo_loop/tracker_qualification_gates.json` that is not
-listed in `state.json` `reference_tracker_ppo.v55_stage_gates.passed_stages`.
-Never skip a stage unless a new decision packet explicitly justifies it.
+The current required stage follows the `next_stage` chain in
+`experiments/level3_ppo_loop/tracker_qualification_gates.json`, ignoring stages
+marked `optional_diagnostic`. If the first 10 tracker stages are passed, the next
+required stage is `planner_integration_smoke`, not `gate_aperture_reference`.
 
 On a failed stage gate, spawn exactly three analysis subagents before changing
 training structure or reward:
@@ -270,8 +272,9 @@ evaluator semantics, controller behavior, or loop orchestration, use the
 builder/checker gate before training again. The checker must be read-only and
 must verify unchanged `config/level3.toml`.
 
-Do not approve planner-driven Level3 long training until all 12 stage gates pass
-and `planner_integration_smoke` passes on unchanged `config/level3.toml`.
+Do not approve planner-driven Level3 long training until the required tracker
+ladder through `zigzag_or_lemniscate_tracking` is passed and
+`planner_integration_smoke` passes on unchanged `config/level3.toml`.
 
 ## Long-Stage Training Policy
 
@@ -309,8 +312,8 @@ line_tracking: 5M
 multi_point_reference, l_shape_tracking: 8M
 curve_tracking: 10M
 zigzag_or_lemniscate_tracking: 12M
-gate_aperture_reference: 15M
 planner_integration_smoke: no new training, evaluate only
+gate_aperture_reference: optional diagnostic only, no default maturation
 ```
 
 Tracker learning chunks must use vectorized environments. The single-env
@@ -394,9 +397,15 @@ multi_point_reference
 l_shape_tracking
 curve_tracking
 zigzag_or_lemniscate_tracking
-gate_aperture_reference
+optional gate_aperture_reference diagnostic only
 ```
 
 The first acceptance target is not a Level3 success rate. It is evidence that
 the tracker can follow references accurately enough for an upper planner to be
 meaningful.
+
+As of the v55 architecture clarification, `gate_aperture_reference` is no longer
+part of the required ladder. Do not continue reward-shaped gate-aperture PPO
+training by default; use the zigzag-qualified tracker in planner integration
+smoke and diagnose failures as either planner-reference design problems or
+tracker reference-following gaps.

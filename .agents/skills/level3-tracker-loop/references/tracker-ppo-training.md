@@ -77,8 +77,11 @@ Use this order unless a decision packet justifies a different one:
 8. `l_shape_tracking`
 9. `curve_tracking`
 10. `zigzag_or_lemniscate_tracking`
-11. `gate_aperture_reference`
-12. `planner_integration_smoke`
+11. `planner_integration_smoke`
+
+`gate_aperture_reference` is now optional diagnostic only. Use it when a
+planner-generated pre-gate/aperture/post-gate reference appears untrackable and
+needs isolation, but do not make it a mandatory reward-shaped training stage.
 
 Start with fixed/easy references. Then randomize start state, endpoint, speed,
 curvature, and point timing. Add disturbance, latency, and domain
@@ -151,11 +154,13 @@ Every rung should report:
 - held-out seed/reference split;
 - checkpoint path and W&B run URL.
 
-For gate-aperture and planner smoke, add valid plane crossing, aperture margin,
-post-gate recovery, first-gate progress, and gate-0 pass count.
+For optional gate-aperture diagnostics and required planner smoke, add valid
+plane crossing, aperture margin, post-gate recovery, first-gate progress, and
+gate-0 pass count.
 
 Do not approve long planner-driven Level3 training until the tracker passes the
-mini-task gates and strict planner smoke on unchanged `config/level3.toml`.
+required free-space tracker gates through `zigzag_or_lemniscate_tracking` and
+strict planner smoke on unchanged `config/level3.toml`.
 
 ## PPO Hygiene
 
