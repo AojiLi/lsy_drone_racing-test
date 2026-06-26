@@ -59,40 +59,44 @@ servo law:
 - reference phase or time encoding when switching points;
 - local gate-aperture geometry only for gate-aperture tasks.
 
-For planner-driven Level3, the reference should include semantic intent, not
-only a single target point. Treat this as the durable v58 interface requirement:
+For planner-driven Level3, the reference should include command intent, not
+only a single target point. The user has rejected the earlier v58 direction
+when it is framed as gate/aperture semantics. Treat the next durable interface
+as v60 no-gate command tracking:
 
 ```text
-reference_point
+current_reference_point
 next_point
 lookahead_point
 desired_velocity
 desired_speed
 desired_heading
-waypoint_type / stop_signal / brake_mask
+generic pass-through / hold-brake / low-speed-through / speed-recovery intent
 ```
 
 The main instruction should come from the trajectory horizon, speed/velocity,
-and heading. Waypoint type or masks are auxiliary hints, not a replacement for
-concrete flight commands. For example, a brake/hold command should look like a
+and heading. Labels or masks are auxiliary hints, not a replacement for
+concrete flight commands. For example, a hold/brake command should look like a
 nearly stationary short horizon with low desired speed and alignment heading;
-a slow-through command should look like future points passing through the
-aperture with low but nonzero speed and a through-gate heading.
+a low-speed-through command should look like future points moving through a
+constrained segment with low but nonzero speed.
 
-Recommended waypoint semantics:
+Recommended generic command intents:
 
-- `through`: pass smoothly through the point at the commanded speed;
-- `brake_or_hold`: slow to about `0.0-0.1m/s`, reduce overshoot, and stabilize
-  heading/alignment;
-- `slow_through`: continue through the point at about `0.25-0.35m/s` without
-  stopping dead;
-- `recover`: leave the constrained segment and restore speed gradually.
+- `pass_through`: pass smoothly through the point at the commanded speed;
+- `hold_or_brake`: slow to about `0.0-0.1m/s`, reduce overshoot, and stabilize;
+- `low_speed_through`: continue at about `0.25-0.35m/s` without stopping dead;
+- `recover_speed`: restore speed gradually after the constrained segment.
 
 If the actor cannot observe the future reference horizon, desired speed, and
 heading clearly enough, it may treat every waypoint as a pass-through point.
 That matches the v57a failure pattern: references became continuous, but actual
-phase4 speed stayed too high and contacts persisted. A waypoint label alone is
+phase4 speed stayed too high and contacts persisted. A label alone is
 not sufficient evidence that the command is trackable.
+
+Do not encode gate pass, aperture crossing, finish, race progress, or stage
+progress as tracker actor inputs for v60. Those are planner-integration or final
+evaluation concepts, not bottom-servo training concepts.
 
 If using asymmetric PPO later, the critic may receive privileged exact state,
 dynamics randomization values, or full reference state during training only.
@@ -112,15 +116,17 @@ Use this order unless a decision packet justifies a different one:
 8. `l_shape_tracking`
 9. `curve_tracking`
 10. `zigzag_or_lemniscate_tracking`
-11. `semantic_planner_reference`
+11. `reference_command_no_gate_reward`
 12. `planner_integration_smoke`
 
 `gate_aperture_reference` is now optional diagnostic only. Use it when a
 planner-generated pre-gate/aperture/post-gate reference appears untrackable and
 needs isolation, but do not make it a mandatory reward-shaped training stage.
-`semantic_planner_reference` is the required v58 stage for planner-like command
-intent: future reference points, desired speed/velocity, desired heading, and
-auxiliary masks for through, brake/hold, slow-through, and recover.
+The old `semantic_planner_reference` v58 stage is now held. Replace it with a
+v60 no-gate command stage whose command intent is expressed by future reference
+points, desired speed/velocity, desired heading, and optional generic masks for
+pass-through, hold/brake, low-speed-through, and speed recovery. The bottom
+tracker should not receive gate/aperture pass reward while learning this stage.
 
 Start with fixed/easy references. Then randomize start state, endpoint, speed,
 curvature, and point timing. Add disturbance, latency, and domain
@@ -173,14 +179,14 @@ Keep tracker reward local and measurable:
 - action norm and action-delta smoothness;
 - uprightness, spin/body-rate limits, and crash/timeout penalties.
 
-For semantic waypoint training, split reward by intended waypoint behavior:
+For command-intent training, split reward by intended trajectory behavior:
 
-- `through`: reward smooth path following and speed tracking, not stopping;
-- `brake_or_hold`: reward low terminal speed, low overshoot, and short dwell
+- `pass_through`: reward smooth path following and speed tracking, not stopping;
+- `hold_or_brake`: reward low terminal speed, low overshoot, and short dwell
   stability near the target;
-- `slow_through`: reward crossing at the commanded low speed, penalizing both
+- `low_speed_through`: reward motion at the commanded low speed, penalizing both
   rushing through and stopping dead;
-- `recover`: reward gradual speed restoration and smooth action changes.
+- `recover_speed`: reward gradual speed restoration and smooth action changes.
 
 Avoid full-race global progress reward during early tracker qualification. It
 can hide the real failure mode: the policy may move forward without being able
@@ -189,6 +195,12 @@ to stop, align, or follow the reference precisely.
 Do not reward the presence of a label by itself. Reward the measurable behavior
 implied by the concrete command: position/horizon tracking, desired-speed
 tracking, heading tracking, low overshoot, and smooth actions.
+
+Do not add gate-pass bonus, aperture-crossing bonus, finish bonus, race-progress
+bonus, stage-progress bonus, or target-gate transition reward to the bottom
+tracker. If a future experiment needs to evaluate gate passage, keep it in
+planner integration smoke on unchanged `config/level3.toml`, not in tracker
+training reward.
 
 ## Metrics And Gates
 
@@ -210,15 +222,15 @@ For optional gate-aperture diagnostics and required planner smoke, add valid
 plane crossing, aperture margin, post-gate recovery, first-gate progress, and
 gate-0 pass count.
 
-For v58 semantic planner-like references, add per-semantics metrics:
+For v60 no-gate command references, add per-command metrics:
 
-- error and speed error by waypoint type;
-- brake/hold terminal speed;
-- slow-through speed in the constrained segment;
-- overshoot after brake/hold targets;
+- error and speed error by command type;
+- hold/brake terminal speed;
+- low-speed-through speed in the constrained segment;
+- overshoot after hold/brake targets;
 - dwell stability for hold targets;
 - wrong behavior counts, such as rushing through a brake point or stopping at a
-  slow-through point.
+  low-speed-through point.
 
 Do not approve long planner-driven Level3 training until the tracker passes the
 required free-space tracker gates through `zigzag_or_lemniscate_tracking` and

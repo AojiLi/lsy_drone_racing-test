@@ -319,7 +319,7 @@
       },
       "prerequisite_stage": "curve_tracking",
       "min_eval_episodes": 20,
-      "next_stage": "semantic_planner_reference",
+      "next_stage": "reference_command_no_gate_reward",
       "required_metrics": [
         {"name": "checkpoint_backed", "op": "==", "value": true},
         {"name": "all_finite", "op": "==", "value": true},
@@ -332,11 +332,11 @@
       ]
     },
     {
-      "id": "semantic_planner_reference",
+      "id": "reference_command_no_gate_reward",
       "order": 11,
       "environment": "free_space",
       "config": "config/level3_tracker_free_space.toml",
-      "task": "semantic_planner_reference",
+      "task": "reference_command_no_gate_reward",
       "training_budget": {
         "preflight_smoke_timesteps": 4096,
         "default_maturation_timesteps": 8000000,
@@ -344,7 +344,7 @@
         "min_timesteps_before_learning_failure": 5000000,
         "checkpoint_interval_timesteps": 1000000,
         "evaluate_all_milestones": true,
-        "note": "v58 semantic tracker stage. Observation layout must be level3_reference_tracker_semantic_v2; this trains waypoint intent, not Level3 gate strategy."
+        "note": "v60 no-gate command tracker stage. Observation layout must be level3_reference_tracker_semantic_v2; this trains generic pass/hold/low-speed/recovery command following, not gate strategy."
       },
       "prerequisite_stage": "zigzag_or_lemniscate_tracking",
       "min_eval_episodes": 20,
@@ -380,7 +380,7 @@
         "evaluate_all_milestones": false,
         "note": "No new long training in this stage; evaluate the qualified tracker with GeometricSlowGatePlanner on unchanged config/level3.toml."
       },
-      "prerequisite_stage": "semantic_planner_reference",
+      "prerequisite_stage": "reference_command_no_gate_reward",
       "min_eval_episodes": 20,
       "next_stage": "manual_long_level3_training_review",
       "required_metrics": [

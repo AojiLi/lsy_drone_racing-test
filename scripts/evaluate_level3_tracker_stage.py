@@ -391,7 +391,7 @@ def summarize_episode(
     }
     row.update(gate_metrics)
     row.update(semantic_metrics)
-    if stage_id == "semantic_planner_reference":
+    if stage_id in {"semantic_planner_reference", "reference_command_no_gate_reward"}:
         row["success"] = bool(
             not terminated
             and semantic_metrics["semantic_waypoint_type_count"] >= 4

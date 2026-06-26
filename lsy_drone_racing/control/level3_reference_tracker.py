@@ -35,10 +35,10 @@ REFERENCE_TRACKER_PHASES = (
 )
 REFERENCE_TRACKER_OBS_DIM = 65
 REFERENCE_TRACKER_WAYPOINT_TYPES = (
-    "through",
-    "brake_or_hold",
-    "slow_through",
-    "recover",
+    "pass_through",
+    "hold_or_brake",
+    "low_speed_through",
+    "recover_speed",
 )
 REFERENCE_TRACKER_SEMANTIC_FEATURE_DIM = len(REFERENCE_TRACKER_WAYPOINT_TYPES) + 3
 SEMANTIC_REFERENCE_TRACKER_OBS_DIM = (
@@ -52,7 +52,8 @@ REFERENCE_TRACKER_OBS_DIMS = {
     REFERENCE_TRACKER_LAYOUT: REFERENCE_TRACKER_OBS_DIM,
     SEMANTIC_REFERENCE_TRACKER_LAYOUT: SEMANTIC_REFERENCE_TRACKER_OBS_DIM,
 }
-SEMANTIC_REFERENCE_TRACKER_TASKS = frozenset({"semantic_planner_reference"})
+REFERENCE_COMMAND_TRACKER_TASKS = frozenset({"reference_command_no_gate_reward"})
+SEMANTIC_REFERENCE_TRACKER_TASKS = REFERENCE_COMMAND_TRACKER_TASKS
 FREE_SPACE_TRACKER_TASKS = frozenset(
     {
         "hover",
@@ -71,7 +72,8 @@ GATE_TRACKER_TASKS = frozenset({"gate_aperture_reference", "level3"})
 REFERENCE_TRACKER_TASK_ALIASES = {
     "point": "point_reach",
     "gate_aperture": "gate_aperture_reference",
-    "semantic_reference": "semantic_planner_reference",
+    "semantic_reference": "reference_command_no_gate_reward",
+    "semantic_planner_reference": "reference_command_no_gate_reward",
 }
 REFERENCE_TRACKER_TASKS = tuple(
     sorted(FREE_SPACE_TRACKER_TASKS | GATE_TRACKER_TASKS | set(REFERENCE_TRACKER_TASK_ALIASES))
@@ -116,7 +118,7 @@ class ReferenceFrame:
     obstacle_relative: np.ndarray
     obstacle_distance: float
     obstacle_detected: float
-    waypoint_type: str = "through"
+    waypoint_type: str = "pass_through"
     waypoint_type_id: int = 0
     stop_signal: float = 0.0
     brake_mask: float = 0.0
@@ -392,6 +394,12 @@ def default_tracker_observation_layout(task: str, requested_layout: str = "auto"
 
 def waypoint_type_id(waypoint_type: str) -> int:
     """Return the stable integer id for a semantic waypoint type."""
+    waypoint_type = {
+        "through": "pass_through",
+        "brake_or_hold": "hold_or_brake",
+        "slow_through": "low_speed_through",
+        "recover": "recover_speed",
+    }.get(waypoint_type, waypoint_type)
     try:
         return REFERENCE_TRACKER_WAYPOINT_TYPES.index(waypoint_type)
     except ValueError as exc:
@@ -406,10 +414,16 @@ def waypoint_semantic_values(
     slow_through_mask: float | None = None,
 ) -> tuple[int, float, float, float]:
     """Return waypoint id and explicit behavior masks for the semantic v2 layout."""
+    waypoint_type = {
+        "through": "pass_through",
+        "brake_or_hold": "hold_or_brake",
+        "slow_through": "low_speed_through",
+        "recover": "recover_speed",
+    }.get(waypoint_type, waypoint_type)
     type_id = waypoint_type_id(waypoint_type)
-    default_stop = 1.0 if waypoint_type == "brake_or_hold" else 0.0
-    default_brake = 1.0 if waypoint_type == "brake_or_hold" else 0.0
-    default_slow = 1.0 if waypoint_type == "slow_through" else 0.0
+    default_stop = 1.0 if waypoint_type == "hold_or_brake" else 0.0
+    default_brake = 1.0 if waypoint_type == "hold_or_brake" else 0.0
+    default_slow = 1.0 if waypoint_type == "low_speed_through" else 0.0
     return (
         type_id,
         float(default_stop if stop_signal is None else stop_signal),
@@ -630,8 +644,8 @@ class ReferenceTrajectoryGenerator:
             return self._curve_reference(obs, speed=0.34, sharp=False)
         if self.task == "zigzag_or_lemniscate_tracking":
             return self._curve_reference(obs, speed=0.36, sharp=True)
-        if self.task == "semantic_planner_reference":
-            return self._semantic_planner_reference(obs)
+        if self.task == "reference_command_no_gate_reward":
+            return self._reference_command_no_gate_reward(obs)
         raise ValueError(f"Unsupported free-space tracker task: {self.task!r}")
 
     def _hover_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
@@ -801,8 +815,8 @@ class ReferenceTrajectoryGenerator:
             use_gate_context=False,
         )
 
-    def _semantic_planner_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
-        """Planner-like free-space reference sequence with explicit waypoint intent."""
+    def _reference_command_no_gate_reward(self, obs: dict[str, Any]) -> ReferenceFrame:
+        """Free-space command sequence with no gate/aperture reward semantics."""
         origin = np.asarray(self._origin, dtype=np.float32)
         points = [
             origin,
@@ -817,27 +831,27 @@ class ReferenceTrajectoryGenerator:
             current = lerp(points[0], points[1], alpha)
             next_point = lerp(points[0], points[1], min(1.0, alpha + 0.18))
             lookahead = lerp(points[0], points[1], min(1.0, alpha + 0.40))
-            waypoint_type = "through"
+            waypoint_type = "pass_through"
             phase, phase_id, speed = "cruise", 1, 0.62
         elif step < 70:
             current = points[2]
             next_point = points[2]
             lookahead = points[3]
-            waypoint_type = "brake_or_hold"
+            waypoint_type = "hold_or_brake"
             phase, phase_id, speed = "slowdown", 2, 0.05
         elif step < 115:
             alpha = (step - 70) / 45.0
             current = lerp(points[2], points[3], alpha)
             next_point = lerp(points[2], points[3], min(1.0, alpha + 0.20))
             lookahead = lerp(points[2], points[3], min(1.0, alpha + 0.45))
-            waypoint_type = "slow_through"
+            waypoint_type = "low_speed_through"
             phase, phase_id, speed = "cross", 4, 0.30
         else:
             alpha = min(1.0, (step - 115) / 45.0)
             current = lerp(points[3], points[4], alpha)
             next_point = lerp(points[3], points[4], min(1.0, alpha + 0.22))
             lookahead = points[4]
-            waypoint_type = "recover"
+            waypoint_type = "recover_speed"
             phase, phase_id, speed = "recover", 5, 0.48 if alpha < 1.0 else 0.20
         heading = safe_normalize(next_point - current)
         return self._make_reference(
@@ -949,7 +963,7 @@ class ReferenceTrajectoryGenerator:
         desired_speed: float,
         *,
         desired_heading: np.ndarray | None = None,
-        waypoint_type: str = "through",
+        waypoint_type: str = "pass_through",
         stop_signal: float | None = None,
         brake_mask: float | None = None,
         slow_through_mask: float | None = None,
@@ -1503,7 +1517,7 @@ class ReferenceTrackerReward:
 
     @staticmethod
     def _semantic_terms(reference: ReferenceFrame, vel: np.ndarray) -> dict[str, float]:
-        """Return semantic waypoint behavior diagnostics and optional reward terms."""
+        """Return generic command behavior diagnostics and optional reward terms."""
         speed = float(np.linalg.norm(vel))
         desired_speed_error = abs(speed - float(reference.desired_speed))
         brake_excess = max(0.0, speed - 0.12) * float(reference.brake_mask)

@@ -44,16 +44,20 @@
   completion. Train and qualify hover, point, line, L-shape, curve, braking,
   heading, and multi-point reference tracking before treating planner+tracker
   Level3 gate pass as the primary exam.
-- Current v58 tracker objective: train the bottom PPO on semantic
-  planner-like reference trajectories, not generic point chasing. The tracker
-  must observe and respond to whether a waypoint is a pass-through point, a
-  brake/hold alignment point, a low-speed through point, or a recovery point.
-  Reference inputs should include current/next/lookahead points plus desired
-  velocity/speed/heading and waypoint intent such as `waypoint_type`,
-  `stop_signal`, or `brake_mask`. The concrete future points, speed/velocity,
-  and heading are the primary driving command; waypoint labels/masks are
-  auxiliary hints only.
-- Current v59 tracker proposal: after v58 semantic support is proven, allow a
+- Current v58 tracker correction: do not launch the existing semantic
+  planner-reference training as the next step. The user rejected any tracker
+  route that smells like teaching the bottom PPO to pass gates. The bottom
+  tracker must learn generic trajectory-command following, not gate semantics.
+  Future inputs should prioritize current/next/lookahead points, desired
+  velocity/speed, desired heading, and generic hold/low-speed command intent.
+  Waypoint labels are optional diagnostics, not the main interface.
+- Current v60 tracker proposal: replace v58 with a
+  `reference_command_tracker_no_gate_reward` lane. The reward must be local:
+  reference tracking, speed/velocity tracking, heading tracking, braking/hold
+  behavior, action smoothness, and small safety penalties only. Do not add
+  gate-pass, finish, aperture-crossing, race-progress, or stage-progress
+  rewards to the bottom tracker.
+- Current v59 tracker proposal: after v60 no-gate command tracking is proven, allow a
   small local safety reflex in the tracker. The tracker still follows planner
   references as its main job; safety features such as nearest obstacle relative
   position/distance, and possibly minimal gate-frame clearance, are auxiliary
@@ -297,15 +301,15 @@
   fell from about `0.740m` to `0.280m`, reference error from `0.783m` to
   `0.340m`, and action delta from `0.727` to `0.491`, while `gate0 pass`
   stayed `2/20`, contact stayed `20/20`, and near-plane phase4 speed remained
-  too high. The next proposed lane is
-  `v58_tracker_semantic_planner_reference_training`: make the bottom tracker
-  understand planner waypoint semantics (`through`, `brake_or_hold`,
-  `slow_through`, `recover`) before another ordinary planner threshold sweep.
-- v59 has been recorded as a future extension, not the immediate training
-  command: `v59_reference_tracker_with_local_safety_reflex` keeps reference
-  tracking dominant and adds only weak local obstacle/frame safety penalties or
-  inputs if v58/planner-smoke evidence shows contact persists despite
-  trackable references.
+  too high. The earlier v58 semantic-reference route is now held because it
+  risks adding gate-like semantics/rewards to the bottom tracker. The next
+  proposed lane is `v60_reference_command_tracker_no_gate_reward`: teach the
+  tracker to follow generic trajectory commands with hold/low-speed behavior
+  but no gate/aperture/race reward.
+- v59 remains a future extension, not the immediate training command:
+  `v59_reference_tracker_with_local_safety_reflex` keeps reference tracking
+  dominant and adds only weak local obstacle/frame safety penalties or inputs
+  after the generic no-gate-reward command tracker is proven.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

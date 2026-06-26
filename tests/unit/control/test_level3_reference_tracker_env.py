@@ -1,3 +1,4 @@
+from argparse import Namespace
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,9 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     tracker_env_mode_from_config,
     waypoint_semantic_features,
 )
+from lsy_drone_racing.control.train_level3_reference_tracker_ppo import (
+    reward_coefficients_from_args,
+)
 from lsy_drone_racing.utils import load_config
 
 ROOT = Path(__file__).parents[3]
@@ -46,12 +50,13 @@ def sample_obs() -> dict[str, np.ndarray]:
 def test_legacy_task_aliases() -> None:
     assert normalize_tracker_task("point") == "point_reach"
     assert normalize_tracker_task("gate_aperture") == "gate_aperture_reference"
-    assert normalize_tracker_task("semantic_reference") == "semantic_planner_reference"
+    assert normalize_tracker_task("semantic_reference") == "reference_command_no_gate_reward"
+    assert normalize_tracker_task("semantic_planner_reference") == "reference_command_no_gate_reward"
 
 
 def test_semantic_observation_layout_extends_v1_without_changing_v1() -> None:
     obs = sample_obs()
-    generator = ReferenceTrajectoryGenerator("semantic_planner_reference")
+    generator = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
     generator.reset(obs)
     reference = generator.reference(obs)
     memory = TrackerMemory.from_observation(obs)
@@ -75,20 +80,20 @@ def test_semantic_observation_layout_extends_v1_without_changing_v1() -> None:
         waypoint_semantic_features(reference),
         atol=1e-6,
     )
-    assert reference.waypoint_type == "through"
+    assert reference.waypoint_type == "pass_through"
 
 
-def test_semantic_reference_task_emits_explicit_waypoint_intents() -> None:
+def test_reference_command_task_emits_explicit_no_gate_intents() -> None:
     obs = sample_obs()
-    generator = ReferenceTrajectoryGenerator("semantic_planner_reference")
+    generator = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
     generator.reset(obs)
 
     references = [generator.reference(obs) for _ in range(130)]
     types = {reference.waypoint_type for reference in references}
 
-    assert {"through", "brake_or_hold", "slow_through", "recover"} <= types
-    brake = next(reference for reference in references if reference.waypoint_type == "brake_or_hold")
-    slow = next(reference for reference in references if reference.waypoint_type == "slow_through")
+    assert {"pass_through", "hold_or_brake", "low_speed_through", "recover_speed"} <= types
+    brake = next(reference for reference in references if reference.waypoint_type == "hold_or_brake")
+    slow = next(reference for reference in references if reference.waypoint_type == "low_speed_through")
     assert brake.stop_signal == pytest.approx(1.0)
     assert brake.brake_mask == pytest.approx(1.0)
     assert brake.desired_speed <= 0.10
@@ -98,7 +103,7 @@ def test_semantic_reference_task_emits_explicit_waypoint_intents() -> None:
 
 def test_semantic_reference_intent_is_encoded_by_horizon_speed_and_heading() -> None:
     obs = sample_obs()
-    generator = ReferenceTrajectoryGenerator("semantic_planner_reference")
+    generator = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
     generator.reset(obs)
 
     references = [generator.reference(obs) for _ in range(130)]
@@ -107,23 +112,56 @@ def test_semantic_reference_intent_is_encoded_by_horizon_speed_and_heading() -> 
     slow = references[70]
     recover = references[115]
 
-    assert through.waypoint_type == "through"
+    assert through.waypoint_type == "pass_through"
     assert np.linalg.norm(through.next_point - through.current_point) > 0.04
     assert through.desired_speed == pytest.approx(0.62)
 
-    assert brake.waypoint_type == "brake_or_hold"
+    assert brake.waypoint_type == "hold_or_brake"
     np.testing.assert_allclose(brake.next_point, brake.current_point, atol=1e-6)
     assert np.linalg.norm(brake.lookahead_point - brake.current_point) > 0.20
     assert brake.desired_speed == pytest.approx(0.05)
 
-    assert slow.waypoint_type == "slow_through"
+    assert slow.waypoint_type == "low_speed_through"
     assert np.linalg.norm(slow.next_point - slow.current_point) > 0.04
     assert slow.desired_speed == pytest.approx(0.30)
     assert slow.desired_heading[0] > 0.9
 
-    assert recover.waypoint_type == "recover"
+    assert recover.waypoint_type == "recover_speed"
     assert np.linalg.norm(recover.next_point - recover.current_point) > 0.04
     assert recover.desired_speed == pytest.approx(0.48)
+
+
+def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> None:
+    args = Namespace(
+        task="reference_command_no_gate_reward",
+        pos_error_coef=3.0,
+        vel_error_coef=0.6,
+        heading_coef=0.35,
+        gate_center_coef=9.0,
+        obstacle_margin=0.28,
+        obstacle_coef=0.8,
+        action_coef=0.02,
+        action_delta_coef=0.04,
+        progress_bonus=0.3,
+        gate_x_progress_coef=9.0,
+        gate_cross_bonus=9.0,
+        gate_recover_bonus=9.0,
+        gate_linger_penalty_coef=9.0,
+        semantic_brake_speed_coef=0.2,
+        semantic_slow_speed_coef=0.3,
+        semantic_slow_stop_coef=0.4,
+        crash_penalty=250.0,
+    )
+
+    coefficients = reward_coefficients_from_args(args)
+
+    assert coefficients["gate_center_coef"] == pytest.approx(0.0)
+    assert coefficients["gate_x_progress_coef"] == pytest.approx(0.0)
+    assert coefficients["gate_cross_bonus"] == pytest.approx(0.0)
+    assert coefficients["gate_recover_bonus"] == pytest.approx(0.0)
+    assert coefficients["gate_linger_penalty_coef"] == pytest.approx(0.0)
+    assert coefficients["pos_error_coef"] == pytest.approx(3.0)
+    assert coefficients["semantic_brake_speed_coef"] == pytest.approx(0.2)
 
 
 def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Path) -> None:

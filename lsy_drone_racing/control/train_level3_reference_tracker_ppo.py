@@ -29,6 +29,14 @@ DEFAULT_MODEL = (
     / "lsy_drone_racing/control/checkpoints/v54_reference_tracker_ppo/"
     / "v54_reference_tracker_ppo_final.ckpt"
 )
+NO_GATE_REWARD_TRACKER_TASKS = frozenset({"reference_command_no_gate_reward"})
+NO_GATE_REWARD_COEFFICIENTS = (
+    "gate_center_coef",
+    "gate_x_progress_coef",
+    "gate_cross_bonus",
+    "gate_recover_bonus",
+    "gate_linger_penalty_coef",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -396,10 +404,14 @@ def make_training_env(
 
 def reward_coefficients_from_args(args: argparse.Namespace) -> dict[str, float]:
     """Return ReferenceTrackerReward coefficients selected by CLI arguments."""
-    return {
+    coefficients = {
         name: float(getattr(args, name))
         for name in REFERENCE_TRACKER_REWARD_DEFAULTS
     }
+    if normalize_tracker_task(args.task) in NO_GATE_REWARD_TRACKER_TASKS:
+        for name in NO_GATE_REWARD_COEFFICIENTS:
+            coefficients[name] = 0.0
+    return coefficients
 
 
 def initial_checkpoint_step(path: Path | None, observation_layout: str) -> int:
