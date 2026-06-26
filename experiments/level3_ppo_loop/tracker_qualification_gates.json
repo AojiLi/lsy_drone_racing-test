@@ -344,7 +344,7 @@
         "min_timesteps_before_learning_failure": 5000000,
         "checkpoint_interval_timesteps": 1000000,
         "evaluate_all_milestones": true,
-        "note": "v60 no-gate command tracker stage. Observation layout must be level3_reference_tracker_semantic_v2; this trains generic pass/hold/low-speed/recovery command following, not gate strategy."
+        "note": "v60 clean command tracker stage. Observation layout must be level3_reference_tracker_command_v3; this keeps only self state, reference horizon, desired velocity/speed/heading, command masks, last action, and history. No gate, obstacle, or phase inputs."
       },
       "prerequisite_stage": "zigzag_or_lemniscate_tracking",
       "min_eval_episodes": 20,

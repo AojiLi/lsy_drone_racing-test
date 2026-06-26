@@ -1,10 +1,13 @@
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from lsy_drone_racing.control.level3_reference_tracker import (
+    COMMAND_REFERENCE_TRACKER_LAYOUT,
+    REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM,
     REFERENCE_TRACKER_OBS_DIM,
     REFERENCE_TRACKER_LAYOUT,
     SEMANTIC_REFERENCE_TRACKER_LAYOUT,
@@ -17,6 +20,7 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     ReferenceTrajectoryGenerator,
     TrackerMemory,
     TrackerPPOAgent,
+    default_tracker_observation_layout,
     gate_local_axis_velocity_x,
     load_tracker_checkpoint,
     normalize_tracker_task,
@@ -81,6 +85,55 @@ def test_semantic_observation_layout_extends_v1_without_changing_v1() -> None:
         atol=1e-6,
     )
     assert reference.waypoint_type == "pass_through"
+
+
+def test_reference_command_layout_is_clean_tracker_baseline() -> None:
+    assert (
+        default_tracker_observation_layout("reference_command_no_gate_reward")
+        == COMMAND_REFERENCE_TRACKER_LAYOUT
+    )
+
+    obs = sample_obs()
+    generator = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
+    generator.reset(obs)
+    reference = generator.reference(obs)
+    memory = TrackerMemory.from_observation(obs)
+
+    command_obs = ReferenceTrackerObservation(COMMAND_REFERENCE_TRACKER_LAYOUT).build(
+        obs,
+        reference,
+        memory,
+    )
+    modified_context = replace(
+        reference,
+        phase_id=5,
+        gate_local_position=np.array([9.0, -8.0, 7.0], dtype=np.float32),
+        aperture_yz=np.array([0.4, -0.3], dtype=np.float32),
+        obstacle_relative=np.array([0.9, -0.8, 0.7], dtype=np.float32),
+        obstacle_distance=0.05,
+        obstacle_detected=1.0,
+    )
+    command_obs_with_context_noise = ReferenceTrackerObservation(
+        COMMAND_REFERENCE_TRACKER_LAYOUT
+    ).build(
+        obs,
+        modified_context,
+        memory,
+    )
+    v1_obs = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(
+        obs,
+        reference,
+        memory,
+    )
+    v1_obs_with_context_noise = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(
+        obs,
+        modified_context,
+        memory,
+    )
+
+    assert command_obs.shape == (REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM,)
+    np.testing.assert_allclose(command_obs, command_obs_with_context_noise, atol=1e-6)
+    assert not np.allclose(v1_obs, v1_obs_with_context_noise)
 
 
 def test_reference_command_task_emits_explicit_no_gate_intents() -> None:
@@ -167,6 +220,7 @@ def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> No
 def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Path) -> None:
     v1_path = tmp_path / "tracker_v1.ckpt"
     v2_path = tmp_path / "tracker_v2.ckpt"
+    v3_path = tmp_path / "tracker_v3.ckpt"
     save_tracker_checkpoint(
         v1_path,
         TrackerPPOAgent(obs_dim=REFERENCE_TRACKER_OBS_DIM),
@@ -176,6 +230,11 @@ def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Pat
         v2_path,
         TrackerPPOAgent(obs_dim=SEMANTIC_REFERENCE_TRACKER_OBS_DIM),
         observation_layout=SEMANTIC_REFERENCE_TRACKER_LAYOUT,
+    )
+    save_tracker_checkpoint(
+        v3_path,
+        TrackerPPOAgent(obs_dim=REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM),
+        observation_layout=COMMAND_REFERENCE_TRACKER_LAYOUT,
     )
 
     v1_agent, v1_metadata = load_tracker_checkpoint(v1_path)
@@ -191,6 +250,13 @@ def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Pat
     )
     assert v2_agent.obs_dim == SEMANTIC_REFERENCE_TRACKER_OBS_DIM
     assert v2_metadata["observation_layout"] == SEMANTIC_REFERENCE_TRACKER_LAYOUT
+
+    v3_agent, v3_metadata = load_tracker_checkpoint(
+        v3_path,
+        expected_layout=COMMAND_REFERENCE_TRACKER_LAYOUT,
+    )
+    assert v3_agent.obs_dim == REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM
+    assert v3_metadata["observation_layout"] == COMMAND_REFERENCE_TRACKER_LAYOUT
 
 
 def test_existing_zigzag_v55_checkpoint_still_loads_when_present() -> None:

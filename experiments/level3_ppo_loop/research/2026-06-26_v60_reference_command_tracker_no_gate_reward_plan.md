@@ -35,19 +35,36 @@ reference_command_no_gate_reward
 ```
 
 The task is free-space trajectory-command training, not gate training.
+The clean actor observation layout is:
+
+```text
+level3_reference_tracker_command_v3
+```
+
+It intentionally removes gate, obstacle, and planner phase inputs.
 
 ## Input Interface
 
 Primary actor inputs:
 
+- own state;
 - current reference point relative to drone;
 - next reference point relative to drone;
 - lookahead reference point relative to drone;
 - desired velocity;
 - desired speed;
 - desired heading / heading error;
-- self state and action/history;
 - optional generic command masks.
+- last action;
+- short history.
+
+Forbidden actor inputs for the clean v60 baseline:
+
+- gate-local position;
+- aperture Y/Z;
+- target-gate index or gate-pass state;
+- obstacle relative position/distance/detected;
+- planner phase one-hot.
 
 Generic command intents:
 
@@ -89,6 +106,8 @@ Forbidden reward terms:
 - Kept old `semantic_planner_reference` and `semantic_reference` as aliases only.
 - Replaced v2 waypoint type names with generic command names:
   `pass_through`, `hold_or_brake`, `low_speed_through`, `recover_speed`.
+- Added clean command observation layout `level3_reference_tracker_command_v3`
+  with `56` dimensions, down from `72` in semantic v2.
 - Updated tracker qualification gates so the required stage after
   `zigzag_or_lemniscate_tracking` is `reference_command_no_gate_reward`.
 - Kept the stage in free space on `config/level3_tracker_free_space.toml`.
@@ -101,7 +120,8 @@ Run builder/checker validation for v60 support, then run only a bounded smoke.
 Do not start long training until checker verifies:
 
 - old v55/v1 checkpoint compatibility remains intact;
-- v60 task uses semantic v2 layout intentionally;
+- v60 task uses `level3_reference_tracker_command_v3` intentionally;
 - gate reward coefficients are zero in the intended v60 command;
+- gate, obstacle, and phase features are absent from the v60 actor observation;
 - `config/level3.toml` is unchanged;
 - focused tests pass.

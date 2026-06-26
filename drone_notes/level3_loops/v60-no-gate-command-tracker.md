@@ -20,6 +20,30 @@ PPO tracker：只负责跟踪一小段 reference trajectory
 不要冲过头
 ```
 
+新的干净 observation layout 是：
+
+```text
+level3_reference_tracker_command_v3
+```
+
+它只保留：
+
+```text
+自身状态
+reference horizon
+desired velocity / speed / heading
+hold/brake/slow/recover command
+last_action / history
+```
+
+它去掉：
+
+```text
+gate
+obstacle
+planner phase
+```
+
 它不应该拿这些奖励：
 
 ```text

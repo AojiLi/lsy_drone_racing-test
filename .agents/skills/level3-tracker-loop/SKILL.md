@@ -64,6 +64,7 @@ desired_velocity
 desired_speed
 desired_heading
 generic hold / low-speed / pass-through command intent
+last_action / short history
 ```
 
 The concrete flight command is primary. A label or mask is only an auxiliary
@@ -96,6 +97,13 @@ overshooting, failing to brake, or contacting near the gate plane.
 Do not add gate-pass, aperture-crossing, finish, race-progress, or
 stage-progress rewards to the bottom tracker. Gate pass belongs to planner
 integration smoke and final Level3 evaluation, not to tracker learning.
+
+The clean v60 baseline must also remove gate/obstacle/planner-phase inputs from
+the actor observation. Use `level3_reference_tracker_command_v3`, containing
+only self state, reference horizon, desired velocity/speed/heading, generic
+command masks, last action, and short history. Keep older v1/v2 layouts loadable
+for existing checkpoints and diagnostics, but do not use them as the v60 clean
+baseline.
 
 For v59, the tracker may gain a small local safety reflex, but it must not
 become an autonomous Level3 racer. Treat this as:
@@ -265,6 +273,9 @@ visible or measurable. If current/next/lookahead points, desired
 speed/velocity, desired heading, and optional command masks cannot represent
 hold intent or low-speed-through intent, v60 must include a small
 observation-layout change with builder/checker approval before long training.
+As of the clean baseline update, that layout is
+`level3_reference_tracker_command_v3`, and it must not contain gate, obstacle,
+or phase features.
 
 ## Metrics
 

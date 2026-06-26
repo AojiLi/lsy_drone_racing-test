@@ -22,6 +22,7 @@ from lsy_drone_racing.utils import load_config
 
 REFERENCE_TRACKER_LAYOUT = "level3_reference_tracker_v1"
 SEMANTIC_REFERENCE_TRACKER_LAYOUT = "level3_reference_tracker_semantic_v2"
+COMMAND_REFERENCE_TRACKER_LAYOUT = "level3_reference_tracker_command_v3"
 REFERENCE_TRACKER_POLICY_ARCH = "mlp_2x256_tanh"
 REFERENCE_TRACKER_HISTORY = 2
 REFERENCE_TRACKER_HISTORY_DIM = 7
@@ -34,6 +35,7 @@ REFERENCE_TRACKER_PHASES = (
     "recover",
 )
 REFERENCE_TRACKER_OBS_DIM = 65
+REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM = 56
 REFERENCE_TRACKER_WAYPOINT_TYPES = (
     "pass_through",
     "hold_or_brake",
@@ -47,10 +49,12 @@ SEMANTIC_REFERENCE_TRACKER_OBS_DIM = (
 REFERENCE_TRACKER_OBSERVATION_LAYOUTS = (
     REFERENCE_TRACKER_LAYOUT,
     SEMANTIC_REFERENCE_TRACKER_LAYOUT,
+    COMMAND_REFERENCE_TRACKER_LAYOUT,
 )
 REFERENCE_TRACKER_OBS_DIMS = {
     REFERENCE_TRACKER_LAYOUT: REFERENCE_TRACKER_OBS_DIM,
     SEMANTIC_REFERENCE_TRACKER_LAYOUT: SEMANTIC_REFERENCE_TRACKER_OBS_DIM,
+    COMMAND_REFERENCE_TRACKER_LAYOUT: REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM,
 }
 REFERENCE_COMMAND_TRACKER_TASKS = frozenset({"reference_command_no_gate_reward"})
 SEMANTIC_REFERENCE_TRACKER_TASKS = REFERENCE_COMMAND_TRACKER_TASKS
@@ -383,7 +387,7 @@ def default_tracker_observation_layout(task: str, requested_layout: str = "auto"
     canonical = normalize_tracker_task(task)
     if requested_layout == "auto":
         return (
-            SEMANTIC_REFERENCE_TRACKER_LAYOUT
+            COMMAND_REFERENCE_TRACKER_LAYOUT
             if canonical in SEMANTIC_REFERENCE_TRACKER_TASKS
             else REFERENCE_TRACKER_LAYOUT
         )
@@ -1345,24 +1349,33 @@ class ReferenceTrackerObservation:
             ]
         )
         history = np.concatenate(memory.history).astype(np.float32)
-        flat = np.concatenate(
-            [
-                pos[2:3],
-                vel_body,
-                ang_vel,
-                rot.reshape(-1),
-                ref_points,
-                desired_velocity_body,
-                np.array([reference.desired_speed], dtype=np.float32),
-                heading_error,
-                reference.gate_local_position,
-                reference.aperture_yz,
-                phase,
-                obstacle,
-                memory.last_action_norm,
-                history,
-            ]
-        ).astype(np.float32)
+        clean_command_fields = [
+            pos[2:3],
+            vel_body,
+            ang_vel,
+            rot.reshape(-1),
+            ref_points,
+            desired_velocity_body,
+            np.array([reference.desired_speed], dtype=np.float32),
+            heading_error,
+            memory.last_action_norm,
+            history,
+        ]
+        if self.layout == COMMAND_REFERENCE_TRACKER_LAYOUT:
+            flat = np.concatenate(
+                [*clean_command_fields, waypoint_semantic_features(reference)]
+            ).astype(np.float32)
+        else:
+            flat = np.concatenate(
+                [
+                    *clean_command_fields[:8],
+                    reference.gate_local_position,
+                    reference.aperture_yz,
+                    phase,
+                    obstacle,
+                    *clean_command_fields[8:],
+                ]
+            ).astype(np.float32)
         if self.layout == SEMANTIC_REFERENCE_TRACKER_LAYOUT:
             flat = np.concatenate([flat, waypoint_semantic_features(reference)]).astype(
                 np.float32

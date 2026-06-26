@@ -19,6 +19,14 @@ The new canonical task is:
 reference_command_no_gate_reward
 ```
 
+The new clean actor layout is:
+
+```text
+level3_reference_tracker_command_v3
+```
+
+It removes gate, obstacle, and planner phase inputs from the bottom tracker.
+
 ## Rationale
 
 The bottom PPO tracker should not be trained with gate-like inputs or rewards.
@@ -40,6 +48,8 @@ outcomes. They should not become bottom-tracker reward.
 - Do not add gate-pass, aperture-crossing, finish, race-progress, or
   stage-progress rewards to tracker training.
 - Do not make the tracker infer route strategy from target-gate semantics.
+- Do not include gate, obstacle, or planner phase fields in the clean v60 actor
+  observation.
 - Keep v60 in free space first.
 - Use builder/checker before long training.
 - Keep old v55/v1 checkpoint loading intact.

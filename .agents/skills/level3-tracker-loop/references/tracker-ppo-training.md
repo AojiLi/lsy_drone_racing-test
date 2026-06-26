@@ -72,6 +72,7 @@ desired_velocity
 desired_speed
 desired_heading
 generic pass-through / hold-brake / low-speed-through / speed-recovery intent
+last_action / short history
 ```
 
 The main instruction should come from the trajectory horizon, speed/velocity,
@@ -97,6 +98,12 @@ not sufficient evidence that the command is trackable.
 Do not encode gate pass, aperture crossing, finish, race progress, or stage
 progress as tracker actor inputs for v60. Those are planner-integration or final
 evaluation concepts, not bottom-servo training concepts.
+
+For the clean v60 baseline, also remove gate, obstacle, and planner phase
+features from the actor input. Use `level3_reference_tracker_command_v3`: self
+state, reference horizon, desired velocity/speed/heading, generic command masks,
+last action, and history only. Obstacle/frame information belongs to a later
+local-safety-reflex lane if evidence requires it, not to the clean baseline.
 
 If using asymmetric PPO later, the critic may receive privileged exact state,
 dynamics randomization values, or full reference state during training only.

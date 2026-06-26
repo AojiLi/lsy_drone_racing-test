@@ -56,7 +56,11 @@
   reference tracking, speed/velocity tracking, heading tracking, braking/hold
   behavior, action smoothness, and small safety penalties only. Do not add
   gate-pass, finish, aperture-crossing, race-progress, or stage-progress
-  rewards to the bottom tracker.
+  rewards to the bottom tracker. Use clean observation layout
+  `level3_reference_tracker_command_v3`: self state, reference horizon, desired
+  velocity/speed/heading, generic command masks, last action, and short history
+  only. Do not include gate, obstacle, or planner phase inputs in this clean
+  bottom-tracker baseline.
 - Current v59 tracker proposal: after v60 no-gate command tracking is proven, allow a
   small local safety reflex in the tracker. The tracker still follows planner
   references as its main job; safety features such as nearest obstacle relative
