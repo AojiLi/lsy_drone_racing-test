@@ -46,3 +46,11 @@ config/level3.toml 不变
 ```
 
 还有一个 loop 规则：每轮只改一个旋钮。比如这一轮只改 align 条件，就不要同时改 cross speed 和 recover。否则结果变好或变坏时，我们不知道是哪一刀造成的。
+
+还有一个容易误判的地方：旧的 `planner_integration_smoke` checker 只要求很低，比如 `gate0 pass >= 1` 就能过。v56 不能只看这个 checker 的 `passed=true`，必须单独看：
+
+```text
+gate0 pass >= 10/20
+contact <= 8/20
+first-gate progress = 20/20
+```

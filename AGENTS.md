@@ -273,7 +273,10 @@
   progress `20/20`. Do not start PPO training or long Level3 training during
   this loop. Only an environment `target_gate` transition counts as a real gate
   pass for planner control flow; custom pass-checker logic is diagnostic only.
-  Change only one planner strategy knob per v56 iteration.
+  Change only one planner strategy knob per v56 iteration. The legacy
+  `planner_integration_smoke` gate checker is only a compatibility/plumbing
+  check for v56; do not treat its `passed=true` result as v56 success unless
+  the stronger v56 target also passes.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

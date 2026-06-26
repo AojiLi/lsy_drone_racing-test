@@ -51,6 +51,12 @@ config/level3.toml unchanged
 If this gate passes, write a decision packet to promote to multi-gate planner
 smoke. Do not call this a Level3 completion result.
 
+The legacy `planner_integration_smoke` gate checker is not sufficient for v56
+acceptance. It only verifies the older minimum smoke contract, including
+`gate0_pass_count >= 1`. A checker `passed=true` result is useful plumbing
+evidence, but v56 is complete only when the analysis and decision packet
+explicitly confirm the stronger target above.
+
 ## Hard Principles
 
 - Optimize planner references, not environment semantics.
@@ -192,6 +198,16 @@ pixi run -e tests python scripts/check_level3_tracker_stage_gate.py \
   --history-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v55_required_stage_history_through_zigzag.json \
   --require-prerequisites \
   --output experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v56_geometric_gate_crossing_500step_gate.json
+```
+
+Treat this checker as a compatibility/plumbing check only. Do not promote v56
+because this command passes unless the v56 target also passes:
+
+```text
+gate0 pass >= 10/20
+contact <= 8/20
+first-gate progress = 20/20
+early termination <= 6/20
 ```
 
 ## Trace Analysis Requirements

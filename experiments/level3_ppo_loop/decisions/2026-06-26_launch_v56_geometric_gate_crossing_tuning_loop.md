@@ -68,6 +68,11 @@ all_finite = true
 config/level3.toml unchanged
 ```
 
+The old `planner_integration_smoke` gate checker is only a compatibility check
+for the previous smoke contract. Its `passed=true` result is not v56 success,
+because that checker can pass with only `gate0_pass_count >= 1`. The v56
+analysis and decision packet must explicitly verify the stronger target above.
+
 ## Task Order
 
 1. Align stabilization:
