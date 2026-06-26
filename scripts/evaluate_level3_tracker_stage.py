@@ -13,7 +13,8 @@ import numpy as np
 import torch
 
 from lsy_drone_racing.control.level3_reference_tracker import (
-    REFERENCE_TRACKER_OBS_DIM,
+    REFERENCE_TRACKER_LAYOUT,
+    SEMANTIC_REFERENCE_TRACKER_TASKS,
     ReferenceFrame,
     ReferenceTrackerEnv,
     TrackerPPOAgent,
@@ -39,6 +40,7 @@ PATH_TASKS = {
     "curve_tracking",
     "zigzag_or_lemniscate_tracking",
 }
+SEMANTIC_TASKS = set(SEMANTIC_REFERENCE_TRACKER_TASKS)
 
 
 @dataclass
@@ -55,6 +57,11 @@ class StepSample:
     aperture_yz_error: float
     reward: float
     finite: bool
+    waypoint_type_id: int
+    stop_signal: float
+    brake_mask: float
+    slow_through_mask: float
+    desired_speed: float
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,8 +122,9 @@ def evaluate_stage(
             trace_output=trace_output,
         )
 
-    agent, metadata = load_tracker_checkpoint(checkpoint, "cpu")
-    if int(metadata.get("obs_dim", REFERENCE_TRACKER_OBS_DIM)) != REFERENCE_TRACKER_OBS_DIM:
+    agent, metadata = load_tracker_checkpoint(checkpoint, "cpu", expected_layout=None)
+    observation_layout = str(metadata.get("observation_layout", REFERENCE_TRACKER_LAYOUT))
+    if int(metadata.get("obs_dim", agent.obs_dim)) != int(agent.obs_dim):
         raise ValueError(f"Unexpected tracker obs_dim in {checkpoint}.")
     agent.eval()
     episode_count = int(episodes or stage.get("min_eval_episodes", 20))
@@ -126,6 +134,7 @@ def evaluate_stage(
             agent=agent,
             stage=stage,
             checkpoint=checkpoint,
+            observation_layout=observation_layout,
             seed=seed,
             max_episode_steps=max_episode_steps,
             rp_limit_deg=rp_limit_deg,
@@ -173,6 +182,7 @@ def run_tracker_episode(
     seed: int,
     max_episode_steps: int,
     rp_limit_deg: float,
+    observation_layout: str = REFERENCE_TRACKER_LAYOUT,
 ) -> dict[str, Any]:
     """Run one tracker episode and return per-episode metrics."""
     del checkpoint
@@ -183,8 +193,14 @@ def run_tracker_episode(
         max_episode_steps=max_episode_steps,
         render=False,
         rp_limit_deg=rp_limit_deg,
+        observation_layout=observation_layout,
     )
     obs, _info = env.reset(seed=seed)
+    if int(obs.shape[0]) != int(agent.obs_dim):
+        raise ValueError(
+            f"Tracker obs_dim mismatch for stage {stage['id']}: env produced "
+            f"{obs.shape[0]}, checkpoint expects {agent.obs_dim}."
+        )
     samples: list[StepSample] = []
     actions: list[np.ndarray] = []
     positions: list[np.ndarray] = []
@@ -283,6 +299,11 @@ def make_step_sample(
         aperture_yz_error=aperture_error,
         reward=float(reward),
         finite=finite,
+        waypoint_type_id=int(reference.waypoint_type_id),
+        stop_signal=float(reference.stop_signal),
+        brake_mask=float(reference.brake_mask),
+        slow_through_mask=float(reference.slow_through_mask),
+        desired_speed=float(reference.desired_speed),
     )
 
 
@@ -318,6 +339,7 @@ def summarize_episode(
     terminal_speed = float(speeds[-1]) if len(speeds) else 0.0
     time_to_target = time_to_target_s(pos_errors, dt)
     gate_metrics = gate_episode_metrics(samples, speeds)
+    semantic_metrics = semantic_episode_metrics(samples)
     path_completion = path_completion_ratio(positions, references)
     row = {
         "seed": int(seed),
@@ -368,6 +390,14 @@ def summarize_episode(
         "p90_aperture_yz_error_m": percentile_or_inf(aperture_errors, 90),
     }
     row.update(gate_metrics)
+    row.update(semantic_metrics)
+    if stage_id == "semantic_planner_reference":
+        row["success"] = bool(
+            not terminated
+            and semantic_metrics["semantic_waypoint_type_count"] >= 4
+            and semantic_metrics["brake_hold_rush_count"] <= 2
+            and semantic_metrics["slow_through_stop_count"] <= 2
+        )
     return row
 
 
@@ -406,6 +436,69 @@ def gate_episode_metrics(samples: list[StepSample], speeds: np.ndarray) -> dict[
         "valid_aperture_cross": bool(valid_cross),
         "post_gate_recovered": bool(recovered),
         "mean_post_gate_speed_mps": float(np.mean(post_gate_speeds)) if post_gate_speeds else 0.0,
+    }
+
+
+def semantic_episode_metrics(samples: list[StepSample]) -> dict[str, Any]:
+    """Return v58 semantic waypoint tracking metrics for one episode."""
+    if not samples:
+        return {
+            "semantic_waypoint_type_count": 0,
+            "mean_through_position_error_m": float("inf"),
+            "mean_brake_hold_position_error_m": float("inf"),
+            "mean_slow_through_position_error_m": float("inf"),
+            "mean_recover_position_error_m": float("inf"),
+            "mean_through_desired_speed_error_mps": float("inf"),
+            "mean_brake_hold_desired_speed_error_mps": float("inf"),
+            "mean_slow_through_desired_speed_error_mps": float("inf"),
+            "mean_recover_desired_speed_error_mps": float("inf"),
+            "mean_brake_hold_speed_mps": float("inf"),
+            "p90_brake_hold_speed_mps": float("inf"),
+            "mean_slow_through_speed_mps": float("inf"),
+            "p90_slow_through_speed_mps": float("inf"),
+            "brake_hold_terminal_speed_mps": float("inf"),
+            "slow_through_stop_count": 0,
+            "brake_hold_rush_count": 0,
+        }
+    rows_by_type: dict[int, list[StepSample]] = {}
+    for sample in samples:
+        rows_by_type.setdefault(int(sample.waypoint_type_id), []).append(sample)
+
+    def values(type_id: int, field: str) -> np.ndarray:
+        return np.array([float(getattr(row, field)) for row in rows_by_type.get(type_id, [])])
+
+    def desired_speed_errors(type_id: int) -> np.ndarray:
+        return np.array(
+            [
+                abs(float(row.speed) - float(row.desired_speed))
+                for row in rows_by_type.get(type_id, [])
+            ],
+            dtype=np.float32,
+        )
+
+    brake_rows = rows_by_type.get(1, [])
+    slow_rows = rows_by_type.get(2, [])
+    brake_near = [row for row in brake_rows if row.pos_error <= 0.25]
+    slow_near = [row for row in slow_rows if row.pos_error <= 0.25]
+    return {
+        "semantic_waypoint_type_count": len(rows_by_type),
+        "mean_through_position_error_m": mean_or_inf(values(0, "pos_error")),
+        "mean_brake_hold_position_error_m": mean_or_inf(values(1, "pos_error")),
+        "mean_slow_through_position_error_m": mean_or_inf(values(2, "pos_error")),
+        "mean_recover_position_error_m": mean_or_inf(values(3, "pos_error")),
+        "mean_through_desired_speed_error_mps": mean_or_inf(desired_speed_errors(0)),
+        "mean_brake_hold_desired_speed_error_mps": mean_or_inf(desired_speed_errors(1)),
+        "mean_slow_through_desired_speed_error_mps": mean_or_inf(desired_speed_errors(2)),
+        "mean_recover_desired_speed_error_mps": mean_or_inf(desired_speed_errors(3)),
+        "mean_brake_hold_speed_mps": mean_or_inf(values(1, "speed")),
+        "p90_brake_hold_speed_mps": percentile_or_inf(values(1, "speed"), 90),
+        "mean_slow_through_speed_mps": mean_or_inf(values(2, "speed")),
+        "p90_slow_through_speed_mps": percentile_or_inf(values(2, "speed"), 90),
+        "brake_hold_terminal_speed_mps": (
+            float(brake_rows[-1].speed) if brake_rows else float("inf")
+        ),
+        "slow_through_stop_count": sum(1 for row in slow_near if row.speed < 0.10),
+        "brake_hold_rush_count": sum(1 for row in brake_near if row.speed > 0.25),
     }
 
 
@@ -508,6 +601,22 @@ def aggregate_stage_rows(stage: dict[str, Any], rows: list[dict[str, Any]]) -> d
         "mean_aperture_yz_error_m",
         "p90_aperture_yz_error_m",
         "mean_post_gate_speed_mps",
+        "semantic_waypoint_type_count",
+        "mean_through_position_error_m",
+        "mean_brake_hold_position_error_m",
+        "mean_slow_through_position_error_m",
+        "mean_recover_position_error_m",
+        "mean_through_desired_speed_error_mps",
+        "mean_brake_hold_desired_speed_error_mps",
+        "mean_slow_through_desired_speed_error_mps",
+        "mean_recover_desired_speed_error_mps",
+        "mean_brake_hold_speed_mps",
+        "p90_brake_hold_speed_mps",
+        "mean_slow_through_speed_mps",
+        "p90_slow_through_speed_mps",
+        "brake_hold_terminal_speed_mps",
+        "slow_through_stop_count",
+        "brake_hold_rush_count",
     ]:
         values = np.array([float(row.get(name, float("inf"))) for row in rows], dtype=np.float32)
         metrics[name] = aggregate_named_metric(name, values)

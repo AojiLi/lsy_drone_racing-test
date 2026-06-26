@@ -103,11 +103,14 @@ Use this order unless a decision packet justifies a different one:
 8. `l_shape_tracking`
 9. `curve_tracking`
 10. `zigzag_or_lemniscate_tracking`
-11. `planner_integration_smoke`
+11. `semantic_planner_reference`
+12. `planner_integration_smoke`
 
 `gate_aperture_reference` is now optional diagnostic only. Use it when a
 planner-generated pre-gate/aperture/post-gate reference appears untrackable and
 needs isolation, but do not make it a mandatory reward-shaped training stage.
+`semantic_planner_reference` is the required v58 stage for waypoint intent:
+through, brake/hold, slow-through, and recover.
 
 Start with fixed/easy references. Then randomize start state, endpoint, speed,
 curvature, and point timing. Add disturbance, latency, and domain

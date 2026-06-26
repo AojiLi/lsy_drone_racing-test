@@ -132,6 +132,54 @@ def test_gate_aperture_aggregation_uses_crossing_as_success() -> None:
     assert metrics["crash_rate"] == 0.5
 
 
+def test_semantic_episode_metrics_detect_wrong_waypoint_behaviors() -> None:
+    """Semantic stage metrics should expose rushing brake points and slow-through stops."""
+    samples = [
+        evaluator.StepSample(
+            pos_error=0.12,
+            speed=0.4,
+            vel_error=0.2,
+            heading_error_rad=0.0,
+            action_delta_l2=0.0,
+            action_l2=0.0,
+            gate_x=0.0,
+            aperture_yz_error=0.0,
+            reward=0.0,
+            finite=True,
+            waypoint_type_id=1,
+            stop_signal=1.0,
+            brake_mask=1.0,
+            slow_through_mask=0.0,
+            desired_speed=0.05,
+        ),
+        evaluator.StepSample(
+            pos_error=0.10,
+            speed=0.04,
+            vel_error=0.2,
+            heading_error_rad=0.0,
+            action_delta_l2=0.0,
+            action_l2=0.0,
+            gate_x=0.0,
+            aperture_yz_error=0.0,
+            reward=0.0,
+            finite=True,
+            waypoint_type_id=2,
+            stop_signal=0.0,
+            brake_mask=0.0,
+            slow_through_mask=1.0,
+            desired_speed=0.30,
+        ),
+    ]
+
+    metrics = evaluator.semantic_episode_metrics(samples)
+
+    assert metrics["semantic_waypoint_type_count"] == 2
+    assert metrics["brake_hold_rush_count"] == 1
+    assert metrics["slow_through_stop_count"] == 1
+    assert metrics["mean_brake_hold_speed_mps"] == pytest.approx(0.4)
+    assert metrics["mean_slow_through_speed_mps"] == pytest.approx(0.04)
+
+
 def test_planner_smoke_aggregates_level3_progress(monkeypatch: pytest.MonkeyPatch) -> None:
     """Planner smoke should report the fields required by the final gate."""
     gates = load_json(GATES)

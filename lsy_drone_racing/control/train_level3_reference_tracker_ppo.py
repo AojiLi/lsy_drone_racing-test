@@ -12,7 +12,7 @@ import torch.optim as optim
 
 import wandb
 from lsy_drone_racing.control.level3_reference_tracker import (
-    REFERENCE_TRACKER_OBS_DIM,
+    REFERENCE_TRACKER_OBSERVATION_LAYOUTS,
     REFERENCE_TRACKER_REWARD_DEFAULTS,
     REFERENCE_TRACKER_TASKS,
     TRACKER_ENV_MODES,
@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
         default="hover",
     )
     parser.add_argument("--tracker-env-mode", choices=TRACKER_ENV_MODES, default="auto")
+    parser.add_argument(
+        "--observation-layout",
+        choices=("auto", *REFERENCE_TRACKER_OBSERVATION_LAYOUTS),
+        default="auto",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--total-timesteps", type=int, default=4096)
     parser.add_argument("--num-envs", "--num_envs", dest="num_envs", type=int, default=1)
@@ -106,15 +111,25 @@ def setup_wandb(args: argparse.Namespace) -> None:
     wandb.define_metric("tracker/*", step_metric="global_step")
 
 
-def make_agent(args: argparse.Namespace, device: torch.device) -> TrackerPPOAgent:
+def make_agent(
+    args: argparse.Namespace,
+    device: torch.device,
+    *,
+    obs_dim: int,
+    observation_layout: str,
+) -> TrackerPPOAgent:
     """Construct the tracker PPO agent on the selected device."""
     if args.initial_model_path is not None:
-        agent, metadata = load_tracker_checkpoint(args.initial_model_path, device)
-        if int(metadata.get("obs_dim", REFERENCE_TRACKER_OBS_DIM)) != REFERENCE_TRACKER_OBS_DIM:
+        agent, metadata = load_tracker_checkpoint(
+            args.initial_model_path,
+            device,
+            expected_layout=observation_layout,
+        )
+        if int(metadata.get("obs_dim", obs_dim)) != obs_dim:
             raise ValueError(f"Unexpected obs_dim in {args.initial_model_path}.")
         return agent.to(device)
     return TrackerPPOAgent(
-        obs_dim=REFERENCE_TRACKER_OBS_DIM,
+        obs_dim=obs_dim,
         action_dim=4,
         hidden_dim=args.hidden_dim,
     ).to(device)
@@ -129,7 +144,14 @@ def train(args: argparse.Namespace) -> Path:
     if num_envs < 1:
         raise ValueError("--num-envs must be >= 1")
     env = make_training_env(args, num_envs)
-    agent = make_agent(args, device)
+    obs_dim = int(env.single_observation_space.shape[0])
+    observation_layout = str(env.observation_layout)
+    agent = make_agent(
+        args,
+        device,
+        obs_dim=obs_dim,
+        observation_layout=observation_layout,
+    )
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
     if args.wandb_enabled:
         setup_wandb(args)
@@ -137,10 +159,10 @@ def train(args: argparse.Namespace) -> Path:
     obs_np, _info = env.reset(seed=args.seed)
     obs = torch.as_tensor(obs_np, dtype=torch.float32, device=device).reshape(
         num_envs,
-        REFERENCE_TRACKER_OBS_DIM,
+        obs_dim,
     )
     next_done = torch.zeros(num_envs, dtype=torch.float32, device=device)
-    initial_global_step = initial_checkpoint_step(args.initial_model_path)
+    initial_global_step = initial_checkpoint_step(args.initial_model_path, observation_layout)
     global_step = initial_global_step
     start_time = time.time()
     next_checkpoint_step = (
@@ -154,7 +176,7 @@ def train(args: argparse.Namespace) -> Path:
 
     for update in range(1, num_updates + 1):
         obs_buf = torch.zeros(
-            (args.num_steps, num_envs, REFERENCE_TRACKER_OBS_DIM),
+            (args.num_steps, num_envs, obs_dim),
             device=device,
         )
         actions_buf = torch.zeros((args.num_steps, num_envs, 4), device=device)
@@ -202,7 +224,7 @@ def train(args: argparse.Namespace) -> Path:
                 episode_length[done_np] = 0
             obs = torch.as_tensor(next_obs_np, dtype=torch.float32, device=device).reshape(
                 num_envs,
-                REFERENCE_TRACKER_OBS_DIM,
+                obs_dim,
             )
 
             if next_checkpoint_step is not None and global_step >= next_checkpoint_step:
@@ -211,7 +233,8 @@ def train(args: argparse.Namespace) -> Path:
                     checkpoint_path,
                     agent,
                     global_step=global_step,
-                    extra_metadata=checkpoint_metadata(args),
+                    observation_layout=observation_layout,
+                    extra_metadata=checkpoint_metadata(args, observation_layout, obs_dim),
                 )
                 next_checkpoint_step += args.checkpoint_interval
 
@@ -231,7 +254,7 @@ def train(args: argparse.Namespace) -> Path:
                 advantages[t] = lastgaelam
             returns = advantages + values_buf
 
-        b_obs = obs_buf.reshape((batch_size, REFERENCE_TRACKER_OBS_DIM))
+        b_obs = obs_buf.reshape((batch_size, obs_dim))
         b_actions = actions_buf.reshape((batch_size, 4))
         b_logprobs = logprobs_buf.reshape(batch_size)
         b_advantages = advantages.reshape(batch_size)
@@ -307,7 +330,8 @@ def train(args: argparse.Namespace) -> Path:
         args.model_path,
         agent,
         global_step=global_step,
-        extra_metadata=checkpoint_metadata(args),
+        observation_layout=observation_layout,
+        extra_metadata=checkpoint_metadata(args, observation_layout, obs_dim),
     )
     env.close()
     if args.wandb_enabled:
@@ -321,7 +345,11 @@ def checkpoint_step_path(model_path: Path, step: int) -> Path:
     return model_path.with_name(f"{stem}_step_{step:09d}{model_path.suffix}")
 
 
-def checkpoint_metadata(args: argparse.Namespace) -> dict[str, object]:
+def checkpoint_metadata(
+    args: argparse.Namespace,
+    observation_layout: str,
+    obs_dim: int,
+) -> dict[str, object]:
     """Build metadata stored in every v54 tracker checkpoint."""
     return {
         "config": args.config,
@@ -329,6 +357,9 @@ def checkpoint_metadata(args: argparse.Namespace) -> dict[str, object]:
         "task": normalize_tracker_task(args.task),
         "requested_task": args.task,
         "tracker_env_mode": args.tracker_env_mode,
+        "requested_observation_layout": args.observation_layout,
+        "observation_layout": observation_layout,
+        "obs_dim": int(obs_dim),
         "num_envs": int(args.num_envs),
         "num_steps": int(args.num_steps),
         "total_timesteps": int(args.total_timesteps),
@@ -353,6 +384,7 @@ def make_training_env(
         "render": False,
         "rp_limit_deg": args.rp_limit_deg,
         "tracker_env_mode": args.tracker_env_mode,
+        "observation_layout": args.observation_layout,
         "reward_coefficients": reward_coefficients_from_args(args),
     }
     return ReferenceTrackerVectorEnv(
@@ -370,11 +402,15 @@ def reward_coefficients_from_args(args: argparse.Namespace) -> dict[str, float]:
     }
 
 
-def initial_checkpoint_step(path: Path | None) -> int:
+def initial_checkpoint_step(path: Path | None, observation_layout: str) -> int:
     """Return the global-step offset from a prior checkpoint, if any."""
     if path is None:
         return 0
-    _agent, metadata = load_tracker_checkpoint(path, "cpu")
+    _agent, metadata = load_tracker_checkpoint(
+        path,
+        "cpu",
+        expected_layout=observation_layout,
+    )
     return int(metadata.get("global_step", 0))
 
 

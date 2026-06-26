@@ -319,7 +319,7 @@
       },
       "prerequisite_stage": "curve_tracking",
       "min_eval_episodes": 20,
-      "next_stage": "planner_integration_smoke",
+      "next_stage": "semantic_planner_reference",
       "required_metrics": [
         {"name": "checkpoint_backed", "op": "==", "value": true},
         {"name": "all_finite", "op": "==", "value": true},
@@ -332,8 +332,42 @@
       ]
     },
     {
-      "id": "planner_integration_smoke",
+      "id": "semantic_planner_reference",
       "order": 11,
+      "environment": "free_space",
+      "config": "config/level3_tracker_free_space.toml",
+      "task": "semantic_planner_reference",
+      "training_budget": {
+        "preflight_smoke_timesteps": 4096,
+        "default_maturation_timesteps": 8000000,
+        "research_extension_timesteps": 20000000,
+        "min_timesteps_before_learning_failure": 5000000,
+        "checkpoint_interval_timesteps": 1000000,
+        "evaluate_all_milestones": true,
+        "note": "v58 semantic tracker stage. Observation layout must be level3_reference_tracker_semantic_v2; this trains waypoint intent, not Level3 gate strategy."
+      },
+      "prerequisite_stage": "zigzag_or_lemniscate_tracking",
+      "min_eval_episodes": 20,
+      "next_stage": "planner_integration_smoke",
+      "required_metrics": [
+        {"name": "checkpoint_backed", "op": "==", "value": true},
+        {"name": "all_finite", "op": "==", "value": true},
+        {"name": "semantic_waypoint_type_count", "op": ">=", "value": 4},
+        {"name": "success_rate", "op": ">=", "value": 0.8},
+        {"name": "crash_rate", "op": "<=", "value": 0.08},
+        {"name": "mean_brake_hold_position_error_m", "op": "<=", "value": 0.2},
+        {"name": "mean_slow_through_position_error_m", "op": "<=", "value": 0.24},
+        {"name": "mean_brake_hold_speed_mps", "op": "<=", "value": 0.16},
+        {"name": "p90_brake_hold_speed_mps", "op": "<=", "value": 0.28},
+        {"name": "mean_slow_through_speed_mps", "op": ">=", "value": 0.18},
+        {"name": "mean_slow_through_speed_mps", "op": "<=", "value": 0.42},
+        {"name": "brake_hold_rush_count", "op": "<=", "value": 2},
+        {"name": "slow_through_stop_count", "op": "<=", "value": 2}
+      ]
+    },
+    {
+      "id": "planner_integration_smoke",
+      "order": 12,
       "environment": "level3",
       "config": "config/level3.toml",
       "task": "level3",
@@ -346,7 +380,7 @@
         "evaluate_all_milestones": false,
         "note": "No new long training in this stage; evaluate the qualified tracker with GeometricSlowGatePlanner on unchanged config/level3.toml."
       },
-      "prerequisite_stage": "zigzag_or_lemniscate_tracking",
+      "prerequisite_stage": "semantic_planner_reference",
       "min_eval_episodes": 20,
       "next_stage": "manual_long_level3_training_review",
       "required_metrics": [

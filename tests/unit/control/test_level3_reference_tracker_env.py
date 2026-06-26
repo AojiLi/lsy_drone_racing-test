@@ -5,14 +5,23 @@ import pytest
 
 from lsy_drone_racing.control.level3_reference_tracker import (
     REFERENCE_TRACKER_OBS_DIM,
+    REFERENCE_TRACKER_LAYOUT,
+    SEMANTIC_REFERENCE_TRACKER_LAYOUT,
+    SEMANTIC_REFERENCE_TRACKER_OBS_DIM,
     GeometricSlowGatePlanner,
     ReferenceFrame,
+    ReferenceTrackerObservation,
     ReferenceTrackerReward,
     ReferenceTrackerVectorEnv,
     ReferenceTrajectoryGenerator,
+    TrackerMemory,
+    TrackerPPOAgent,
     gate_local_axis_velocity_x,
+    load_tracker_checkpoint,
     normalize_tracker_task,
+    save_tracker_checkpoint,
     tracker_env_mode_from_config,
+    waypoint_semantic_features,
 )
 from lsy_drone_racing.utils import load_config
 
@@ -37,6 +46,99 @@ def sample_obs() -> dict[str, np.ndarray]:
 def test_legacy_task_aliases() -> None:
     assert normalize_tracker_task("point") == "point_reach"
     assert normalize_tracker_task("gate_aperture") == "gate_aperture_reference"
+    assert normalize_tracker_task("semantic_reference") == "semantic_planner_reference"
+
+
+def test_semantic_observation_layout_extends_v1_without_changing_v1() -> None:
+    obs = sample_obs()
+    generator = ReferenceTrajectoryGenerator("semantic_planner_reference")
+    generator.reset(obs)
+    reference = generator.reference(obs)
+    memory = TrackerMemory.from_observation(obs)
+
+    v1_obs = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(
+        obs,
+        reference,
+        memory,
+    )
+    v2_obs = ReferenceTrackerObservation(SEMANTIC_REFERENCE_TRACKER_LAYOUT).build(
+        obs,
+        reference,
+        memory,
+    )
+
+    assert v1_obs.shape == (REFERENCE_TRACKER_OBS_DIM,)
+    assert v2_obs.shape == (SEMANTIC_REFERENCE_TRACKER_OBS_DIM,)
+    np.testing.assert_allclose(v2_obs[:REFERENCE_TRACKER_OBS_DIM], v1_obs, atol=1e-6)
+    np.testing.assert_allclose(
+        v2_obs[REFERENCE_TRACKER_OBS_DIM:],
+        waypoint_semantic_features(reference),
+        atol=1e-6,
+    )
+    assert reference.waypoint_type == "through"
+
+
+def test_semantic_reference_task_emits_explicit_waypoint_intents() -> None:
+    obs = sample_obs()
+    generator = ReferenceTrajectoryGenerator("semantic_planner_reference")
+    generator.reset(obs)
+
+    references = [generator.reference(obs) for _ in range(130)]
+    types = {reference.waypoint_type for reference in references}
+
+    assert {"through", "brake_or_hold", "slow_through", "recover"} <= types
+    brake = next(reference for reference in references if reference.waypoint_type == "brake_or_hold")
+    slow = next(reference for reference in references if reference.waypoint_type == "slow_through")
+    assert brake.stop_signal == pytest.approx(1.0)
+    assert brake.brake_mask == pytest.approx(1.0)
+    assert brake.desired_speed <= 0.10
+    assert slow.slow_through_mask == pytest.approx(1.0)
+    assert 0.25 <= slow.desired_speed <= 0.35
+
+
+def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Path) -> None:
+    v1_path = tmp_path / "tracker_v1.ckpt"
+    v2_path = tmp_path / "tracker_v2.ckpt"
+    save_tracker_checkpoint(
+        v1_path,
+        TrackerPPOAgent(obs_dim=REFERENCE_TRACKER_OBS_DIM),
+        observation_layout=REFERENCE_TRACKER_LAYOUT,
+    )
+    save_tracker_checkpoint(
+        v2_path,
+        TrackerPPOAgent(obs_dim=SEMANTIC_REFERENCE_TRACKER_OBS_DIM),
+        observation_layout=SEMANTIC_REFERENCE_TRACKER_LAYOUT,
+    )
+
+    v1_agent, v1_metadata = load_tracker_checkpoint(v1_path)
+    assert v1_agent.obs_dim == REFERENCE_TRACKER_OBS_DIM
+    assert v1_metadata["observation_layout"] == REFERENCE_TRACKER_LAYOUT
+
+    with pytest.raises(ValueError, match="does not match expected layout"):
+        load_tracker_checkpoint(v2_path)
+
+    v2_agent, v2_metadata = load_tracker_checkpoint(
+        v2_path,
+        expected_layout=SEMANTIC_REFERENCE_TRACKER_LAYOUT,
+    )
+    assert v2_agent.obs_dim == SEMANTIC_REFERENCE_TRACKER_OBS_DIM
+    assert v2_metadata["observation_layout"] == SEMANTIC_REFERENCE_TRACKER_LAYOUT
+
+
+def test_existing_zigzag_v55_checkpoint_still_loads_when_present() -> None:
+    checkpoint = (
+        ROOT
+        / "lsy_drone_racing/control/checkpoints/v55_tracker_qualification/"
+        / "zigzag_or_lemniscate_tracking/"
+        / "v55_tracker_zigzag_from_curve_attempt001_step_042959360.ckpt"
+    )
+    if not checkpoint.exists():
+        pytest.skip("local v55 zigzag checkpoint not present")
+
+    agent, metadata = load_tracker_checkpoint(checkpoint)
+
+    assert agent.obs_dim == REFERENCE_TRACKER_OBS_DIM
+    assert metadata["observation_layout"] == REFERENCE_TRACKER_LAYOUT
 
 
 def test_free_space_reference_ignores_dummy_gate_and_obstacle() -> None:

@@ -21,6 +21,7 @@ from torch.distributions.normal import Normal
 from lsy_drone_racing.utils import load_config
 
 REFERENCE_TRACKER_LAYOUT = "level3_reference_tracker_v1"
+SEMANTIC_REFERENCE_TRACKER_LAYOUT = "level3_reference_tracker_semantic_v2"
 REFERENCE_TRACKER_POLICY_ARCH = "mlp_2x256_tanh"
 REFERENCE_TRACKER_HISTORY = 2
 REFERENCE_TRACKER_HISTORY_DIM = 7
@@ -33,6 +34,25 @@ REFERENCE_TRACKER_PHASES = (
     "recover",
 )
 REFERENCE_TRACKER_OBS_DIM = 65
+REFERENCE_TRACKER_WAYPOINT_TYPES = (
+    "through",
+    "brake_or_hold",
+    "slow_through",
+    "recover",
+)
+REFERENCE_TRACKER_SEMANTIC_FEATURE_DIM = len(REFERENCE_TRACKER_WAYPOINT_TYPES) + 3
+SEMANTIC_REFERENCE_TRACKER_OBS_DIM = (
+    REFERENCE_TRACKER_OBS_DIM + REFERENCE_TRACKER_SEMANTIC_FEATURE_DIM
+)
+REFERENCE_TRACKER_OBSERVATION_LAYOUTS = (
+    REFERENCE_TRACKER_LAYOUT,
+    SEMANTIC_REFERENCE_TRACKER_LAYOUT,
+)
+REFERENCE_TRACKER_OBS_DIMS = {
+    REFERENCE_TRACKER_LAYOUT: REFERENCE_TRACKER_OBS_DIM,
+    SEMANTIC_REFERENCE_TRACKER_LAYOUT: SEMANTIC_REFERENCE_TRACKER_OBS_DIM,
+}
+SEMANTIC_REFERENCE_TRACKER_TASKS = frozenset({"semantic_planner_reference"})
 FREE_SPACE_TRACKER_TASKS = frozenset(
     {
         "hover",
@@ -46,11 +66,12 @@ FREE_SPACE_TRACKER_TASKS = frozenset(
         "curve_tracking",
         "zigzag_or_lemniscate_tracking",
     }
-)
+) | SEMANTIC_REFERENCE_TRACKER_TASKS
 GATE_TRACKER_TASKS = frozenset({"gate_aperture_reference", "level3"})
 REFERENCE_TRACKER_TASK_ALIASES = {
     "point": "point_reach",
     "gate_aperture": "gate_aperture_reference",
+    "semantic_reference": "semantic_planner_reference",
 }
 REFERENCE_TRACKER_TASKS = tuple(
     sorted(FREE_SPACE_TRACKER_TASKS | GATE_TRACKER_TASKS | set(REFERENCE_TRACKER_TASK_ALIASES))
@@ -70,6 +91,9 @@ REFERENCE_TRACKER_REWARD_DEFAULTS = {
     "gate_cross_bonus": 0.0,
     "gate_recover_bonus": 0.0,
     "gate_linger_penalty_coef": 0.0,
+    "semantic_brake_speed_coef": 0.0,
+    "semantic_slow_speed_coef": 0.0,
+    "semantic_slow_stop_coef": 0.0,
     "crash_penalty": 250.0,
 }
 
@@ -92,6 +116,11 @@ class ReferenceFrame:
     obstacle_relative: np.ndarray
     obstacle_distance: float
     obstacle_detected: float
+    waypoint_type: str = "through"
+    waypoint_type_id: int = 0
+    stop_signal: float = 0.0
+    brake_mask: float = 0.0
+    slow_through_mask: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -191,12 +220,19 @@ def save_tracker_checkpoint(
     agent: TrackerPPOAgent,
     *,
     global_step: int = 0,
+    observation_layout: str = REFERENCE_TRACKER_LAYOUT,
     extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Save a tracker checkpoint with enough metadata for inference validation."""
+    expected_dim = tracker_obs_dim_for_layout(observation_layout)
+    if int(agent.obs_dim) != expected_dim:
+        raise ValueError(
+            f"Agent obs_dim {agent.obs_dim} does not match {observation_layout!r} "
+            f"dimension {expected_dim}."
+        )
     checkpoint = {
         "model_state_dict": agent.state_dict(),
-        "observation_layout": REFERENCE_TRACKER_LAYOUT,
+        "observation_layout": observation_layout,
         "policy_arch": REFERENCE_TRACKER_POLICY_ARCH,
         "obs_dim": agent.obs_dim,
         "action_dim": agent.action_dim,
@@ -205,6 +241,10 @@ def save_tracker_checkpoint(
     }
     if extra_metadata:
         checkpoint.update(extra_metadata)
+    checkpoint["observation_layout"] = observation_layout
+    checkpoint["obs_dim"] = agent.obs_dim
+    checkpoint["action_dim"] = agent.action_dim
+    checkpoint["hidden_dim"] = agent.hidden_dim
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(checkpoint, path)
 
@@ -212,17 +252,28 @@ def save_tracker_checkpoint(
 def load_tracker_checkpoint(
     path: Path,
     device: torch.device | str = "cpu",
+    *,
+    expected_layout: str | None = REFERENCE_TRACKER_LAYOUT,
 ) -> tuple[TrackerPPOAgent, dict[str, Any]]:
-    """Load a v54 tracker checkpoint and validate its observation layout."""
+    """Load a tracker checkpoint and validate its observation layout."""
     checkpoint = torch.load(path, map_location=device, weights_only=False)
     if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
         raise ValueError(f"Unsupported v54 tracker checkpoint: {path}")
-    if checkpoint.get("observation_layout") != REFERENCE_TRACKER_LAYOUT:
+    layout = str(checkpoint.get("observation_layout", REFERENCE_TRACKER_LAYOUT))
+    if layout not in REFERENCE_TRACKER_OBSERVATION_LAYOUTS:
+        raise ValueError(f"Unsupported tracker checkpoint layout {layout!r}: {path}")
+    if expected_layout is not None and layout != expected_layout:
         raise ValueError(
-            f"Checkpoint layout {checkpoint.get('observation_layout')!r} does not match "
-            f"{REFERENCE_TRACKER_LAYOUT!r}."
+            f"Checkpoint layout {layout!r} does not match expected layout "
+            f"{expected_layout!r}."
         )
-    obs_dim = int(checkpoint.get("obs_dim", REFERENCE_TRACKER_OBS_DIM))
+    expected_dim = tracker_obs_dim_for_layout(layout)
+    obs_dim = int(checkpoint.get("obs_dim", expected_dim))
+    if obs_dim != expected_dim:
+        raise ValueError(
+            f"Checkpoint obs_dim {obs_dim} does not match {layout!r} dimension "
+            f"{expected_dim}."
+        )
     action_dim = int(checkpoint.get("action_dim", 4))
     hidden_dim = int(checkpoint.get("hidden_dim", 256))
     agent = TrackerPPOAgent(
@@ -318,6 +369,72 @@ def safe_normalize(vector: np.ndarray, fallback: np.ndarray | None = None) -> np
     return (fallback / fallback_norm).astype(np.float32)
 
 
+def tracker_obs_dim_for_layout(layout: str) -> int:
+    """Return the tracker observation dimension for a named layout."""
+    if layout not in REFERENCE_TRACKER_OBS_DIMS:
+        raise ValueError(f"Unsupported reference tracker observation layout: {layout!r}")
+    return int(REFERENCE_TRACKER_OBS_DIMS[layout])
+
+
+def default_tracker_observation_layout(task: str, requested_layout: str = "auto") -> str:
+    """Resolve the observation layout for a tracker task."""
+    canonical = normalize_tracker_task(task)
+    if requested_layout == "auto":
+        return (
+            SEMANTIC_REFERENCE_TRACKER_LAYOUT
+            if canonical in SEMANTIC_REFERENCE_TRACKER_TASKS
+            else REFERENCE_TRACKER_LAYOUT
+        )
+    if requested_layout not in REFERENCE_TRACKER_OBSERVATION_LAYOUTS:
+        raise ValueError(f"Unsupported tracker observation layout: {requested_layout!r}")
+    return requested_layout
+
+
+def waypoint_type_id(waypoint_type: str) -> int:
+    """Return the stable integer id for a semantic waypoint type."""
+    try:
+        return REFERENCE_TRACKER_WAYPOINT_TYPES.index(waypoint_type)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported waypoint_type: {waypoint_type!r}") from exc
+
+
+def waypoint_semantic_values(
+    waypoint_type: str,
+    *,
+    stop_signal: float | None = None,
+    brake_mask: float | None = None,
+    slow_through_mask: float | None = None,
+) -> tuple[int, float, float, float]:
+    """Return waypoint id and explicit behavior masks for the semantic v2 layout."""
+    type_id = waypoint_type_id(waypoint_type)
+    default_stop = 1.0 if waypoint_type == "brake_or_hold" else 0.0
+    default_brake = 1.0 if waypoint_type == "brake_or_hold" else 0.0
+    default_slow = 1.0 if waypoint_type == "slow_through" else 0.0
+    return (
+        type_id,
+        float(default_stop if stop_signal is None else stop_signal),
+        float(default_brake if brake_mask is None else brake_mask),
+        float(default_slow if slow_through_mask is None else slow_through_mask),
+    )
+
+
+def waypoint_semantic_features(reference: ReferenceFrame) -> np.ndarray:
+    """Encode waypoint intent for the semantic v2 tracker observation."""
+    one_hot = np.zeros(len(REFERENCE_TRACKER_WAYPOINT_TYPES), dtype=np.float32)
+    one_hot[
+        int(np.clip(reference.waypoint_type_id, 0, len(REFERENCE_TRACKER_WAYPOINT_TYPES) - 1))
+    ] = 1.0
+    masks = np.array(
+        [
+            reference.stop_signal,
+            reference.brake_mask,
+            reference.slow_through_mask,
+        ],
+        dtype=np.float32,
+    )
+    return np.concatenate([one_hot, masks]).astype(np.float32)
+
+
 def normalize_tracker_task(task: str) -> str:
     """Return the canonical tracker task name while preserving legacy aliases."""
     canonical = REFERENCE_TRACKER_TASK_ALIASES.get(task, task)
@@ -389,6 +506,15 @@ def polyline_length(points: list[np.ndarray]) -> float:
     for start, end in zip(points[:-1], points[1:], strict=True):
         total += float(np.linalg.norm(np.asarray(end) - np.asarray(start)))
     return total
+
+
+def lerp(start: np.ndarray, end: np.ndarray, alpha: float) -> np.ndarray:
+    """Linearly interpolate between two 3D points."""
+    t = float(np.clip(alpha, 0.0, 1.0))
+    return (
+        np.asarray(start, dtype=np.float32)
+        + (np.asarray(end, dtype=np.float32) - np.asarray(start, dtype=np.float32)) * t
+    ).astype(np.float32)
 
 
 def tracker_history_row(obs: dict[str, Any]) -> np.ndarray:
@@ -504,6 +630,8 @@ class ReferenceTrajectoryGenerator:
             return self._curve_reference(obs, speed=0.34, sharp=False)
         if self.task == "zigzag_or_lemniscate_tracking":
             return self._curve_reference(obs, speed=0.36, sharp=True)
+        if self.task == "semantic_planner_reference":
+            return self._semantic_planner_reference(obs)
         raise ValueError(f"Unsupported free-space tracker task: {self.task!r}")
 
     def _hover_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
@@ -673,6 +801,58 @@ class ReferenceTrajectoryGenerator:
             use_gate_context=False,
         )
 
+    def _semantic_planner_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
+        """Planner-like free-space reference sequence with explicit waypoint intent."""
+        origin = np.asarray(self._origin, dtype=np.float32)
+        points = [
+            origin,
+            origin + np.array([0.32, 0.00, 0.02], dtype=np.float32),
+            origin + np.array([0.58, 0.00, 0.02], dtype=np.float32),
+            origin + np.array([0.86, 0.00, 0.02], dtype=np.float32),
+            origin + np.array([1.16, 0.08, 0.02], dtype=np.float32),
+        ]
+        step = max(0, self._step - 1)
+        if step < 30:
+            alpha = step / 30.0
+            current = lerp(points[0], points[1], alpha)
+            next_point = lerp(points[0], points[1], min(1.0, alpha + 0.18))
+            lookahead = lerp(points[0], points[1], min(1.0, alpha + 0.40))
+            waypoint_type = "through"
+            phase, phase_id, speed = "cruise", 1, 0.62
+        elif step < 70:
+            current = points[2]
+            next_point = points[2]
+            lookahead = points[3]
+            waypoint_type = "brake_or_hold"
+            phase, phase_id, speed = "slowdown", 2, 0.05
+        elif step < 115:
+            alpha = (step - 70) / 45.0
+            current = lerp(points[2], points[3], alpha)
+            next_point = lerp(points[2], points[3], min(1.0, alpha + 0.20))
+            lookahead = lerp(points[2], points[3], min(1.0, alpha + 0.45))
+            waypoint_type = "slow_through"
+            phase, phase_id, speed = "cross", 4, 0.30
+        else:
+            alpha = min(1.0, (step - 115) / 45.0)
+            current = lerp(points[3], points[4], alpha)
+            next_point = lerp(points[3], points[4], min(1.0, alpha + 0.22))
+            lookahead = points[4]
+            waypoint_type = "recover"
+            phase, phase_id, speed = "recover", 5, 0.48 if alpha < 1.0 else 0.20
+        heading = safe_normalize(next_point - current)
+        return self._make_reference(
+            obs,
+            current,
+            next_point,
+            lookahead,
+            phase,
+            phase_id,
+            speed,
+            desired_heading=heading,
+            waypoint_type=waypoint_type,
+            use_gate_context=False,
+        )
+
     def _gate_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
         pos = np.asarray(obs["pos"], dtype=np.float32)
         target_gate_raw = int(np.asarray(obs.get("target_gate", 0)).item())
@@ -769,6 +949,10 @@ class ReferenceTrajectoryGenerator:
         desired_speed: float,
         *,
         desired_heading: np.ndarray | None = None,
+        waypoint_type: str = "through",
+        stop_signal: float | None = None,
+        brake_mask: float | None = None,
+        slow_through_mask: float | None = None,
         use_gate_context: bool = True,
     ) -> ReferenceFrame:
         pos = np.asarray(obs["pos"], dtype=np.float32)
@@ -796,6 +980,12 @@ class ReferenceTrajectoryGenerator:
             obstacle_distance = 10.0
             obstacle_detected = 0.0
             target_gate = 0
+        semantic_id, semantic_stop, semantic_brake, semantic_slow = waypoint_semantic_values(
+            waypoint_type,
+            stop_signal=stop_signal,
+            brake_mask=brake_mask,
+            slow_through_mask=slow_through_mask,
+        )
         return ReferenceFrame(
             phase=phase,
             phase_id=phase_id,
@@ -811,6 +1001,11 @@ class ReferenceTrajectoryGenerator:
             obstacle_relative=obstacle_relative.astype(np.float32),
             obstacle_distance=float(obstacle_distance),
             obstacle_detected=float(obstacle_detected),
+            waypoint_type=waypoint_type,
+            waypoint_type_id=semantic_id,
+            stop_signal=semantic_stop,
+            brake_mask=semantic_brake,
+            slow_through_mask=semantic_slow,
         )
 
     def _gate_context(self, obs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
@@ -1093,6 +1288,13 @@ class ReferenceTrackerObservation:
 
     obs_dim = REFERENCE_TRACKER_OBS_DIM
 
+    def __init__(self, layout: str = REFERENCE_TRACKER_LAYOUT):
+        """Select the tracker observation layout."""
+        if layout not in REFERENCE_TRACKER_OBSERVATION_LAYOUTS:
+            raise ValueError(f"Unsupported tracker observation layout: {layout!r}")
+        self.layout = layout
+        self.obs_dim = tracker_obs_dim_for_layout(layout)
+
     def build(
         self,
         obs: dict[str, Any],
@@ -1147,6 +1349,10 @@ class ReferenceTrackerObservation:
                 history,
             ]
         ).astype(np.float32)
+        if self.layout == SEMANTIC_REFERENCE_TRACKER_LAYOUT:
+            flat = np.concatenate([flat, waypoint_semantic_features(reference)]).astype(
+                np.float32
+            )
         if flat.shape != (self.obs_dim,):
             raise ValueError(
                 f"reference tracker obs dim mismatch: {flat.shape} != {(self.obs_dim,)}"
@@ -1180,6 +1386,15 @@ class ReferenceTrackerReward:
         gate_linger_penalty_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
             "gate_linger_penalty_coef"
         ],
+        semantic_brake_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_brake_speed_coef"
+        ],
+        semantic_slow_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_slow_speed_coef"
+        ],
+        semantic_slow_stop_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_slow_stop_coef"
+        ],
         crash_penalty: float = REFERENCE_TRACKER_REWARD_DEFAULTS["crash_penalty"],
     ):
         """Set reward coefficients for dense local reference tracking."""
@@ -1196,6 +1411,9 @@ class ReferenceTrackerReward:
         self.gate_cross_bonus = float(gate_cross_bonus)
         self.gate_recover_bonus = float(gate_recover_bonus)
         self.gate_linger_penalty_coef = float(gate_linger_penalty_coef)
+        self.semantic_brake_speed_coef = float(semantic_brake_speed_coef)
+        self.semantic_slow_speed_coef = float(semantic_slow_speed_coef)
+        self.semantic_slow_stop_coef = float(semantic_slow_stop_coef)
         self.crash_penalty = float(crash_penalty)
 
     def coefficients(self) -> dict[str, float]:
@@ -1237,6 +1455,7 @@ class ReferenceTrackerReward:
         action_penalty = float(np.mean(np.square(action_norm)))
         delta_penalty = float(np.mean(np.square(action_norm - prev_action_norm)))
         gate_terms = self._gate_completion_terms(prev_obs, obs, reference, vel)
+        semantic_terms = self._semantic_terms(reference, vel)
         reward = (
             -self.pos_error_coef * pos_error
             - self.vel_error_coef * vel_error
@@ -1250,6 +1469,9 @@ class ReferenceTrackerReward:
             + self.gate_cross_bonus * gate_terms["valid_aperture_cross_event"]
             + self.gate_recover_bonus * gate_terms["post_gate_recovery_event"]
             - self.gate_linger_penalty_coef * gate_terms["near_plane_linger_event"]
+            - self.semantic_brake_speed_coef * semantic_terms["brake_hold_speed_excess"]
+            - self.semantic_slow_speed_coef * semantic_terms["slow_through_speed_error"]
+            - self.semantic_slow_stop_coef * semantic_terms["slow_through_stop_error"]
         )
         if terminated and not truncated:
             reward -= self.crash_penalty
@@ -1268,8 +1490,31 @@ class ReferenceTrackerReward:
             "tracker/valid_aperture_cross_event": gate_terms["valid_aperture_cross_event"],
             "tracker/post_gate_recovery_event": gate_terms["post_gate_recovery_event"],
             "tracker/near_plane_linger_event": gate_terms["near_plane_linger_event"],
+            "tracker/waypoint_type_id": float(reference.waypoint_type_id),
+            "tracker/stop_signal": float(reference.stop_signal),
+            "tracker/brake_mask": float(reference.brake_mask),
+            "tracker/slow_through_mask": float(reference.slow_through_mask),
+            "tracker/desired_speed_error": semantic_terms["desired_speed_error"],
+            "tracker/brake_hold_speed_excess": semantic_terms["brake_hold_speed_excess"],
+            "tracker/slow_through_speed_error": semantic_terms["slow_through_speed_error"],
+            "tracker/slow_through_stop_error": semantic_terms["slow_through_stop_error"],
         }
         return float(reward), diagnostics
+
+    @staticmethod
+    def _semantic_terms(reference: ReferenceFrame, vel: np.ndarray) -> dict[str, float]:
+        """Return semantic waypoint behavior diagnostics and optional reward terms."""
+        speed = float(np.linalg.norm(vel))
+        desired_speed_error = abs(speed - float(reference.desired_speed))
+        brake_excess = max(0.0, speed - 0.12) * float(reference.brake_mask)
+        slow_speed_error = desired_speed_error * float(reference.slow_through_mask)
+        slow_stop_error = max(0.0, 0.12 - speed) * float(reference.slow_through_mask)
+        return {
+            "desired_speed_error": desired_speed_error,
+            "brake_hold_speed_excess": brake_excess,
+            "slow_through_speed_error": slow_speed_error,
+            "slow_through_stop_error": slow_stop_error,
+        }
 
     @staticmethod
     def _gate_completion_terms(
@@ -1345,6 +1590,7 @@ class ReferenceTrackerEnv(gym.Env):
         render: bool = False,
         rp_limit_deg: float = 50.0,
         tracker_env_mode: str = "auto",
+        observation_layout: str = "auto",
         reward_coefficients: dict[str, float] | None = None,
         reward_model: ReferenceTrackerReward | None = None,
     ):
@@ -1357,6 +1603,10 @@ class ReferenceTrackerEnv(gym.Env):
             self.config,
             self.task,
             tracker_env_mode,
+        )
+        self.observation_layout = default_tracker_observation_layout(
+            self.task,
+            observation_layout,
         )
         self.max_episode_steps = int(max_episode_steps)
         self.config.sim.render = bool(render)
@@ -1379,7 +1629,7 @@ class ReferenceTrackerEnv(gym.Env):
             self.task,
             dt=1.0 / float(self.config.env.freq),
         )
-        self.observation_builder = ReferenceTrackerObservation()
+        self.observation_builder = ReferenceTrackerObservation(self.observation_layout)
         if reward_model is not None and reward_coefficients is not None:
             raise ValueError("Pass either reward_model or reward_coefficients, not both.")
         self.reward_model = reward_model or ReferenceTrackerReward(
@@ -1393,7 +1643,7 @@ class ReferenceTrackerEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(REFERENCE_TRACKER_OBS_DIM,),
+            shape=(self.observation_builder.obs_dim,),
             dtype=np.float32,
         )
         self._raw_obs: dict[str, Any] | None = None
@@ -1481,6 +1731,7 @@ class ReferenceTrackerVectorEnv:
         render: bool = False,
         rp_limit_deg: float = 50.0,
         tracker_env_mode: str = "auto",
+        observation_layout: str = "auto",
         reward_coefficients: dict[str, float] | None = None,
         reward_model: ReferenceTrackerReward | None = None,
         jax_device: str = "gpu",
@@ -1496,6 +1747,10 @@ class ReferenceTrackerVectorEnv:
             self.config,
             self.task,
             tracker_env_mode,
+        )
+        self.observation_layout = default_tracker_observation_layout(
+            self.task,
+            observation_layout,
         )
         self.config.sim.render = bool(render)
         if int(seed) >= 0:
@@ -1519,7 +1774,7 @@ class ReferenceTrackerVectorEnv:
             ReferenceTrajectoryGenerator(self.task, dt=1.0 / float(self.config.env.freq))
             for _ in range(self.num_envs)
         ]
-        self.observation_builder = ReferenceTrackerObservation()
+        self.observation_builder = ReferenceTrackerObservation(self.observation_layout)
         if reward_model is not None and reward_coefficients is not None:
             raise ValueError("Pass either reward_model or reward_coefficients, not both.")
         self.reward_model = reward_model or ReferenceTrackerReward(
@@ -1539,7 +1794,7 @@ class ReferenceTrackerVectorEnv:
         self.single_observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(REFERENCE_TRACKER_OBS_DIM,),
+            shape=(self.observation_builder.obs_dim,),
             dtype=np.float32,
         )
         self.action_space = batch_space(self.single_action_space, self.num_envs)

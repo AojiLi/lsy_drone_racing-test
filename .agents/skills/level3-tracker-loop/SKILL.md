@@ -180,7 +180,10 @@ packet explains why the lower rungs are already proven.
 10. `zigzag_or_lemniscate_tracking`
     - follow sharper but still short held-out curves;
     - require low tracking error without unstable corrective actions.
-11. `planner_integration_smoke`
+11. `semantic_planner_reference`
+    - follow planner-like semantic reference sequences;
+    - distinguish through, brake/hold, slow-through, and recover behavior.
+12. `planner_integration_smoke`
     - run unchanged `config/level3.toml` with `GeometricSlowGatePlanner` and
       the PPO tracker.
 
@@ -381,6 +384,7 @@ line_tracking: 5M
 multi_point_reference, l_shape_tracking: 8M
 curve_tracking: 10M
 zigzag_or_lemniscate_tracking: 12M
+semantic_planner_reference: 8M default, 20M research extension
 planner_integration_smoke: no new training, evaluate only
 gate_aperture_reference: optional diagnostic only, no default maturation
 ```
