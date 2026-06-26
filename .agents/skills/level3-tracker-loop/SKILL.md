@@ -514,6 +514,15 @@ budget. At least one review must explicitly answer whether the failure is more
 consistent with undertraining, bad reward/metrics, bad curriculum difficulty,
 PPO instability, or insufficient observation/control authority.
 
+For v61 packaged PPO backends, use the packet
+`experiments/level3_ppo_loop/analysis/2026-06-27_v61_packaged_ppo_backend_probe.md`.
+SBX PPO is installed and has a working trainer entry, but its 1024-env smoke
+was much slower than the current PyTorch fast path. Treat SBX as a stability
+fallback, not the main throughput fix. The speed-oriented package route is
+Brax: build a minimal `brax.envs.base.Env` adapter for the v60 command tracker,
+run a bounded Brax PPO smoke, and only promote it if it clearly beats the
+current PyTorch fast path.
+
 When changing the budget table or rejecting a stage as undertrained, create a
 research/budget packet under `experiments/level3_ppo_loop/research/` using:
 
