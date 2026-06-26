@@ -105,6 +105,14 @@ command masks, last action, and short history. Keep older v1/v2 layouts loadable
 for existing checkpoints and diagnostics, but do not use them as the v60 clean
 baseline.
 
+The clean v60 reward path must also be separate from the legacy gate-capable
+tracker reward. Use `ReferenceCommandReward` for
+`reference_command_no_gate_reward`; keep `ReferenceTrackerReward` /
+`LegacyTrackerReward` only for old v1/v2 paths and `gate_aperture_reference`
+diagnostics. V60 reward diagnostics must not compute gate-center, gate-progress,
+gate-cross, gate-recover, gate-linger, obstacle, finish, race-progress, or
+stage-progress terms.
+
 For v59, the tracker may gain a small local safety reflex, but it must not
 become an autonomous Level3 racer. Treat this as:
 
@@ -546,6 +554,7 @@ For v60, the reward must be local:
 - desired heading tracking;
 - terminal speed and dwell stability when the command is hold/brake;
 - low but nonzero speed tracking when the command is low-speed-through;
+- speed recovery tracking when the command is recover-speed;
 - action smoothness, uprightness/spin, and crash/timeout penalties.
 
 It must not include:
@@ -556,6 +565,7 @@ It must not include:
 - race progress;
 - stage progress;
 - gate-plane or target-gate transition reward.
+- obstacle reward in the clean v60 baseline.
 
 As of the v55 architecture clarification, `gate_aperture_reference` is no longer
 part of the required ladder. Do not continue reward-shaped gate-aperture PPO

@@ -195,6 +195,13 @@ For command-intent training, split reward by intended trajectory behavior:
   rushing through and stopping dead;
 - `recover_speed`: reward gradual speed restoration and smooth action changes.
 
+For the clean v60 baseline, route `reference_command_no_gate_reward` through
+`ReferenceCommandReward`, not the legacy gate-capable `ReferenceTrackerReward`.
+The v60 reward formula and diagnostics should contain no gate-center,
+gate-progress, gate-cross, gate-recover, gate-linger, obstacle, finish,
+race-progress, or stage-progress terms. Keep the legacy reward path only for old
+v1/v2 compatibility and gate-aperture diagnostics.
+
 Avoid full-race global progress reward during early tracker qualification. It
 can hide the real failure mode: the policy may move forward without being able
 to stop, align, or follow the reference precisely.

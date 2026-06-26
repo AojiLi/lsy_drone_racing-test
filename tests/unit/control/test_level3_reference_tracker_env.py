@@ -14,6 +14,7 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     SEMANTIC_REFERENCE_TRACKER_OBS_DIM,
     GeometricSlowGatePlanner,
     ReferenceFrame,
+    ReferenceCommandReward,
     ReferenceTrackerObservation,
     ReferenceTrackerReward,
     ReferenceTrackerVectorEnv,
@@ -26,10 +27,12 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     normalize_tracker_task,
     save_tracker_checkpoint,
     tracker_env_mode_from_config,
+    tracker_reward_model_for_task,
     waypoint_semantic_features,
 )
 from lsy_drone_racing.control.train_level3_reference_tracker_ppo import (
     reward_coefficients_from_args,
+    reward_model_name_from_task,
 )
 from lsy_drone_racing.utils import load_config
 
@@ -210,6 +213,7 @@ def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> No
     coefficients = reward_coefficients_from_args(args)
 
     assert coefficients["gate_center_coef"] == pytest.approx(0.0)
+    assert coefficients["obstacle_coef"] == pytest.approx(0.0)
     assert coefficients["gate_x_progress_coef"] == pytest.approx(0.0)
     assert coefficients["gate_cross_bonus"] == pytest.approx(0.0)
     assert coefficients["gate_recover_bonus"] == pytest.approx(0.0)
@@ -245,6 +249,7 @@ def test_v60_default_reward_has_command_speed_shaping_without_gate_reward() -> N
     coefficients = reward_coefficients_from_args(args)
 
     assert coefficients["gate_center_coef"] == pytest.approx(0.0)
+    assert coefficients["obstacle_coef"] == pytest.approx(0.0)
     assert coefficients["gate_x_progress_coef"] == pytest.approx(0.0)
     assert coefficients["gate_cross_bonus"] == pytest.approx(0.0)
     assert coefficients["gate_recover_bonus"] == pytest.approx(0.0)
@@ -255,22 +260,36 @@ def test_v60_default_reward_has_command_speed_shaping_without_gate_reward() -> N
     assert coefficients["semantic_recover_speed_coef"] > 0.0
 
 
+def test_v60_uses_clean_reference_command_reward_model() -> None:
+    reward_model = tracker_reward_model_for_task(
+        "reference_command_no_gate_reward",
+        {
+            "gate_center_coef": 9.0,
+            "obstacle_coef": 9.0,
+            "semantic_brake_speed_coef": 1.0,
+        },
+    )
+
+    assert isinstance(reward_model, ReferenceCommandReward)
+    assert not isinstance(reward_model, ReferenceTrackerReward)
+    assert reward_model_name_from_task(
+        "reference_command_no_gate_reward"
+    ) == "reference_command_reward"
+    assert reward_model_name_from_task("gate_aperture_reference") == (
+        "legacy_reference_tracker_reward"
+    )
+
+
 def test_command_speed_reward_penalizes_wrong_motion_without_gate_terms() -> None:
     prev_obs = sample_obs()
     obs = sample_obs()
-    reward_model = ReferenceTrackerReward(
+    reward_model = ReferenceCommandReward(
         pos_error_coef=0.0,
         vel_error_coef=0.0,
         heading_coef=0.0,
-        gate_center_coef=0.0,
-        obstacle_coef=0.0,
         action_coef=0.0,
         action_delta_coef=0.0,
         progress_bonus=0.0,
-        gate_x_progress_coef=0.0,
-        gate_cross_bonus=0.0,
-        gate_recover_bonus=0.0,
-        gate_linger_penalty_coef=0.0,
         semantic_brake_speed_coef=1.0,
         semantic_slow_speed_coef=0.8,
         semantic_slow_stop_coef=0.8,
@@ -312,7 +331,8 @@ def test_command_speed_reward_penalizes_wrong_motion_without_gate_terms() -> Non
     )
 
     assert diagnostics["tracker/brake_hold_speed_excess"] == pytest.approx(0.20)
-    assert diagnostics["tracker/valid_aperture_cross_event"] == pytest.approx(0.0)
+    assert not any("gate" in key for key in diagnostics)
+    assert not any("obstacle" in key for key in diagnostics)
     assert reward == pytest.approx(-0.20)
 
     slow_reference = replace(

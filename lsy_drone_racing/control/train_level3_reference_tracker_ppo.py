@@ -32,6 +32,7 @@ DEFAULT_MODEL = (
 NO_GATE_REWARD_TRACKER_TASKS = frozenset({"reference_command_no_gate_reward"})
 NO_GATE_REWARD_COEFFICIENTS = (
     "gate_center_coef",
+    "obstacle_coef",
     "gate_x_progress_coef",
     "gate_cross_bonus",
     "gate_recover_bonus",
@@ -374,6 +375,7 @@ def checkpoint_metadata(
         "jax_device": str(args.jax_device),
         "rp_limit_deg": float(args.rp_limit_deg),
         "reward_coefficients": reward_coefficients_from_args(args),
+        "reward_model": reward_model_name_from_task(args.task),
         "max_episode_steps": int(args.max_episode_steps),
         "v54_lane": "v54_reference_trajectory_tracker_ppo",
     }
@@ -412,6 +414,13 @@ def reward_coefficients_from_args(args: argparse.Namespace) -> dict[str, float]:
         for name in NO_GATE_REWARD_COEFFICIENTS:
             coefficients[name] = 0.0
     return coefficients
+
+
+def reward_model_name_from_task(task: str) -> str:
+    """Return the active reward-model family for checkpoint metadata."""
+    if normalize_tracker_task(task) in NO_GATE_REWARD_TRACKER_TASKS:
+        return "reference_command_reward"
+    return "legacy_reference_tracker_reward"
 
 
 def initial_checkpoint_step(path: Path | None, observation_layout: str) -> int:

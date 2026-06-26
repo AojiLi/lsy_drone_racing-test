@@ -1391,7 +1391,7 @@ class ReferenceTrackerObservation:
 
 
 class ReferenceTrackerReward:
-    """Dense tracker reward for v54 local reference following."""
+    """Legacy dense tracker reward for v54/v55 and gate-aperture diagnostics."""
 
     def __init__(
         self,
@@ -1612,6 +1612,144 @@ class ReferenceTrackerReward:
         return (gate_rot.T @ (pos - gate_pos)).astype(np.float32)
 
 
+LegacyTrackerReward = ReferenceTrackerReward
+
+
+class ReferenceCommandReward:
+    """Clean v60 command-tracker reward with no gate, obstacle, or race terms."""
+
+    COEFFICIENT_NAMES = (
+        "pos_error_coef",
+        "vel_error_coef",
+        "heading_coef",
+        "action_coef",
+        "action_delta_coef",
+        "progress_bonus",
+        "semantic_brake_speed_coef",
+        "semantic_slow_speed_coef",
+        "semantic_slow_stop_coef",
+        "semantic_recover_speed_coef",
+        "crash_penalty",
+    )
+
+    def __init__(
+        self,
+        pos_error_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["pos_error_coef"],
+        vel_error_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["vel_error_coef"],
+        heading_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["heading_coef"],
+        action_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_coef"],
+        action_delta_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_delta_coef"],
+        progress_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["progress_bonus"],
+        semantic_brake_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_brake_speed_coef"
+        ],
+        semantic_slow_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_slow_speed_coef"
+        ],
+        semantic_slow_stop_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_slow_stop_coef"
+        ],
+        semantic_recover_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_recover_speed_coef"
+        ],
+        crash_penalty: float = REFERENCE_TRACKER_REWARD_DEFAULTS["crash_penalty"],
+    ):
+        """Set local command-following reward coefficients."""
+        self.pos_error_coef = float(pos_error_coef)
+        self.vel_error_coef = float(vel_error_coef)
+        self.heading_coef = float(heading_coef)
+        self.action_coef = float(action_coef)
+        self.action_delta_coef = float(action_delta_coef)
+        self.progress_bonus = float(progress_bonus)
+        self.semantic_brake_speed_coef = float(semantic_brake_speed_coef)
+        self.semantic_slow_speed_coef = float(semantic_slow_speed_coef)
+        self.semantic_slow_stop_coef = float(semantic_slow_stop_coef)
+        self.semantic_recover_speed_coef = float(semantic_recover_speed_coef)
+        self.crash_penalty = float(crash_penalty)
+
+    def coefficients(self) -> dict[str, float]:
+        """Return clean v60 reward coefficients for diagnostics."""
+        return {
+            name: float(getattr(self, name))
+            for name in self.COEFFICIENT_NAMES
+        }
+
+    def compute(
+        self,
+        prev_obs: dict[str, Any],
+        obs: dict[str, Any],
+        reference: ReferenceFrame,
+        action_norm: np.ndarray,
+        prev_action_norm: np.ndarray,
+        *,
+        terminated: bool,
+        truncated: bool,
+    ) -> tuple[float, dict[str, float]]:
+        """Compute v60 reward without gate, obstacle, finish, or race terms."""
+        pos = np.asarray(obs["pos"], dtype=np.float32)
+        prev_pos = np.asarray(prev_obs["pos"], dtype=np.float32)
+        vel = np.asarray(obs["vel"], dtype=np.float32)
+        pos_error = float(np.linalg.norm(reference.current_point - pos))
+        prev_error = float(np.linalg.norm(reference.current_point - prev_pos))
+        vel_error = float(np.linalg.norm(reference.desired_velocity - vel))
+        heading = safe_normalize(reference.desired_heading)
+        current_heading = quat_to_rotmat(np.asarray(obs["quat"], dtype=np.float32))[:, 0]
+        current_heading[2] = 0.0
+        current_heading = safe_normalize(current_heading)
+        heading_error = 1.0 - float(np.clip(np.dot(heading, current_heading), -1.0, 1.0))
+        action_penalty = float(np.mean(np.square(action_norm)))
+        delta_penalty = float(np.mean(np.square(action_norm - prev_action_norm)))
+        semantic_terms = ReferenceTrackerReward._semantic_terms(reference, vel)
+        reward = (
+            -self.pos_error_coef * pos_error
+            - self.vel_error_coef * vel_error
+            - self.heading_coef * heading_error
+            - self.action_coef * action_penalty
+            - self.action_delta_coef * delta_penalty
+            + self.progress_bonus * (prev_error - pos_error)
+            - self.semantic_brake_speed_coef * semantic_terms["brake_hold_speed_excess"]
+            - self.semantic_slow_speed_coef * semantic_terms["slow_through_speed_error"]
+            - self.semantic_slow_stop_coef * semantic_terms["slow_through_stop_error"]
+            - self.semantic_recover_speed_coef * semantic_terms["recover_speed_error"]
+        )
+        if terminated and not truncated:
+            reward -= self.crash_penalty
+        diagnostics = {
+            "tracker/pos_error": pos_error,
+            "tracker/vel_error": vel_error,
+            "tracker/heading_error": heading_error,
+            "tracker/action_penalty": action_penalty,
+            "tracker/action_delta_penalty": delta_penalty,
+            "tracker/waypoint_type_id": float(reference.waypoint_type_id),
+            "tracker/stop_signal": float(reference.stop_signal),
+            "tracker/brake_mask": float(reference.brake_mask),
+            "tracker/slow_through_mask": float(reference.slow_through_mask),
+            "tracker/desired_speed_error": semantic_terms["desired_speed_error"],
+            "tracker/brake_hold_speed_excess": semantic_terms["brake_hold_speed_excess"],
+            "tracker/slow_through_speed_error": semantic_terms["slow_through_speed_error"],
+            "tracker/slow_through_stop_error": semantic_terms["slow_through_stop_error"],
+            "tracker/recover_speed_error": semantic_terms["recover_speed_error"],
+        }
+        return float(reward), diagnostics
+
+
+def tracker_reward_model_for_task(
+    task: str,
+    reward_coefficients: dict[str, float] | None = None,
+) -> ReferenceTrackerReward | ReferenceCommandReward:
+    """Return the default reward model for a tracker task."""
+    canonical = normalize_tracker_task(task)
+    coefficients = reward_coefficients or {}
+    if canonical in REFERENCE_COMMAND_TRACKER_TASKS:
+        command_coefficients = {
+            name: float(coefficients[name])
+            for name in ReferenceCommandReward.COEFFICIENT_NAMES
+            if name in coefficients
+        }
+        return ReferenceCommandReward(**command_coefficients)
+    return ReferenceTrackerReward(**coefficients)
+
+
 class ReferenceTrackerEnv(gym.Env):
     """Single-env wrapper for Level3 and v55 tracker-training tasks."""
 
@@ -1629,7 +1767,7 @@ class ReferenceTrackerEnv(gym.Env):
         tracker_env_mode: str = "auto",
         observation_layout: str = "auto",
         reward_coefficients: dict[str, float] | None = None,
-        reward_model: ReferenceTrackerReward | None = None,
+        reward_model: ReferenceTrackerReward | ReferenceCommandReward | None = None,
     ):
         """Wrap a race-compatible env as a tracker training task."""
         super().__init__()
@@ -1669,8 +1807,9 @@ class ReferenceTrackerEnv(gym.Env):
         self.observation_builder = ReferenceTrackerObservation(self.observation_layout)
         if reward_model is not None and reward_coefficients is not None:
             raise ValueError("Pass either reward_model or reward_coefficients, not both.")
-        self.reward_model = reward_model or ReferenceTrackerReward(
-            **(reward_coefficients or {})
+        self.reward_model = reward_model or tracker_reward_model_for_task(
+            self.task,
+            reward_coefficients,
         )
         self.action_low, self.action_high = action_bounds_from_config(
             self.config,
@@ -1770,7 +1909,7 @@ class ReferenceTrackerVectorEnv:
         tracker_env_mode: str = "auto",
         observation_layout: str = "auto",
         reward_coefficients: dict[str, float] | None = None,
-        reward_model: ReferenceTrackerReward | None = None,
+        reward_model: ReferenceTrackerReward | ReferenceCommandReward | None = None,
         jax_device: str = "gpu",
     ):
         """Wrap a vector race env as parallel tracker-training worlds."""
@@ -1814,8 +1953,9 @@ class ReferenceTrackerVectorEnv:
         self.observation_builder = ReferenceTrackerObservation(self.observation_layout)
         if reward_model is not None and reward_coefficients is not None:
             raise ValueError("Pass either reward_model or reward_coefficients, not both.")
-        self.reward_model = reward_model or ReferenceTrackerReward(
-            **(reward_coefficients or {})
+        self.reward_model = reward_model or tracker_reward_model_for_task(
+            self.task,
+            reward_coefficients,
         )
         self.max_episode_steps = int(max_episode_steps)
         self.action_low, self.action_high = action_bounds_from_config(
