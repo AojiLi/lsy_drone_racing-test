@@ -289,6 +289,22 @@ def quat_to_rotmat(quat: np.ndarray) -> np.ndarray:
     )
 
 
+def gate_local_axis_velocity_x(obs: dict[str, Any]) -> float:
+    """Return signed drone velocity along the current target gate's local X axis."""
+    gates_pos = np.asarray(obs.get("gates_pos", []), dtype=np.float32)
+    gates_quat = np.asarray(obs.get("gates_quat", []), dtype=np.float32)
+    gate_count = min(len(gates_pos), len(gates_quat))
+    if gate_count <= 0:
+        return 0.0
+    raw_target = int(np.asarray(obs.get("target_gate", 0)).item())
+    target_gate = int(np.clip(raw_target, 0, gate_count - 1))
+    vel = np.asarray(obs.get("vel", np.zeros(3)), dtype=np.float32)
+    if vel.shape != (3,) or not np.isfinite(vel).all():
+        return 0.0
+    gate_rot = quat_to_rotmat(gates_quat[target_gate])
+    return float((gate_rot.T @ vel)[0])
+
+
 def safe_normalize(vector: np.ndarray, fallback: np.ndarray | None = None) -> np.ndarray:
     """Normalize a vector while returning a stable fallback for near-zero norms."""
     vec = np.asarray(vector, dtype=np.float32)
@@ -869,6 +885,8 @@ class GeometricSlowGatePlanner:
     RECOVERY_X = 0.82
     OBSTACLE_CLEARANCE_M = 0.34
     MAX_REFERENCE_YZ_M = 0.24
+    ALIGN_TO_CROSS_YZ_M = 0.22
+    ALIGN_TO_CROSS_MAX_GATE_X_SPEED_MPS = 0.85
 
     def __init__(self) -> None:
         """Initialize gate/phase memory for hysteretic rolling replanning."""
@@ -950,8 +968,8 @@ class GeometricSlowGatePlanner:
             phase = 2
         if phase <= 2 and x > -0.72:
             phase = 3
-        aligned_enough = yz_error < 0.18 or x > -0.18
-        slow_enough = gate_speed < 1.05 or x > -0.18
+        aligned_enough = yz_error <= cls.ALIGN_TO_CROSS_YZ_M
+        slow_enough = gate_speed <= cls.ALIGN_TO_CROSS_MAX_GATE_X_SPEED_MPS
         if phase <= 3 and x > -0.34 and aligned_enough and slow_enough:
             phase = 4
         if phase <= 4 and x > 0.30:
@@ -960,10 +978,7 @@ class GeometricSlowGatePlanner:
 
     @staticmethod
     def _gate_axis_speed(obs: dict[str, Any]) -> float:
-        vel = np.asarray(obs.get("vel", np.zeros(3)), dtype=np.float32)
-        if not np.isfinite(vel).all():
-            return 0.0
-        return float(np.linalg.norm(vel))
+        return abs(gate_local_axis_velocity_x(obs))
 
     @classmethod
     def _phase_points(

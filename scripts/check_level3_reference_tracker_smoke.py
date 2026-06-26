@@ -17,6 +17,7 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     REFERENCE_TRACKER_OBS_DIM,
     ReferenceTrackerEnv,
     TrackerPPOAgent,
+    gate_local_axis_velocity_x,
     load_tracker_checkpoint,
     quat_to_rotmat,
 )
@@ -326,6 +327,9 @@ def make_level3_trace_row(
         "gate_local_x": float(gate_local[0]),
         "gate_local_y": float(gate_local[1]),
         "gate_local_z": float(gate_local[2]),
+        "gate_local_vx": float(
+            diagnostics.get("v54_tracker_gate_local_vx", gate_local_axis_velocity_x(obs))
+        ),
         "first_gate_local_x": float(first_local[0]),
         "first_gate_local_y": float(first_local[1]),
         "first_gate_local_z": float(first_local[2]),

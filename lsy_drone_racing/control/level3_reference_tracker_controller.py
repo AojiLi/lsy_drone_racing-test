@@ -17,6 +17,7 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     TrackerMemory,
     TrackerPPOAgent,
     action_bounds_from_config,
+    gate_local_axis_velocity_x,
     load_tracker_checkpoint,
     scale_action,
 )
@@ -189,6 +190,7 @@ class Level3ReferenceTrackerController(Controller):
             "v54_tracker_gate_local_x": float(self.reference.gate_local_position[0]),
             "v54_tracker_gate_local_y": float(self.reference.gate_local_position[1]),
             "v54_tracker_gate_local_z": float(self.reference.gate_local_position[2]),
+            "v54_tracker_gate_local_vx": float(gate_local_axis_velocity_x(obs)),
             "v54_tracker_aperture_y": float(self.reference.aperture_yz[0]),
             "v54_tracker_aperture_z": float(self.reference.aperture_yz[1]),
             "v54_tracker_position_error_m": position_error,

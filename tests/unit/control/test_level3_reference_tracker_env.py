@@ -4,11 +4,13 @@ import numpy as np
 import pytest
 
 from lsy_drone_racing.control.level3_reference_tracker import (
+    GeometricSlowGatePlanner,
     REFERENCE_TRACKER_OBS_DIM,
     ReferenceFrame,
     ReferenceTrackerReward,
     ReferenceTrackerVectorEnv,
     ReferenceTrajectoryGenerator,
+    gate_local_axis_velocity_x,
     normalize_tracker_task,
     tracker_env_mode_from_config,
 )
@@ -140,6 +142,45 @@ def test_level3_geometric_planner_advances_conservatively() -> None:
     obs["pos"] = np.array([0.34, 0.0, 0.75], dtype=np.float32)
     recover = generator.reference(obs)
     assert recover.phase == "recover"
+
+
+def test_level3_geometric_planner_requires_alignment_before_crossing() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
+    obs["obstacles_visited"] = np.array([False])
+    generator = ReferenceTrajectoryGenerator("level3")
+
+    obs["pos"] = np.array([-0.50, 0.0, 0.75], dtype=np.float32)
+    generator.reset(obs)
+    assert generator.reference(obs).phase == "align"
+
+    obs["pos"] = np.array([-0.16, 0.32, 0.75], dtype=np.float32)
+    obs["vel"] = np.array([0.1, 0.0, 0.0], dtype=np.float32)
+    still_align = generator.reference(obs)
+    assert still_align.phase == "align"
+
+    obs["pos"] = np.array([-0.16, 0.05, 0.75], dtype=np.float32)
+    obs["vel"] = np.array([1.2, 0.0, 0.0], dtype=np.float32)
+    too_fast = generator.reference(obs)
+    assert too_fast.phase == "align"
+
+    obs["vel"] = np.array([0.1, 0.0, 0.0], dtype=np.float32)
+    cross = generator.reference(obs)
+    assert cross.phase == "cross"
+
+
+def test_gate_axis_speed_uses_gate_local_x_velocity() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
+    obs["gates_quat"] = np.array([[0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
+
+    obs["vel"] = np.array([0.0, 3.0, 0.0], dtype=np.float32)
+    assert gate_local_axis_velocity_x(obs) == pytest.approx(0.0)
+    assert GeometricSlowGatePlanner._gate_axis_speed(obs) == pytest.approx(0.0)
+
+    obs["vel"] = np.array([-0.7, 3.0, 0.0], dtype=np.float32)
+    assert gate_local_axis_velocity_x(obs) == pytest.approx(-0.7)
+    assert GeometricSlowGatePlanner._gate_axis_speed(obs) == pytest.approx(0.7)
 
 
 def test_level3_geometric_planner_uses_hysteresis_and_gate_reset() -> None:
