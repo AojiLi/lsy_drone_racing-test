@@ -242,6 +242,12 @@
   `planner_integration_smoke` on unchanged `config/level3.toml`; use
   `gate_aperture_reference` only as an optional diagnostic if planner-generated
   references appear untrackable.
+- The first planner-smoke implementation is `GeometricSlowGatePlanner` inside
+  `lsy_drone_racing/control/level3_reference_tracker.py`: deterministic
+  gate-frame state machine, five phases, near-gate slowdown, hysteretic phase
+  switching, pre/aperture/post/recovery references, and simple visible-obstacle
+  waypoint offsets. It must output references only; the PPO tracker remains the
+  only action source.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

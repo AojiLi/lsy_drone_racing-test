@@ -50,6 +50,13 @@ tracker quality:
 Do not use Level3 gate pass as the first tracker learning exam. Use gate pass as
 an integration test after the tracker passes reference-following exams.
 
+Planner integration smoke should start with the deterministic
+`GeometricSlowGatePlanner` in
+`lsy_drone_racing/control/level3_reference_tracker.py`, not MPPI/MPC. It is a
+conservative five-phase state machine: cruise, slowdown, align, cross, recover.
+It outputs only short-horizon reference points, desired speed, and heading; the
+PPO tracker remains the only action source.
+
 ## Research Reference
 
 When changing tracker observations, reward terms, qualification tasks, PPO
@@ -147,7 +154,8 @@ packet explains why the lower rungs are already proven.
     - follow sharper but still short held-out curves;
     - require low tracking error without unstable corrective actions.
 11. `planner_integration_smoke`
-    - run unchanged `config/level3.toml` with the upper planner and tracker.
+    - run unchanged `config/level3.toml` with `GeometricSlowGatePlanner` and
+      the PPO tracker.
 
 Optional diagnostic: `gate_aperture_reference` may be used to inspect whether a
 planner-generated pre-gate -> aperture -> post-gate reference is trackable, but
@@ -409,3 +417,9 @@ part of the required ladder. Do not continue reward-shaped gate-aperture PPO
 training by default; use the zigzag-qualified tracker in planner integration
 smoke and diagnose failures as either planner-reference design problems or
 tracker reference-following gaps.
+
+The first planner smoke implementation is `GeometricSlowGatePlanner`: a slow
+deterministic gate-frame planner with phase hysteresis, near-gate slowdown,
+pre-gate alignment, pre/aperture/post/recovery references, and a simple visible
+obstacle waypoint offset. If planner smoke fails, inspect the generated
+references before adding MPPI or retraining the tracker.

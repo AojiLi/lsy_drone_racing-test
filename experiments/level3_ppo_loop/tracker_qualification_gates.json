@@ -344,7 +344,7 @@
         "min_timesteps_before_learning_failure": 0,
         "checkpoint_interval_timesteps": 0,
         "evaluate_all_milestones": false,
-        "note": "No new long training in this stage; evaluate the qualified tracker with the deployed upper planner on unchanged config/level3.toml."
+        "note": "No new long training in this stage; evaluate the qualified tracker with GeometricSlowGatePlanner on unchanged config/level3.toml."
       },
       "prerequisite_stage": "zigzag_or_lemniscate_tracking",
       "min_eval_episodes": 20,

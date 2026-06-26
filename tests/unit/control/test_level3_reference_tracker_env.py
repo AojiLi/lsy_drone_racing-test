@@ -105,6 +105,89 @@ def test_gate_aperture_reference_uses_gate_aperture_phase() -> None:
     assert reference.phase_id == 3
 
 
+def test_level3_geometric_planner_advances_conservatively() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
+    obs["obstacles_visited"] = np.array([False])
+    generator = ReferenceTrajectoryGenerator("level3")
+
+    obs["pos"] = np.array([-1.35, 0.0, 0.75], dtype=np.float32)
+    generator.reset(obs)
+    cruise = generator.reference(obs)
+    assert cruise.phase == "cruise"
+    assert cruise.desired_speed == pytest.approx(0.82)
+    np.testing.assert_allclose(
+        cruise.current_point,
+        np.array([-1.05, 0.0, 0.75], dtype=np.float32),
+        atol=1e-6,
+    )
+
+    obs["pos"] = np.array([-1.00, 0.0, 0.75], dtype=np.float32)
+    slowdown = generator.reference(obs)
+    assert slowdown.phase == "slowdown"
+    assert slowdown.desired_speed < cruise.desired_speed
+
+    obs["pos"] = np.array([-0.50, 0.0, 0.75], dtype=np.float32)
+    align = generator.reference(obs)
+    assert align.phase == "align"
+    assert align.desired_speed < slowdown.desired_speed
+
+    obs["pos"] = np.array([-0.24, 0.0, 0.75], dtype=np.float32)
+    cross = generator.reference(obs)
+    assert cross.phase == "cross"
+    assert cross.current_point[0] > 0.0
+
+    obs["pos"] = np.array([0.34, 0.0, 0.75], dtype=np.float32)
+    recover = generator.reference(obs)
+    assert recover.phase == "recover"
+
+
+def test_level3_geometric_planner_uses_hysteresis_and_gate_reset() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array(
+        [[0.0, 0.0, 0.75], [2.0, 0.0, 0.75]],
+        dtype=np.float32,
+    )
+    obs["gates_quat"] = np.array(
+        [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        dtype=np.float32,
+    )
+    obs["gates_visited"] = np.array([False, False])
+    obs["obstacles_visited"] = np.array([False])
+    generator = ReferenceTrajectoryGenerator("level3")
+
+    obs["pos"] = np.array([-0.20, 0.0, 0.75], dtype=np.float32)
+    generator.reset(obs)
+    cross = generator.reference(obs)
+    assert cross.phase == "cross"
+
+    obs["pos"] = np.array([-0.45, 0.0, 0.75], dtype=np.float32)
+    still_cross = generator.reference(obs)
+    assert still_cross.phase == "cross"
+
+    obs["target_gate"] = np.array(1, dtype=np.int32)
+    obs["pos"] = np.array([0.55, 0.0, 0.75], dtype=np.float32)
+    reset_to_next_gate = generator.reference(obs)
+    assert reset_to_next_gate.phase == "cruise"
+    assert reset_to_next_gate.target_gate == 1
+
+
+def test_level3_geometric_planner_offsets_visible_obstacle_on_segment() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
+    obs["pos"] = np.array([-1.35, 0.0, 0.75], dtype=np.float32)
+    obs["obstacles_pos"] = np.array([[-0.90, 0.0, 0.75]], dtype=np.float32)
+    obs["obstacles_visited"] = np.array([True])
+    generator = ReferenceTrajectoryGenerator("level3")
+    generator.reset(obs)
+
+    reference = generator.reference(obs)
+
+    assert reference.phase == "cruise"
+    assert abs(float(reference.current_point[1])) > 0.05
+    assert abs(float(reference.current_point[1])) <= 0.24
+
+
 def test_tracker_training_configs_resolve_modes() -> None:
     free_config = load_config(ROOT / "config/level3_tracker_free_space.toml")
     gate_config = load_config(ROOT / "config/level3_tracker_gate_aperture.toml")
