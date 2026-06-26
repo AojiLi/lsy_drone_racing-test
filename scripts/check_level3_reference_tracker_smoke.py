@@ -315,6 +315,11 @@ def make_level3_trace_row(
     pos = np.asarray(obs["pos"], dtype=np.float32)
     gate_local = target_gate_local_xyz(obs, post_target_gate)
     first_local = target_gate_local_xyz(obs, 0)
+    aperture_y = float(diagnostics.get("v54_tracker_aperture_y", 0.0))
+    aperture_z = float(diagnostics.get("v54_tracker_aperture_z", 0.0))
+    aperture_yz_error = float(
+        np.hypot(float(gate_local[1]) - aperture_y, float(gate_local[2]) - aperture_z)
+    )
     return {
         "seed": int(seed),
         "step": int(step),
@@ -330,6 +335,9 @@ def make_level3_trace_row(
         "gate_local_vx": float(
             diagnostics.get("v54_tracker_gate_local_vx", gate_local_axis_velocity_x(obs))
         ),
+        "aperture_y": aperture_y,
+        "aperture_z": aperture_z,
+        "aperture_yz_error": aperture_yz_error,
         "first_gate_local_x": float(first_local[0]),
         "first_gate_local_y": float(first_local[1]),
         "first_gate_local_z": float(first_local[2]),

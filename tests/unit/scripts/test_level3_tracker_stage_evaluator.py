@@ -190,6 +190,11 @@ def test_planner_smoke_writes_trace_output(
                     "seed": seed,
                     "step": 1,
                     "gate_local_x": -0.5,
+                    "gate_local_y": 0.1,
+                    "gate_local_z": -0.2,
+                    "aperture_y": 0.0,
+                    "aperture_z": -0.1,
+                    "aperture_yz_error": 0.14142135623730953,
                     "reference_x": 0.1,
                     "phase_id": 2,
                     "termination_reason": "running",
@@ -220,3 +225,8 @@ def test_planner_smoke_writes_trace_output(
     assert "trace" not in metrics["episode_rows"][0]
     assert payload["stage"] == "planner_integration_smoke"
     assert payload["trace_rows"][0]["seed"] == 101
+    assert payload["trace_rows"][0]["aperture_y"] == pytest.approx(0.0)
+    assert payload["trace_rows"][0]["aperture_z"] == pytest.approx(-0.1)
+    assert payload["trace_rows"][0]["aperture_yz_error"] == pytest.approx(
+        ((0.1 - 0.0) ** 2 + (-0.2 + 0.1) ** 2) ** 0.5
+    )
