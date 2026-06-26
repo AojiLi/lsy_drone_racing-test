@@ -229,6 +229,25 @@ def test_level3_geometric_planner_forbids_same_target_recover() -> None:
     assert same_target_after_plane.phase == "cross"
 
 
+def test_level3_geometric_planner_backs_out_when_near_plane_misaligned() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
+    obs["obstacles_visited"] = np.array([False])
+    generator = ReferenceTrajectoryGenerator("level3")
+
+    obs["pos"] = np.array([-0.20, 0.0, 0.75], dtype=np.float32)
+    generator.reset(obs)
+    assert generator.reference(obs).phase == "cross"
+
+    obs["pos"] = np.array([-0.10, 0.34, 0.75], dtype=np.float32)
+    backout = generator.reference(obs)
+    assert backout.phase == "align"
+
+    obs["pos"] = np.array([-0.10, 0.05, 0.75], dtype=np.float32)
+    realigned = generator.reference(obs)
+    assert realigned.phase == "cross"
+
+
 def test_level3_geometric_planner_offsets_visible_obstacle_on_segment() -> None:
     obs = sample_obs()
     obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
