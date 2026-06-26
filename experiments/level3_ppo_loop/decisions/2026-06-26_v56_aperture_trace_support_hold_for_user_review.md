@@ -1,20 +1,17 @@
-# Decision: V56 Aperture Trace Support Complete, Launch V57 Interface Audit
+# Decision: V56 Aperture Trace Support Complete, Hold For User Review
 
 ## Decision
 
-Launch a named structural planner lane:
-
-```text
-v57_reference_geometry_tracker_interface_audit
-```
-
-Do not continue ordinary v56 one-knob planner tuning yet.
+Hold v56 for user review.
 
 Decision type:
 
 ```text
-launch_named_structural_lane
+hold_for_user_review
 ```
+
+Do not launch another v56 one-knob planner tuning iteration under this goal.
+Do not launch v57 automatically from this decision.
 
 ## Evidence
 
@@ -40,7 +37,18 @@ The legacy planner smoke checker passed, but it is not v56 acceptance. V56 still
 requires gate0 pass `>=10/20`, contact `<=8/20`, and first-gate progress
 `20/20`.
 
-## Interpretation
+## Why Hold
+
+The v56 one-knob iterations did not improve first-gate crossing:
+
+- Task1 align stabilization failed the v56 target and exposed illegal
+  same-target recover.
+- Task4 fixed recover semantics but did not improve performance.
+- Task3 near-plane backout produced no behavioral change.
+- Task2 cross slowdown was wired, but actual phase4 gate-local speed stayed
+  high and gate0 pass stayed `2/20`.
+- Aperture trace support showed cross-entry alignment is usually acceptable,
+  not grossly wrong.
 
 The new aperture metrics do not support the simple story that the planner is
 entering cross while badly off-center:
@@ -59,16 +67,23 @@ However, near-plane phase4 actual gate-local X speed remains high:
 This means lowering the planner's phase4 `desired_speed` to `0.32m/s` did not
 make the closed-loop system slow enough at the gate.
 
-Task1, Task3, and Task2 have all failed to improve gate0 pass. Task4 fixed
-recover semantics only. Continuing to tune threshold constants such as cross
-speed, Y/Z gate, or backout threshold is now low confidence.
+Continuing to tune threshold constants such as cross speed, Y/Z gate, or
+backout threshold is now low confidence. The likely bottleneck is the interface
+between planner references and the PPO tracker.
 
-## V57 Scope
+## Recommended Next Direction If Resumed
 
-`v57_reference_geometry_tracker_interface_audit` should inspect and redesign the
-interface between the geometric planner and the PPO tracker.
+If the user approves continuing beyond this v56 hold, the recommended next
+candidate is:
 
-Allowed:
+```text
+v57_reference_geometry_tracker_interface_audit
+```
+
+That future lane should inspect and redesign the interface between the
+geometric planner and the PPO tracker.
+
+Allowed in that future lane:
 
 - trace/evaluator diagnostics;
 - planner reference geometry changes;
@@ -78,7 +93,7 @@ Allowed:
 - tests for reference continuity and no illegal recover behavior;
 - fixed smoke on seeds `101-120`, `500` steps.
 
-Forbidden:
+Still forbidden:
 
 - PPO training;
 - reward changes;
@@ -88,30 +103,10 @@ Forbidden:
 - editing `config/level3.toml`;
 - custom pass checker driving recover or next-gate logic.
 
-## V57 Questions
+## Review Questions For User
 
-The next lane should answer:
-
-- Are reference points jumping too far near phase transitions?
-- Does phase3 -> phase4 happen before the tracker has actually braked?
-- Is `desired_speed` encoded in a way the tracker can follow, or is geometry
-  dominating the command?
-- Is the pre -> aperture -> post segment too short or too sharp for the tracker?
-- Does the tracker need a smoother rolling lookahead instead of discrete phase
-  references around the gate plane?
-
-## Acceptance For V57 First Packet
-
-Before another behavioral planner smoke, write a V57 audit packet that reports:
-
-- reference position jump distribution around phase transitions;
-- reference-to-drone error near phase3/phase4;
-- desired speed versus actual gate-local X speed;
-- phase transition timing relative to `gate_local_x`, `aperture_yz_error`, and
-  `gate_local_vx`;
-- whether terminal contact rows are excluded from alignment metrics;
-- a single named first V57 change, or a hold if the audit finds missing
-  instrumentation.
-
-Any V57 code change must use the builder/checker gate and preserve the immutable
-Level3 target config.
+- Should the next goal approve `v57_reference_geometry_tracker_interface_audit`?
+- Should v57 prioritize reference continuity, phase-transition timing, or
+  speed/heading packaging first?
+- Should we keep the current v56 planner changes as the starting point, or
+  revert ineffective Task2/Task3 knobs before v57?

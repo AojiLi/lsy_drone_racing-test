@@ -186,12 +186,23 @@ commands that the tracker cannot physically follow safely near the gate.
 
 ## Decision Direction
 
-Launch a named structural planner lane:
+Hold for user review:
+
+```text
+hold_for_user_review
+```
+
+This satisfies the v56 goal stop condition: several one-knob iterations failed
+to improve gate0 pass/contact meaningfully, and the new aperture trace shows
+that continuing ordinary threshold tuning is low confidence.
+
+If the user chooses to continue after review, the recommended next candidate is
+a new planner-only structural audit:
 
 ```text
 v57_reference_geometry_tracker_interface_audit
 ```
 
-This next lane should remain planner-only and must not train PPO or modify
-`config/level3.toml`. Its purpose is to audit and redesign the reference
+That future lane should remain planner-only and must not train PPO or modify
+`config/level3.toml`. Its purpose would be to audit and redesign the reference
 geometry / tracker interface before another 500-step smoke.

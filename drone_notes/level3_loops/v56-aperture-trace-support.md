@@ -63,7 +63,20 @@ planner 给出的 reference / phase 切换 / desired_speed
 尤其是 phase4 里，planner 虽然希望慢下来，但实际 gate-local X 速度
 仍然偏高。
 
-## 下一步
+## 当前决策
+
+这轮以后，v56 不应该继续自动拧单个小旋钮了。因为 Task1、Task3、Task2
+都没有把 gate0 pass 从 `2/20` 拉起来，Task4 只是修正语义。
+
+所以当前决策是：
+
+```text
+hold_for_user_review
+```
+
+也就是先停下来给你审阅，而不是在同一个 goal 里继续自动开下一条结构线。
+
+## 如果继续，下一步候选
 
 下一步建议进入：
 
