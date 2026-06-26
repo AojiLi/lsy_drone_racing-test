@@ -325,14 +325,16 @@
   `v59_reference_tracker_with_local_safety_reflex` keeps reference tracking
   dominant and adds only weak local obstacle/frame safety penalties or inputs
   after the generic no-gate-reward command tracker is proven.
-- Current v61 packaged-backend finding: `sbx-rl 0.27.0` and `brax 0.14.2`
-  are installed in the `rl` dependency set. The SBX trainer entry
-  `lsy_drone_racing/control/train_level3_reference_tracker_sbx.py` passed
-  W&B/offline and 1024-env smoke, but only reached about `4.6k` env steps/s
-  without W&B, slower than the current PyTorch v60 fast path. Do not treat SBX
-  as the main speed fix. The next speed-oriented package route is a minimal
-  Brax `brax.envs.base.Env` adapter for v60 command tracking, then a bounded
-  Brax PPO smoke before any long training.
+- Current v61 packaged-backend finding: SBX was tested and rejected as too
+  slow for the main speed route. Its trainer entry was removed and `sbx-rl` is
+  no longer part of the `rl` dependency set. Keep `brax 0.14.2` as the package
+  route for device-resident rollout. `scripts/benchmark_v60_brax_rollout.py`
+  implements a minimal Brax-style `brax.envs.base.State` rollout probe for the
+  v60 command tracker. On `1024 envs x 32 steps`, after compile/autotune, it ran
+  around `0.020s` per rollout, about `1.6M env steps/s`, versus the PyTorch v60
+  fast path's roughly `39.8k env steps/s` for a 1M-step smoke. This probe does
+  not include PPO updates yet. The next speed-oriented step is a real Brax PPO
+  adapter/checkpoint path, then a bounded PPO smoke before any long training.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

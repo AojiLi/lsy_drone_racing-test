@@ -516,12 +516,14 @@ PPO instability, or insufficient observation/control authority.
 
 For v61 packaged PPO backends, use the packet
 `experiments/level3_ppo_loop/analysis/2026-06-27_v61_packaged_ppo_backend_probe.md`.
-SBX PPO is installed and has a working trainer entry, but its 1024-env smoke
-was much slower than the current PyTorch fast path. Treat SBX as a stability
-fallback, not the main throughput fix. The speed-oriented package route is
-Brax: build a minimal `brax.envs.base.Env` adapter for the v60 command tracker,
-run a bounded Brax PPO smoke, and only promote it if it clearly beats the
-current PyTorch fast path.
+SBX PPO was tested and rejected as too slow for the main speed route; do not
+restart it as a long-training backend. The speed-oriented package route is
+Brax. `scripts/benchmark_v60_brax_rollout.py` now proves that the v60 command
+tracker rollout can be represented as a `brax.envs.base.State` JAX scan. Its
+post-warm-up `1024 envs x 32 steps` rollout is much faster than the current
+PyTorch fast path, but it does not include PPO updates or checkpoint export yet.
+The next promotion step is a real Brax PPO adapter/checkpoint path plus bounded
+PPO smoke; do not launch long training directly from the rollout benchmark.
 
 When changing the budget table or rejecting a stage as undertrained, create a
 research/budget packet under `experiments/level3_ppo_loop/research/` using:
