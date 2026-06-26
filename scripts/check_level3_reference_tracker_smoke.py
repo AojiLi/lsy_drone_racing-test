@@ -20,6 +20,7 @@ from lsy_drone_racing.control.level3_reference_tracker import (
     load_tracker_checkpoint,
     quat_to_rotmat,
 )
+from lsy_drone_racing.envs import race_core
 from lsy_drone_racing.utils import load_config, load_controller
 
 ROOT = Path(__file__).parents[1]
@@ -29,6 +30,13 @@ DEFAULT_OUTPUT = (
     / "2026-06-25_v54_reference_tracker_smoke.json"
 )
 CONTROLLER_PATH = ROOT / "lsy_drone_racing/control/level3_reference_tracker_controller.py"
+TERMINATION_REASON_NAMES = {
+    race_core.TERMINATION_REASON_NONE: "none",
+    race_core.TERMINATION_REASON_FINISH: "finish",
+    race_core.TERMINATION_REASON_CONTACT: "contact",
+    race_core.TERMINATION_REASON_BOUNDS: "bounds",
+    race_core.TERMINATION_REASON_TIMEOUT: "timeout",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,6 +158,7 @@ def run_level3_controller_seed(
     checkpoint: Path | None,
     allow_untrained: bool,
     early_termination_step_threshold: int,
+    trace_steps: bool = False,
 ) -> dict[str, Any]:
     """Run the deployed controller path on one unchanged Level3 seed."""
     previous_checkpoint_env = os.environ.get("V54_REFERENCE_TRACKER_CHECKPOINT")
@@ -190,9 +199,12 @@ def run_level3_controller_seed(
         truncated = False
         controller_finished = False
         steps = 0
+        trace: list[dict[str, Any]] = []
         for _step in range(max_steps):
+            pre_target_gate = int(np.asarray(obs["target_gate"]).item())
             action = controller.compute_control(obs, info)
             finite_action = finite_action and bool(np.isfinite(action).all())
+            diagnostics = dict(controller.mppi_diagnostics())
             obs, reward, terminated, truncated, info = env.step(action)
             steps += 1
             target_gate = int(np.asarray(obs["target_gate"]).item())
@@ -212,7 +224,23 @@ def run_level3_controller_seed(
                 bool(truncated),
                 info,
             )
-            diagnostics = dict(controller.mppi_diagnostics())
+            if trace_steps:
+                trace.append(
+                    make_level3_trace_row(
+                        seed=seed,
+                        step=steps,
+                        pre_target_gate=pre_target_gate,
+                        post_target_gate=target_gate,
+                        max_gate_index=max_gate_index,
+                        obs=obs,
+                        info=info,
+                        action=action,
+                        diagnostics=diagnostics,
+                        terminated=bool(terminated),
+                        truncated=bool(truncated),
+                        controller_finished=bool(controller_finished),
+                    )
+                )
             if terminated or truncated or controller_finished:
                 break
     finally:
@@ -233,13 +261,22 @@ def run_level3_controller_seed(
         ended_before_max_steps
         and steps < min(max_steps, int(early_termination_step_threshold))
     )
-    return {
+    termination_reason = level3_termination_reason(
+        info=info,
+        terminated=bool(terminated),
+        truncated=bool(truncated),
+        controller_finished=bool(controller_finished),
+        ended_by_max_steps=not ended_before_max_steps,
+    )
+    result = {
         "seed": seed,
         "steps": steps,
         "finite_action": finite_action,
         "terminated": bool(terminated),
         "truncated": bool(truncated),
         "controller_finished": bool(controller_finished),
+        "termination_reason": termination_reason,
+        "termination_reason_code": level3_termination_reason_code(info),
         "ended_before_max_steps": ended_before_max_steps,
         "early_termination": early_termination,
         "early_termination_step_threshold": int(early_termination_step_threshold),
@@ -253,17 +290,117 @@ def run_level3_controller_seed(
         ),
         "last_diagnostics": diagnostics,
     }
+    if trace_steps:
+        result["trace"] = trace
+    return result
+
+
+def make_level3_trace_row(
+    *,
+    seed: int,
+    step: int,
+    pre_target_gate: int,
+    post_target_gate: int,
+    max_gate_index: int,
+    obs: dict[str, Any],
+    info: dict[str, Any],
+    action: np.ndarray,
+    diagnostics: dict[str, float],
+    terminated: bool,
+    truncated: bool,
+    controller_finished: bool,
+) -> dict[str, Any]:
+    """Build one compact per-step planner+tracker trace row."""
+    pos = np.asarray(obs["pos"], dtype=np.float32)
+    gate_local = target_gate_local_xyz(obs, post_target_gate)
+    first_local = target_gate_local_xyz(obs, 0)
+    return {
+        "seed": int(seed),
+        "step": int(step),
+        "pre_target_gate": int(pre_target_gate),
+        "post_target_gate": int(post_target_gate),
+        "max_gate_index": int(max_gate_index),
+        "pos_x": float(pos[0]),
+        "pos_y": float(pos[1]),
+        "pos_z": float(pos[2]),
+        "gate_local_x": float(gate_local[0]),
+        "gate_local_y": float(gate_local[1]),
+        "gate_local_z": float(gate_local[2]),
+        "first_gate_local_x": float(first_local[0]),
+        "first_gate_local_y": float(first_local[1]),
+        "first_gate_local_z": float(first_local[2]),
+        "reference_x": float(diagnostics.get("v54_tracker_reference_x", float("nan"))),
+        "reference_y": float(diagnostics.get("v54_tracker_reference_y", float("nan"))),
+        "reference_z": float(diagnostics.get("v54_tracker_reference_z", float("nan"))),
+        "phase_id": int(diagnostics.get("v54_tracker_phase_id", -1.0)),
+        "desired_speed": float(
+            diagnostics.get("v54_tracker_desired_speed", float("nan"))
+        ),
+        "action_roll": float(action[0]),
+        "action_pitch": float(action[1]),
+        "action_yaw": float(action[2]),
+        "action_thrust": float(action[3]),
+        "terminated": bool(terminated),
+        "truncated": bool(truncated),
+        "controller_finished": bool(controller_finished),
+        "termination_reason_code": level3_termination_reason_code(info),
+        "termination_reason": level3_termination_reason(
+            info=info,
+            terminated=terminated,
+            truncated=truncated,
+            controller_finished=controller_finished,
+            ended_by_max_steps=False,
+        ),
+    }
+
+
+def level3_termination_reason(
+    *,
+    info: dict[str, Any],
+    terminated: bool,
+    truncated: bool,
+    controller_finished: bool,
+    ended_by_max_steps: bool,
+) -> str:
+    """Return a stable termination label for trace and episode summaries."""
+    code = level3_termination_reason_code(info)
+    if code in TERMINATION_REASON_NAMES and code != race_core.TERMINATION_REASON_NONE:
+        return TERMINATION_REASON_NAMES[code]
+    if controller_finished:
+        return "controller_finished"
+    if terminated:
+        return "terminated"
+    if truncated:
+        return "truncated"
+    if ended_by_max_steps:
+        return "max_steps"
+    return "running"
+
+
+def level3_termination_reason_code(info: dict[str, Any]) -> int:
+    """Extract the race-core termination reason code if present."""
+    if isinstance(info, dict) and "termination_reason" in info:
+        value = np.asarray(info["termination_reason"])
+        if value.size:
+            return int(value.reshape(-1)[0])
+    return int(race_core.TERMINATION_REASON_NONE)
 
 
 def first_gate_local_x(obs: dict[str, Any]) -> float:
     """Return drone x-position in the first gate frame."""
+    return float(target_gate_local_xyz(obs, 0)[0])
+
+
+def target_gate_local_xyz(obs: dict[str, Any], gate_index: int) -> np.ndarray:
+    """Return the drone position in a requested gate frame."""
     gates_pos = np.asarray(obs["gates_pos"], dtype=np.float32)
     gates_quat = np.asarray(obs["gates_quat"], dtype=np.float32)
     if len(gates_pos) == 0:
-        return float("nan")
+        return np.full(3, np.nan, dtype=np.float32)
+    gate = int(np.clip(gate_index, 0, len(gates_pos) - 1))
     pos = np.asarray(obs["pos"], dtype=np.float32)
-    gate_rot = quat_to_rotmat(gates_quat[0])
-    return float((gate_rot.T @ (pos - gates_pos[0]))[0])
+    gate_rot = quat_to_rotmat(gates_quat[gate])
+    return (gate_rot.T @ (pos - gates_pos[gate])).astype(np.float32)
 
 
 def main() -> None:

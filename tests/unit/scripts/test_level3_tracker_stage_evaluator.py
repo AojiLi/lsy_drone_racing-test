@@ -165,3 +165,58 @@ def test_planner_smoke_aggregates_level3_progress(monkeypatch: pytest.MonkeyPatc
     assert metrics["nonzero_first_gate_progress_ratio"] == pytest.approx(2 / 3)
     assert metrics["gate0_pass_count"] == 1
     assert metrics["early_termination_ratio"] == pytest.approx(1 / 3)
+
+
+def test_planner_smoke_writes_trace_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Planner smoke should write per-step trace rows outside the metrics payload."""
+    gates = load_json(GATES)
+    stage = stage_by_id(gates, "planner_integration_smoke")
+    trace_flags: list[bool] = []
+
+    def fake_run_level3_controller_seed(**kwargs: object) -> dict[str, object]:
+        seed = int(kwargs["seed"])
+        trace_flags.append(bool(kwargs["trace_steps"]))
+        return {
+            "seed": seed,
+            "finite_action": True,
+            "nonzero_first_gate_progress": True,
+            "max_gate_index": 0,
+            "early_termination": False,
+            "trace": [
+                {
+                    "seed": seed,
+                    "step": 1,
+                    "gate_local_x": -0.5,
+                    "reference_x": 0.1,
+                    "phase_id": 2,
+                    "termination_reason": "running",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        evaluator,
+        "run_level3_controller_seed",
+        fake_run_level3_controller_seed,
+    )
+    trace_output = tmp_path / "planner_trace.json"
+
+    metrics = evaluator.evaluate_planner_smoke(
+        stage=stage,
+        checkpoint=Path("/tmp/fake_tracker.ckpt"),
+        seeds="101-102",
+        max_steps=10,
+        early_termination_step_threshold=5,
+        trace_output=trace_output,
+    )
+    payload = evaluator.json.loads(trace_output.read_text())
+
+    assert trace_flags == [True, True]
+    assert metrics["trace_output"] == str(trace_output)
+    assert metrics["trace_step_rows"] == 2
+    assert "trace" not in metrics["episode_rows"][0]
+    assert payload["stage"] == "planner_integration_smoke"
+    assert payload["trace_rows"][0]["seed"] == 101

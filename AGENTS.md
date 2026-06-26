@@ -254,6 +254,14 @@
   unchanged `config/level3.toml`. The next unlocked stage is
   `manual_long_level3_training_review`; do not launch long training without that
   review packet.
+- A longer 500-step trace diagnostic with the same planner/checkpoint/seeds
+  produced `20/20` first-gate progress and `3/20` gate0 passes, but `15/20`
+  episodes still ended by contact. Successful gate0 passes had near-plane Y/Z
+  error around `0.10m-0.19m`; failed plane-crossing seeds were commonly
+  `0.5m+` off aperture. Long training remains held. The next move is a
+  planner-only `GeometricSlowGatePlanner` tuning pass: align longer, cross
+  slower, handle near-plane/off-aperture states by backing out to pre-gate, and
+  prevent recover before a real target-gate switch.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

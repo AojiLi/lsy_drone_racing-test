@@ -64,6 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--gates-json", type=Path, default=DEFAULT_GATES)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--trace-output", type=Path)
     parser.add_argument("--episodes", type=int)
     parser.add_argument("--seeds", default="101-120")
     parser.add_argument("--max-episode-steps", type=int, default=500)
@@ -95,6 +96,7 @@ def evaluate_stage(
     level3_steps: int = 150,
     early_termination_step_threshold: int = 50,
     rp_limit_deg: float = 50.0,
+    trace_output: Path | None = None,
 ) -> dict[str, Any]:
     """Evaluate a checkpoint on one gate-defined tracker stage."""
     gates = load_json(gates_json)
@@ -110,6 +112,7 @@ def evaluate_stage(
             seeds=seeds,
             max_steps=level3_steps,
             early_termination_step_threshold=early_termination_step_threshold,
+            trace_output=trace_output,
         )
 
     agent, metadata = load_tracker_checkpoint(checkpoint, "cpu")
@@ -567,6 +570,7 @@ def evaluate_planner_smoke(
     seeds: str,
     max_steps: int,
     early_termination_step_threshold: int,
+    trace_output: Path | None = None,
 ) -> dict[str, Any]:
     """Evaluate the deployed planner+tracker path on unchanged Level3 smoke seeds."""
     level3_seeds = parse_seed_range(seeds)
@@ -578,13 +582,29 @@ def evaluate_planner_smoke(
             checkpoint=checkpoint,
             allow_untrained=False,
             early_termination_step_threshold=early_termination_step_threshold,
+            trace_steps=trace_output is not None,
         )
         for seed in level3_seeds
     ]
+    trace_rows: list[dict[str, Any]] = []
+    if trace_output is not None:
+        for row in rows:
+            trace_rows.extend(row.pop("trace", []))
+        trace_output.parent.mkdir(parents=True, exist_ok=True)
+        trace_payload = {
+            "stage": stage["id"],
+            "checkpoint": str(checkpoint),
+            "seeds": level3_seeds,
+            "max_steps": int(max_steps),
+            "trace_rows": trace_rows,
+        }
+        trace_output.write_text(
+            json.dumps(trace_payload, indent=2, sort_keys=True) + "\n"
+        )
     progress_count = sum(1 for row in rows if row["nonzero_first_gate_progress"])
     gate0_pass_count = sum(1 for row in rows if int(row["max_gate_index"]) > 0)
     early_termination_count = sum(1 for row in rows if row["early_termination"])
-    return {
+    metrics = {
         "stage": stage["id"],
         "task": stage["task"],
         "config": stage["config"],
@@ -602,6 +622,10 @@ def evaluate_planner_smoke(
         "early_termination_ratio": early_termination_count / len(rows) if rows else 1.0,
         "episode_rows": rows,
     }
+    if trace_output is not None:
+        metrics["trace_output"] = str(trace_output)
+        metrics["trace_step_rows"] = len(trace_rows)
+    return metrics
 
 
 def main() -> None:
@@ -617,6 +641,7 @@ def main() -> None:
         level3_steps=args.level3_steps,
         early_termination_step_threshold=args.early_termination_step_threshold,
         rp_limit_deg=args.rp_limit_deg,
+        trace_output=args.trace_output,
     )
     output = args.output
     if output is None:
