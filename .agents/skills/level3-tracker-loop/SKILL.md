@@ -113,6 +113,18 @@ diagnostics. V60 reward diagnostics must not compute gate-center, gate-progress,
 gate-cross, gate-recover, gate-linger, obstacle, finish, race-progress, or
 stage-progress terms.
 
+As of the command-trajectory update, v60 input stays fixed at
+`level3_reference_tracker_command_v3`; the reward, not the observation, now
+does more of the work. `ReferenceCommandReward` should treat the short horizon
+`current -> next -> lookahead` as the driving command. For moving commands
+(`pass_through`, `low_speed_through`, `recover_speed`), reward path following
+with cross-track error, along-track speed error, reverse-speed penalty, and
+along-horizon progress rather than pure distance to the current point. For
+`hold_or_brake`, keep point accuracy and low speed dominant, and penalize
+overshoot past the brake point along the horizon direction. Keep these terms
+generic: no gate, aperture, obstacle, planner-phase, finish, race-progress, or
+stage-progress reward may be introduced into v60.
+
 For v59, the tracker may gain a small local safety reflex, but it must not
 become an autonomous Level3 racer. Treat this as:
 
@@ -549,7 +561,11 @@ diagnostics only.
 
 For v60, the reward must be local:
 
-- position/horizon tracking;
+- command-aware position/horizon tracking;
+- cross-track error to the `current -> next -> lookahead` mini-trajectory;
+- along-track desired-speed tracking and reverse-speed penalty for moving
+  commands;
+- brake/hold overshoot past the commanded stop point;
 - desired speed or velocity tracking;
 - desired heading tracking;
 - terminal speed and dwell stability when the command is hold/brake;

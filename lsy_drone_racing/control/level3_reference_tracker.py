@@ -26,14 +26,7 @@ COMMAND_REFERENCE_TRACKER_LAYOUT = "level3_reference_tracker_command_v3"
 REFERENCE_TRACKER_POLICY_ARCH = "mlp_2x256_tanh"
 REFERENCE_TRACKER_HISTORY = 2
 REFERENCE_TRACKER_HISTORY_DIM = 7
-REFERENCE_TRACKER_PHASES = (
-    "hover",
-    "cruise",
-    "slowdown",
-    "align",
-    "cross",
-    "recover",
-)
+REFERENCE_TRACKER_PHASES = ("hover", "cruise", "slowdown", "align", "cross", "recover")
 REFERENCE_TRACKER_OBS_DIM = 65
 REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM = 56
 REFERENCE_TRACKER_WAYPOINT_TYPES = (
@@ -58,20 +51,23 @@ REFERENCE_TRACKER_OBS_DIMS = {
 }
 REFERENCE_COMMAND_TRACKER_TASKS = frozenset({"reference_command_no_gate_reward"})
 SEMANTIC_REFERENCE_TRACKER_TASKS = REFERENCE_COMMAND_TRACKER_TASKS
-FREE_SPACE_TRACKER_TASKS = frozenset(
-    {
-        "hover",
-        "point_hold",
-        "point_reach",
-        "brake_to_point",
-        "line_tracking",
-        "heading_tracking",
-        "multi_point_reference",
-        "l_shape_tracking",
-        "curve_tracking",
-        "zigzag_or_lemniscate_tracking",
-    }
-) | SEMANTIC_REFERENCE_TRACKER_TASKS
+FREE_SPACE_TRACKER_TASKS = (
+    frozenset(
+        {
+            "hover",
+            "point_hold",
+            "point_reach",
+            "brake_to_point",
+            "line_tracking",
+            "heading_tracking",
+            "multi_point_reference",
+            "l_shape_tracking",
+            "curve_tracking",
+            "zigzag_or_lemniscate_tracking",
+        }
+    )
+    | SEMANTIC_REFERENCE_TRACKER_TASKS
+)
 GATE_TRACKER_TASKS = frozenset({"gate_aperture_reference", "level3"})
 REFERENCE_TRACKER_TASK_ALIASES = {
     "point": "point_reach",
@@ -93,6 +89,10 @@ REFERENCE_TRACKER_REWARD_DEFAULTS = {
     "action_coef": 0.02,
     "action_delta_coef": 0.04,
     "progress_bonus": 0.3,
+    "trajectory_cross_track_coef": 1.2,
+    "trajectory_along_speed_coef": 0.7,
+    "trajectory_reverse_speed_coef": 0.5,
+    "trajectory_overshoot_coef": 1.4,
     "gate_x_progress_coef": 0.0,
     "gate_cross_bonus": 0.0,
     "gate_recover_bonus": 0.0,
@@ -151,9 +151,7 @@ class TrackerMemory:
 
     @classmethod
     def from_observation(
-        cls,
-        obs: dict[str, Any],
-        n_history: int = REFERENCE_TRACKER_HISTORY,
+        cls, obs: dict[str, Any], n_history: int = REFERENCE_TRACKER_HISTORY
     ) -> Self:
         """Initialize tracker memory from the first raw environment observation."""
         basic = tracker_history_row(obs)
@@ -180,10 +178,7 @@ class TrackerPPOAgent(nn.Module):
     """Small MLP PPO actor/critic for the reference-tracker observation."""
 
     def __init__(
-        self,
-        obs_dim: int = REFERENCE_TRACKER_OBS_DIM,
-        action_dim: int = 4,
-        hidden_dim: int = 256,
+        self, obs_dim: int = REFERENCE_TRACKER_OBS_DIM, action_dim: int = 4, hidden_dim: int = 256
     ):
         """Build actor, critic, and learned action standard deviation."""
         super().__init__()
@@ -271,31 +266,26 @@ def load_tracker_checkpoint(
         raise ValueError(f"Unsupported tracker checkpoint layout {layout!r}: {path}")
     if expected_layout is not None and layout != expected_layout:
         raise ValueError(
-            f"Checkpoint layout {layout!r} does not match expected layout "
-            f"{expected_layout!r}."
+            f"Checkpoint layout {layout!r} does not match expected layout {expected_layout!r}."
         )
     expected_dim = tracker_obs_dim_for_layout(layout)
     obs_dim = int(checkpoint.get("obs_dim", expected_dim))
     if obs_dim != expected_dim:
         raise ValueError(
-            f"Checkpoint obs_dim {obs_dim} does not match {layout!r} dimension "
-            f"{expected_dim}."
+            f"Checkpoint obs_dim {obs_dim} does not match {layout!r} dimension {expected_dim}."
         )
     action_dim = int(checkpoint.get("action_dim", 4))
     hidden_dim = int(checkpoint.get("hidden_dim", 256))
-    agent = TrackerPPOAgent(
-        obs_dim=obs_dim,
-        action_dim=action_dim,
-        hidden_dim=hidden_dim,
-    ).to(device)
+    agent = TrackerPPOAgent(obs_dim=obs_dim, action_dim=action_dim, hidden_dim=hidden_dim).to(
+        device
+    )
     agent.load_state_dict(checkpoint["model_state_dict"], strict=True)
     agent.eval()
     return agent, checkpoint
 
 
 def action_bounds_from_config(
-    config: Any,
-    rp_limit_deg: float = 50.0,
+    config: Any, rp_limit_deg: float = 50.0
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return attitude-control action bounds used by trainer and controller."""
     drone_params = load_params(config.sim.physics, config.sim.drone_model)
@@ -308,9 +298,7 @@ def action_bounds_from_config(
 
 
 def scale_action(
-    action_norm: np.ndarray,
-    action_low: np.ndarray,
-    action_high: np.ndarray,
+    action_norm: np.ndarray, action_low: np.ndarray, action_high: np.ndarray
 ) -> np.ndarray:
     """Scale normalized [-1, 1] actions into physical attitude commands."""
     action_norm = np.clip(np.asarray(action_norm, dtype=np.float32), -1.0, 1.0)
@@ -318,16 +306,12 @@ def scale_action(
 
 
 def normalize_action(
-    action: np.ndarray,
-    action_low: np.ndarray,
-    action_high: np.ndarray,
+    action: np.ndarray, action_low: np.ndarray, action_high: np.ndarray
 ) -> np.ndarray:
     """Convert physical attitude commands back to normalized PPO actions."""
     action = np.asarray(action, dtype=np.float32)
     return np.clip(
-        2.0 * (action - (action_low + action_high) / 2.0) / (action_high - action_low),
-        -1.0,
-        1.0,
+        2.0 * (action - (action_low + action_high) / 2.0) / (action_high - action_low), -1.0, 1.0
     )
 
 
@@ -444,12 +428,7 @@ def waypoint_semantic_features(reference: ReferenceFrame) -> np.ndarray:
         int(np.clip(reference.waypoint_type_id, 0, len(REFERENCE_TRACKER_WAYPOINT_TYPES) - 1))
     ] = 1.0
     masks = np.array(
-        [
-            reference.stop_signal,
-            reference.brake_mask,
-            reference.slow_through_mask,
-        ],
-        dtype=np.float32,
+        [reference.stop_signal, reference.brake_mask, reference.slow_through_mask], dtype=np.float32
     )
     return np.concatenate([one_hot, masks]).astype(np.float32)
 
@@ -499,8 +478,7 @@ def _validate_tracker_env_mode(task: str, mode: str) -> None:
 
 
 def point_on_polyline(
-    points: list[np.ndarray],
-    distance_along: float,
+    points: list[np.ndarray], distance_along: float
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return a target point and local direction at a distance along a polyline."""
     remaining = float(distance_along)
@@ -569,10 +547,7 @@ def _mean_diagnostics(rows: list[dict[str, float]]) -> dict[str, float]:
     if not rows:
         return {}
     keys = sorted({key for row in rows for key in row})
-    return {
-        key: float(np.mean([row[key] for row in rows if key in row]))
-        for key in keys
-    }
+    return {key: float(np.mean([row[key] for row in rows if key in row])) for key in keys}
 
 
 class ReferenceTrajectoryGenerator:
@@ -595,8 +570,7 @@ class ReferenceTrajectoryGenerator:
             self._origin = np.array([0.0, 0.0, 0.65], dtype=np.float32)
         else:
             self._origin = np.array(
-                [pos[0], pos[1], np.clip(max(0.65, pos[2] + 0.45), 0.55, 1.25)],
-                dtype=np.float32,
+                [pos[0], pos[1], np.clip(max(0.65, pos[2] + 0.45), 0.55, 1.25)], dtype=np.float32
             )
         if self.task == "hover":
             self._anchor = self._origin.copy()
@@ -685,14 +659,7 @@ class ReferenceTrajectoryGenerator:
         next_point = target + direction * 0.08
         lookahead = target + direction * 0.16
         return self._make_reference(
-            obs,
-            target,
-            next_point,
-            lookahead,
-            phase,
-            phase_id,
-            speed,
-            use_gate_context=False,
+            obs, target, next_point, lookahead, phase, phase_id, speed, use_gate_context=False
         )
 
     def _brake_to_point_reference(self, obs: dict[str, Any]) -> ReferenceFrame:
@@ -735,11 +702,7 @@ class ReferenceTrajectoryGenerator:
         )
 
     def _polyline_reference(
-        self,
-        obs: dict[str, Any],
-        points: list[np.ndarray | None],
-        *,
-        speed: float,
+        self, obs: dict[str, Any], points: list[np.ndarray | None], *, speed: float
     ) -> ReferenceFrame:
         valid_points = [np.asarray(p, dtype=np.float32) for p in points if p is not None]
         if len(valid_points) < 2:
@@ -794,18 +757,15 @@ class ReferenceTrajectoryGenerator:
             radius = 0.55
             theta = min(np.pi / 2.0, speed * t / radius)
             target = origin + np.array(
-                [radius * np.sin(theta), radius * (1.0 - np.cos(theta)), 0.0],
-                dtype=np.float32,
+                [radius * np.sin(theta), radius * (1.0 - np.cos(theta)), 0.0], dtype=np.float32
             )
             theta2 = min(np.pi / 2.0, theta + 0.12 / radius)
             next_point = origin + np.array(
-                [radius * np.sin(theta2), radius * (1.0 - np.cos(theta2)), 0.0],
-                dtype=np.float32,
+                [radius * np.sin(theta2), radius * (1.0 - np.cos(theta2)), 0.0], dtype=np.float32
             )
             theta3 = min(np.pi / 2.0, theta + 0.28 / radius)
             lookahead = origin + np.array(
-                [radius * np.sin(theta3), radius * (1.0 - np.cos(theta3)), 0.0],
-                dtype=np.float32,
+                [radius * np.sin(theta3), radius * (1.0 - np.cos(theta3)), 0.0], dtype=np.float32
             )
         heading = safe_normalize(next_point - target)
         return self._make_reference(
@@ -922,25 +882,14 @@ class ReferenceTrajectoryGenerator:
                 0.65,
             )
         if gate_local[0] < -0.25:
-            return (
-                "align",
-                3,
-                np.array([-0.22, aperture[0], aperture[1]], dtype=np.float32),
-                0.42,
-            )
+            return ("align", 3, np.array([-0.22, aperture[0], aperture[1]], dtype=np.float32), 0.42)
         if gate_local[0] < 0.28:
             return "cross", 4, np.array([0.35, aperture[0], aperture[1]], dtype=np.float32), 0.55
-        return (
-            "recover",
-            5,
-            np.array([0.65, aperture[0], aperture[1]], dtype=np.float32),
-            0.65,
-        )
+        return ("recover", 5, np.array([0.65, aperture[0], aperture[1]], dtype=np.float32), 0.65)
 
     @staticmethod
     def _level3_phase(
-        gate_local: np.ndarray,
-        aperture: np.ndarray,
+        gate_local: np.ndarray, aperture: np.ndarray
     ) -> tuple[str, int, np.ndarray, float]:
         if gate_local[0] < -1.00:
             return "cruise", 1, np.array([-0.80, aperture[0], aperture[1]], dtype=np.float32), 0.85
@@ -986,11 +935,7 @@ class ReferenceTrajectoryGenerator:
                 self._nearest_visible_obstacle(obs)
             )
             target_gate = int(
-                np.clip(
-                    np.asarray(obs.get("target_gate", 0)).item(),
-                    0,
-                    len(obs["gates_pos"]) - 1,
-                )
+                np.clip(np.asarray(obs.get("target_gate", 0)).item(), 0, len(obs["gates_pos"]) - 1)
             )
         else:
             gate_local = np.zeros(3, dtype=np.float32)
@@ -1029,11 +974,7 @@ class ReferenceTrajectoryGenerator:
 
     def _gate_context(self, obs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
         target_gate = int(
-            np.clip(
-                np.asarray(obs.get("target_gate", 0)).item(),
-                0,
-                len(obs["gates_pos"]) - 1,
-            )
+            np.clip(np.asarray(obs.get("target_gate", 0)).item(), 0, len(obs["gates_pos"]) - 1)
         )
         gate_rot = quat_to_rotmat(np.asarray(obs["gates_quat"][target_gate], dtype=np.float32))
         gate_pos = np.asarray(obs["gates_pos"][target_gate], dtype=np.float32)
@@ -1046,8 +987,7 @@ class ReferenceTrajectoryGenerator:
         obstacles = np.asarray(obs["obstacles_pos"], dtype=np.float32)
         detected = np.asarray(obs.get("obstacles_visited", np.ones(len(obstacles))), dtype=bool)
         candidates = np.array(
-            [[0.0, 0.0], [0.12, 0.0], [-0.12, 0.0], [0.0, 0.12], [0.0, -0.12]],
-            dtype=np.float32,
+            [[0.0, 0.0], [0.12, 0.0], [-0.12, 0.0], [0.0, 0.12], [0.0, -0.12]], dtype=np.float32
         )
         best = candidates[0]
         best_score = -np.inf
@@ -1136,11 +1076,7 @@ class GeometricSlowGatePlanner:
         self._phase_id = self._advance_phase(self._phase_id, gate_local, aperture, obs)
         points, speed = self._phase_points(self._phase_id, aperture)
         points = self._avoid_visible_obstacles(
-            obs=obs,
-            gate_local=gate_local,
-            gate_pos=gate_pos,
-            gate_rot=gate_rot,
-            points=points,
+            obs=obs, gate_local=gate_local, gate_pos=gate_pos, gate_rot=gate_rot, points=points
         )
         if self._phase_id == 4 and self._last_current_local is not None:
             points = self._clamp_cross_entry_reference(points, self._last_current_local)
@@ -1176,11 +1112,7 @@ class GeometricSlowGatePlanner:
 
     @classmethod
     def _advance_phase(
-        cls,
-        phase_id: int,
-        gate_local: np.ndarray,
-        aperture: np.ndarray,
-        obs: dict[str, Any],
+        cls, phase_id: int, gate_local: np.ndarray, aperture: np.ndarray, obs: dict[str, Any]
     ) -> int:
         x = float(gate_local[0])
         yz_error = float(np.linalg.norm(gate_local[1:3] - aperture))
@@ -1207,11 +1139,7 @@ class GeometricSlowGatePlanner:
         return abs(gate_local_axis_velocity_x(obs))
 
     @classmethod
-    def _phase_points(
-        cls,
-        phase_id: int,
-        aperture: np.ndarray,
-    ) -> tuple[list[np.ndarray], float]:
+    def _phase_points(cls, phase_id: int, aperture: np.ndarray) -> tuple[list[np.ndarray], float]:
         yz = np.asarray(aperture, dtype=np.float32)
         pre_far = cls._local_point(cls.CRUISE_PRE_GATE_X, yz)
         pre_slow = cls._local_point(cls.SLOWDOWN_PRE_GATE_X, yz)
@@ -1232,9 +1160,7 @@ class GeometricSlowGatePlanner:
 
     @classmethod
     def _clamp_cross_entry_reference(
-        cls,
-        points: list[np.ndarray],
-        previous_current: np.ndarray,
+        cls, points: list[np.ndarray], previous_current: np.ndarray
     ) -> list[np.ndarray]:
         previous = np.asarray(previous_current, dtype=np.float32)
         target = np.asarray(points[0], dtype=np.float32)
@@ -1284,18 +1210,12 @@ class GeometricSlowGatePlanner:
                     dist_yz = 1.0
                 push = (cls.OBSTACLE_CLEARANCE_M - dist_yz) + 0.04
                 point[1:3] += (delta_yz / dist_yz) * push
-                point[1:3] = np.clip(
-                    point[1:3],
-                    -cls.MAX_REFERENCE_YZ_M,
-                    cls.MAX_REFERENCE_YZ_M,
-                )
+                point[1:3] = np.clip(point[1:3], -cls.MAX_REFERENCE_YZ_M, cls.MAX_REFERENCE_YZ_M)
         return adjusted
 
     @staticmethod
     def _obstacle_relevant_to_segment(
-        gate_local: np.ndarray,
-        point: np.ndarray,
-        obstacle_local: np.ndarray,
+        gate_local: np.ndarray, point: np.ndarray, obstacle_local: np.ndarray
     ) -> bool:
         lower_x = min(float(gate_local[0]), float(point[0])) - 0.20
         upper_x = max(float(gate_local[0]), float(point[0])) + 0.35
@@ -1315,10 +1235,7 @@ class ReferenceTrackerObservation:
         self.obs_dim = tracker_obs_dim_for_layout(layout)
 
     def build(
-        self,
-        obs: dict[str, Any],
-        reference: ReferenceFrame,
-        memory: TrackerMemory,
+        self, obs: dict[str, Any], reference: ReferenceFrame, memory: TrackerMemory
     ) -> np.ndarray:
         """Flatten raw state, planner reference, action memory, and local history."""
         pos = np.asarray(obs["pos"], dtype=np.float32)
@@ -1344,8 +1261,7 @@ class ReferenceTrackerObservation:
             [
                 reference.obstacle_relative,
                 np.array(
-                    [reference.obstacle_distance, reference.obstacle_detected],
-                    dtype=np.float32,
+                    [reference.obstacle_distance, reference.obstacle_detected], dtype=np.float32
                 ),
             ]
         )
@@ -1378,9 +1294,7 @@ class ReferenceTrackerObservation:
                 ]
             ).astype(np.float32)
         if self.layout == SEMANTIC_REFERENCE_TRACKER_LAYOUT:
-            flat = np.concatenate([flat, waypoint_semantic_features(reference)]).astype(
-                np.float32
-            )
+            flat = np.concatenate([flat, waypoint_semantic_features(reference)]).astype(np.float32)
         if flat.shape != (self.obs_dim,):
             raise ValueError(
                 f"reference tracker obs dim mismatch: {flat.shape} != {(self.obs_dim,)}"
@@ -1404,13 +1318,21 @@ class ReferenceTrackerReward:
         action_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_coef"],
         action_delta_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_delta_coef"],
         progress_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["progress_bonus"],
-        gate_x_progress_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
-            "gate_x_progress_coef"
+        trajectory_cross_track_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_cross_track_coef"
         ],
+        trajectory_along_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_along_speed_coef"
+        ],
+        trajectory_reverse_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_reverse_speed_coef"
+        ],
+        trajectory_overshoot_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_overshoot_coef"
+        ],
+        gate_x_progress_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["gate_x_progress_coef"],
         gate_cross_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["gate_cross_bonus"],
-        gate_recover_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
-            "gate_recover_bonus"
-        ],
+        gate_recover_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["gate_recover_bonus"],
         gate_linger_penalty_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
             "gate_linger_penalty_coef"
         ],
@@ -1438,6 +1360,10 @@ class ReferenceTrackerReward:
         self.action_coef = float(action_coef)
         self.action_delta_coef = float(action_delta_coef)
         self.progress_bonus = float(progress_bonus)
+        self.trajectory_cross_track_coef = float(trajectory_cross_track_coef)
+        self.trajectory_along_speed_coef = float(trajectory_along_speed_coef)
+        self.trajectory_reverse_speed_coef = float(trajectory_reverse_speed_coef)
+        self.trajectory_overshoot_coef = float(trajectory_overshoot_coef)
         self.gate_x_progress_coef = float(gate_x_progress_coef)
         self.gate_cross_bonus = float(gate_cross_bonus)
         self.gate_recover_bonus = float(gate_recover_bonus)
@@ -1450,10 +1376,7 @@ class ReferenceTrackerReward:
 
     def coefficients(self) -> dict[str, float]:
         """Return reward coefficients for checkpoint metadata and diagnostics."""
-        return {
-            name: float(getattr(self, name))
-            for name in REFERENCE_TRACKER_REWARD_DEFAULTS
-        }
+        return {name: float(getattr(self, name)) for name in REFERENCE_TRACKER_REWARD_DEFAULTS}
 
     def compute(
         self,
@@ -1555,10 +1478,7 @@ class ReferenceTrackerReward:
 
     @staticmethod
     def _gate_completion_terms(
-        prev_obs: dict[str, Any],
-        obs: dict[str, Any],
-        reference: ReferenceFrame,
-        vel: np.ndarray,
+        prev_obs: dict[str, Any], obs: dict[str, Any], reference: ReferenceFrame, vel: np.ndarray
     ) -> dict[str, float]:
         """Return gate-crossing shaping terms for gate-aperture training."""
         terms = {
@@ -1572,13 +1492,9 @@ class ReferenceTrackerReward:
         }
         try:
             prev_gate_local = ReferenceTrackerReward._target_gate_local(
-                prev_obs,
-                reference.target_gate,
+                prev_obs, reference.target_gate
             )
-            gate_local = ReferenceTrackerReward._target_gate_local(
-                obs,
-                reference.target_gate,
-            )
+            gate_local = ReferenceTrackerReward._target_gate_local(obs, reference.target_gate)
         except (KeyError, IndexError, ValueError):
             return terms
 
@@ -1625,6 +1541,10 @@ class ReferenceCommandReward:
         "action_coef",
         "action_delta_coef",
         "progress_bonus",
+        "trajectory_cross_track_coef",
+        "trajectory_along_speed_coef",
+        "trajectory_reverse_speed_coef",
+        "trajectory_overshoot_coef",
         "semantic_brake_speed_coef",
         "semantic_slow_speed_coef",
         "semantic_slow_stop_coef",
@@ -1640,6 +1560,18 @@ class ReferenceCommandReward:
         action_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_coef"],
         action_delta_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS["action_delta_coef"],
         progress_bonus: float = REFERENCE_TRACKER_REWARD_DEFAULTS["progress_bonus"],
+        trajectory_cross_track_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_cross_track_coef"
+        ],
+        trajectory_along_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_along_speed_coef"
+        ],
+        trajectory_reverse_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_reverse_speed_coef"
+        ],
+        trajectory_overshoot_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "trajectory_overshoot_coef"
+        ],
         semantic_brake_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
             "semantic_brake_speed_coef"
         ],
@@ -1661,6 +1593,10 @@ class ReferenceCommandReward:
         self.action_coef = float(action_coef)
         self.action_delta_coef = float(action_delta_coef)
         self.progress_bonus = float(progress_bonus)
+        self.trajectory_cross_track_coef = float(trajectory_cross_track_coef)
+        self.trajectory_along_speed_coef = float(trajectory_along_speed_coef)
+        self.trajectory_reverse_speed_coef = float(trajectory_reverse_speed_coef)
+        self.trajectory_overshoot_coef = float(trajectory_overshoot_coef)
         self.semantic_brake_speed_coef = float(semantic_brake_speed_coef)
         self.semantic_slow_speed_coef = float(semantic_slow_speed_coef)
         self.semantic_slow_stop_coef = float(semantic_slow_stop_coef)
@@ -1669,10 +1605,7 @@ class ReferenceCommandReward:
 
     def coefficients(self) -> dict[str, float]:
         """Return clean v60 reward coefficients for diagnostics."""
-        return {
-            name: float(getattr(self, name))
-            for name in self.COEFFICIENT_NAMES
-        }
+        return {name: float(getattr(self, name)) for name in self.COEFFICIENT_NAMES}
 
     def compute(
         self,
@@ -1700,13 +1633,25 @@ class ReferenceCommandReward:
         action_penalty = float(np.mean(np.square(action_norm)))
         delta_penalty = float(np.mean(np.square(action_norm - prev_action_norm)))
         semantic_terms = ReferenceTrackerReward._semantic_terms(reference, vel)
+        trajectory_terms = self._trajectory_terms(
+            prev_pos=prev_pos,
+            pos=pos,
+            vel=vel,
+            reference=reference,
+            pos_error=pos_error,
+            prev_error=prev_error,
+        )
         reward = (
-            -self.pos_error_coef * pos_error
-            - self.vel_error_coef * vel_error
+            -self.pos_error_coef * trajectory_terms["command_position_error"]
+            - self.vel_error_coef * trajectory_terms["command_velocity_error"]
             - self.heading_coef * heading_error
             - self.action_coef * action_penalty
             - self.action_delta_coef * delta_penalty
-            + self.progress_bonus * (prev_error - pos_error)
+            + self.progress_bonus * trajectory_terms["command_progress_m"]
+            - self.trajectory_cross_track_coef * trajectory_terms["command_cross_track_error"]
+            - self.trajectory_along_speed_coef * trajectory_terms["moving_along_speed_error"]
+            - self.trajectory_reverse_speed_coef * trajectory_terms["moving_reverse_speed"]
+            - self.trajectory_overshoot_coef * trajectory_terms["brake_hold_overshoot"]
             - self.semantic_brake_speed_coef * semantic_terms["brake_hold_speed_excess"]
             - self.semantic_slow_speed_coef * semantic_terms["slow_through_speed_error"]
             - self.semantic_slow_stop_coef * semantic_terms["slow_through_stop_error"]
@@ -1717,6 +1662,18 @@ class ReferenceCommandReward:
         diagnostics = {
             "tracker/pos_error": pos_error,
             "tracker/vel_error": vel_error,
+            "tracker/command_position_error": trajectory_terms["command_position_error"],
+            "tracker/command_velocity_error": trajectory_terms["command_velocity_error"],
+            "tracker/trajectory_cross_track_error": trajectory_terms[
+                "trajectory_cross_track_error"
+            ],
+            "tracker/command_cross_track_error": trajectory_terms["command_cross_track_error"],
+            "tracker/trajectory_along_m": trajectory_terms["trajectory_along_m"],
+            "tracker/trajectory_along_speed": trajectory_terms["trajectory_along_speed"],
+            "tracker/moving_along_speed_error": trajectory_terms["moving_along_speed_error"],
+            "tracker/moving_reverse_speed": trajectory_terms["moving_reverse_speed"],
+            "tracker/brake_hold_overshoot": trajectory_terms["brake_hold_overshoot"],
+            "tracker/command_progress": trajectory_terms["command_progress_m"],
             "tracker/heading_error": heading_error,
             "tracker/action_penalty": action_penalty,
             "tracker/action_delta_penalty": delta_penalty,
@@ -1732,10 +1689,56 @@ class ReferenceCommandReward:
         }
         return float(reward), diagnostics
 
+    @staticmethod
+    def _trajectory_terms(
+        *,
+        prev_pos: np.ndarray,
+        pos: np.ndarray,
+        vel: np.ndarray,
+        reference: ReferenceFrame,
+        pos_error: float,
+        prev_error: float,
+    ) -> dict[str, float]:
+        """Return command-aware terms from the short reference horizon."""
+        segment = np.asarray(reference.lookahead_point - reference.current_point, dtype=np.float32)
+        if float(np.linalg.norm(segment)) < 1e-5:
+            segment = np.asarray(reference.next_point - reference.current_point, dtype=np.float32)
+        direction = safe_normalize(segment, fallback=reference.desired_heading)
+        rel = np.asarray(pos - reference.current_point, dtype=np.float32)
+        prev_rel = np.asarray(prev_pos - reference.current_point, dtype=np.float32)
+        along = float(np.dot(rel, direction))
+        prev_along = float(np.dot(prev_rel, direction))
+        cross_track = float(np.linalg.norm(rel - along * direction))
+        speed = float(np.linalg.norm(vel))
+        along_speed = float(np.dot(vel, direction))
+        hold_mask = float(np.clip(max(reference.stop_signal, reference.brake_mask), 0.0, 1.0))
+        moving_mask = 1.0 - hold_mask
+        desired_speed = float(reference.desired_speed)
+        desired_trajectory_velocity = direction * desired_speed * moving_mask
+        command_velocity_error = float(np.linalg.norm(vel - desired_trajectory_velocity))
+        command_position_error = hold_mask * pos_error + moving_mask * (
+            0.35 * pos_error + 0.65 * cross_track
+        )
+        point_progress = float(prev_error - pos_error)
+        trajectory_progress = along - prev_along
+        command_progress = hold_mask * point_progress + moving_mask * trajectory_progress
+        return {
+            "command_position_error": command_position_error,
+            "command_velocity_error": command_velocity_error,
+            "trajectory_cross_track_error": cross_track,
+            "command_cross_track_error": cross_track * moving_mask,
+            "trajectory_along_m": along,
+            "trajectory_along_speed": along_speed,
+            "moving_along_speed_error": abs(along_speed - desired_speed) * moving_mask,
+            "moving_reverse_speed": max(0.0, -along_speed) * moving_mask,
+            "brake_hold_overshoot": max(0.0, along) * hold_mask,
+            "command_progress_m": command_progress,
+            "speed": speed,
+        }
+
 
 def tracker_reward_model_for_task(
-    task: str,
-    reward_coefficients: dict[str, float] | None = None,
+    task: str, reward_coefficients: dict[str, float] | None = None
 ) -> ReferenceTrackerReward | ReferenceCommandReward:
     """Return the default reward model for a tracker task."""
     canonical = normalize_tracker_task(task)
@@ -1775,14 +1778,9 @@ class ReferenceTrackerEnv(gym.Env):
         self.config = load_config(Path(__file__).parents[2] / "config" / config_name)
         self.task = normalize_tracker_task(task)
         self.tracker_env_mode = tracker_env_mode_from_config(
-            self.config,
-            self.task,
-            tracker_env_mode,
+            self.config, self.task, tracker_env_mode
         )
-        self.observation_layout = default_tracker_observation_layout(
-            self.task,
-            observation_layout,
-        )
+        self.observation_layout = default_tracker_observation_layout(self.task, observation_layout)
         self.max_episode_steps = int(max_episode_steps)
         self.config.sim.render = bool(render)
         if int(seed) >= 0:
@@ -1801,26 +1799,18 @@ class ReferenceTrackerEnv(gym.Env):
         )
         self.base_env = JaxToNumpy(self.base_env)
         self.generator = ReferenceTrajectoryGenerator(
-            self.task,
-            dt=1.0 / float(self.config.env.freq),
+            self.task, dt=1.0 / float(self.config.env.freq)
         )
         self.observation_builder = ReferenceTrackerObservation(self.observation_layout)
         if reward_model is not None and reward_coefficients is not None:
             raise ValueError("Pass either reward_model or reward_coefficients, not both.")
         self.reward_model = reward_model or tracker_reward_model_for_task(
-            self.task,
-            reward_coefficients,
+            self.task, reward_coefficients
         )
-        self.action_low, self.action_high = action_bounds_from_config(
-            self.config,
-            rp_limit_deg,
-        )
+        self.action_low, self.action_high = action_bounds_from_config(self.config, rp_limit_deg)
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
         self.observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(self.observation_builder.obs_dim,),
-            dtype=np.float32,
+            low=-np.inf, high=np.inf, shape=(self.observation_builder.obs_dim,), dtype=np.float32
         )
         self._raw_obs: dict[str, Any] | None = None
         self._reference: ReferenceFrame | None = None
@@ -1829,10 +1819,7 @@ class ReferenceTrackerEnv(gym.Env):
         self.last_diagnostics: dict[str, float] = {}
 
     def reset(
-        self,
-        *,
-        seed: int | None = None,
-        options: dict[str, Any] | None = None,
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:
         """Reset the wrapped race env and rebuild tracker memory/reference."""
         raw_obs, info = self.base_env.reset(seed=seed, options=options)
@@ -1920,14 +1907,9 @@ class ReferenceTrackerVectorEnv:
         self.config = load_config(Path(__file__).parents[2] / "config" / config_name)
         self.task = normalize_tracker_task(task)
         self.tracker_env_mode = tracker_env_mode_from_config(
-            self.config,
-            self.task,
-            tracker_env_mode,
+            self.config, self.task, tracker_env_mode
         )
-        self.observation_layout = default_tracker_observation_layout(
-            self.task,
-            observation_layout,
-        )
+        self.observation_layout = default_tracker_observation_layout(self.task, observation_layout)
         self.config.sim.render = bool(render)
         if int(seed) >= 0:
             self.config.env.seed = int(seed)
@@ -1954,31 +1936,16 @@ class ReferenceTrackerVectorEnv:
         if reward_model is not None and reward_coefficients is not None:
             raise ValueError("Pass either reward_model or reward_coefficients, not both.")
         self.reward_model = reward_model or tracker_reward_model_for_task(
-            self.task,
-            reward_coefficients,
+            self.task, reward_coefficients
         )
         self.max_episode_steps = int(max_episode_steps)
-        self.action_low, self.action_high = action_bounds_from_config(
-            self.config,
-            rp_limit_deg,
-        )
-        self.single_action_space = spaces.Box(
-            low=-1.0,
-            high=1.0,
-            shape=(4,),
-            dtype=np.float32,
-        )
+        self.action_low, self.action_high = action_bounds_from_config(self.config, rp_limit_deg)
+        self.single_action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
         self.single_observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(self.observation_builder.obs_dim,),
-            dtype=np.float32,
+            low=-np.inf, high=np.inf, shape=(self.observation_builder.obs_dim,), dtype=np.float32
         )
         self.action_space = batch_space(self.single_action_space, self.num_envs)
-        self.observation_space = batch_space(
-            self.single_observation_space,
-            self.num_envs,
-        )
+        self.observation_space = batch_space(self.single_observation_space, self.num_envs)
         self._raw_obs: dict[str, Any] | None = None
         self._references: list[ReferenceFrame | None] = [None] * self.num_envs
         self._memories: list[TrackerMemory | None] = [None] * self.num_envs
@@ -1986,10 +1953,7 @@ class ReferenceTrackerVectorEnv:
         self.last_diagnostics: dict[str, float] = {}
 
     def reset(
-        self,
-        *,
-        seed: int | None = None,
-        options: dict[str, Any] | None = None,
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:
         """Reset all vector worlds and rebuild per-world tracker state."""
         raw_obs, info = self.base_env.reset(seed=seed, options=options)
@@ -2010,8 +1974,7 @@ class ReferenceTrackerVectorEnv:
         return np.stack(rows).astype(np.float32), info
 
     def step(
-        self,
-        actions: np.ndarray,
+        self, actions: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
         """Apply one normalized tracker action per world."""
         if self._raw_obs is None:
@@ -2089,9 +2052,7 @@ class ReferenceTrackerVectorEnv:
 
     @staticmethod
     def _final_observation(
-        raw_obs: dict[str, Any],
-        info: dict[str, Any],
-        env_idx: int,
+        raw_obs: dict[str, Any], info: dict[str, Any], env_idx: int
     ) -> dict[str, Any]:
         if isinstance(info, dict) and "final_observation" in info:
             final_obs = info["final_observation"]

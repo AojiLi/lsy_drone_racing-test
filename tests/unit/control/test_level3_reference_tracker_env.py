@@ -8,13 +8,13 @@ import pytest
 from lsy_drone_racing.control.level3_reference_tracker import (
     COMMAND_REFERENCE_TRACKER_LAYOUT,
     REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM,
-    REFERENCE_TRACKER_OBS_DIM,
     REFERENCE_TRACKER_LAYOUT,
+    REFERENCE_TRACKER_OBS_DIM,
     SEMANTIC_REFERENCE_TRACKER_LAYOUT,
     SEMANTIC_REFERENCE_TRACKER_OBS_DIM,
     GeometricSlowGatePlanner,
-    ReferenceFrame,
     ReferenceCommandReward,
+    ReferenceFrame,
     ReferenceTrackerObservation,
     ReferenceTrackerReward,
     ReferenceTrackerVectorEnv,
@@ -58,7 +58,9 @@ def test_legacy_task_aliases() -> None:
     assert normalize_tracker_task("point") == "point_reach"
     assert normalize_tracker_task("gate_aperture") == "gate_aperture_reference"
     assert normalize_tracker_task("semantic_reference") == "reference_command_no_gate_reward"
-    assert normalize_tracker_task("semantic_planner_reference") == "reference_command_no_gate_reward"
+    assert (
+        normalize_tracker_task("semantic_planner_reference") == "reference_command_no_gate_reward"
+    )
 
 
 def test_semantic_observation_layout_extends_v1_without_changing_v1() -> None:
@@ -68,24 +70,16 @@ def test_semantic_observation_layout_extends_v1_without_changing_v1() -> None:
     reference = generator.reference(obs)
     memory = TrackerMemory.from_observation(obs)
 
-    v1_obs = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(
-        obs,
-        reference,
-        memory,
-    )
+    v1_obs = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(obs, reference, memory)
     v2_obs = ReferenceTrackerObservation(SEMANTIC_REFERENCE_TRACKER_LAYOUT).build(
-        obs,
-        reference,
-        memory,
+        obs, reference, memory
     )
 
     assert v1_obs.shape == (REFERENCE_TRACKER_OBS_DIM,)
     assert v2_obs.shape == (SEMANTIC_REFERENCE_TRACKER_OBS_DIM,)
     np.testing.assert_allclose(v2_obs[:REFERENCE_TRACKER_OBS_DIM], v1_obs, atol=1e-6)
     np.testing.assert_allclose(
-        v2_obs[REFERENCE_TRACKER_OBS_DIM:],
-        waypoint_semantic_features(reference),
-        atol=1e-6,
+        v2_obs[REFERENCE_TRACKER_OBS_DIM:], waypoint_semantic_features(reference), atol=1e-6
     )
     assert reference.waypoint_type == "pass_through"
 
@@ -103,9 +97,7 @@ def test_reference_command_layout_is_clean_tracker_baseline() -> None:
     memory = TrackerMemory.from_observation(obs)
 
     command_obs = ReferenceTrackerObservation(COMMAND_REFERENCE_TRACKER_LAYOUT).build(
-        obs,
-        reference,
-        memory,
+        obs, reference, memory
     )
     modified_context = replace(
         reference,
@@ -118,20 +110,10 @@ def test_reference_command_layout_is_clean_tracker_baseline() -> None:
     )
     command_obs_with_context_noise = ReferenceTrackerObservation(
         COMMAND_REFERENCE_TRACKER_LAYOUT
-    ).build(
-        obs,
-        modified_context,
-        memory,
-    )
-    v1_obs = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(
-        obs,
-        reference,
-        memory,
-    )
+    ).build(obs, modified_context, memory)
+    v1_obs = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(obs, reference, memory)
     v1_obs_with_context_noise = ReferenceTrackerObservation(REFERENCE_TRACKER_LAYOUT).build(
-        obs,
-        modified_context,
-        memory,
+        obs, modified_context, memory
     )
 
     assert command_obs.shape == (REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM,)
@@ -148,8 +130,12 @@ def test_reference_command_task_emits_explicit_no_gate_intents() -> None:
     types = {reference.waypoint_type for reference in references}
 
     assert {"pass_through", "hold_or_brake", "low_speed_through", "recover_speed"} <= types
-    brake = next(reference for reference in references if reference.waypoint_type == "hold_or_brake")
-    slow = next(reference for reference in references if reference.waypoint_type == "low_speed_through")
+    brake = next(
+        reference for reference in references if reference.waypoint_type == "hold_or_brake"
+    )
+    slow = next(
+        reference for reference in references if reference.waypoint_type == "low_speed_through"
+    )
     assert brake.stop_signal == pytest.approx(1.0)
     assert brake.brake_mask == pytest.approx(1.0)
     assert brake.desired_speed <= 0.10
@@ -199,6 +185,10 @@ def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> No
         action_coef=0.02,
         action_delta_coef=0.04,
         progress_bonus=0.3,
+        trajectory_cross_track_coef=1.2,
+        trajectory_along_speed_coef=0.7,
+        trajectory_reverse_speed_coef=0.5,
+        trajectory_overshoot_coef=1.4,
         gate_x_progress_coef=9.0,
         gate_cross_bonus=9.0,
         gate_recover_bonus=9.0,
@@ -235,6 +225,10 @@ def test_v60_default_reward_has_command_speed_shaping_without_gate_reward() -> N
         action_coef=0.02,
         action_delta_coef=0.04,
         progress_bonus=0.3,
+        trajectory_cross_track_coef=1.2,
+        trajectory_along_speed_coef=0.7,
+        trajectory_reverse_speed_coef=0.5,
+        trajectory_overshoot_coef=1.4,
         gate_x_progress_coef=9.0,
         gate_cross_bonus=9.0,
         gate_recover_bonus=9.0,
@@ -258,23 +252,24 @@ def test_v60_default_reward_has_command_speed_shaping_without_gate_reward() -> N
     assert coefficients["semantic_slow_speed_coef"] > 0.0
     assert coefficients["semantic_slow_stop_coef"] > 0.0
     assert coefficients["semantic_recover_speed_coef"] > 0.0
+    assert coefficients["trajectory_cross_track_coef"] > 0.0
+    assert coefficients["trajectory_along_speed_coef"] > 0.0
+    assert coefficients["trajectory_reverse_speed_coef"] > 0.0
+    assert coefficients["trajectory_overshoot_coef"] > 0.0
 
 
 def test_v60_uses_clean_reference_command_reward_model() -> None:
     reward_model = tracker_reward_model_for_task(
         "reference_command_no_gate_reward",
-        {
-            "gate_center_coef": 9.0,
-            "obstacle_coef": 9.0,
-            "semantic_brake_speed_coef": 1.0,
-        },
+        {"gate_center_coef": 9.0, "obstacle_coef": 9.0, "semantic_brake_speed_coef": 1.0},
     )
 
     assert isinstance(reward_model, ReferenceCommandReward)
     assert not isinstance(reward_model, ReferenceTrackerReward)
-    assert reward_model_name_from_task(
-        "reference_command_no_gate_reward"
-    ) == "reference_command_reward"
+    assert (
+        reward_model_name_from_task("reference_command_no_gate_reward")
+        == "reference_command_reward"
+    )
     assert reward_model_name_from_task("gate_aperture_reference") == (
         "legacy_reference_tracker_reward"
     )
@@ -290,6 +285,10 @@ def test_command_speed_reward_penalizes_wrong_motion_without_gate_terms() -> Non
         action_coef=0.0,
         action_delta_coef=0.0,
         progress_bonus=0.0,
+        trajectory_cross_track_coef=0.0,
+        trajectory_along_speed_coef=0.0,
+        trajectory_reverse_speed_coef=0.0,
+        trajectory_overshoot_coef=0.0,
         semantic_brake_speed_coef=1.0,
         semantic_slow_speed_coef=0.8,
         semantic_slow_stop_coef=0.8,
@@ -388,6 +387,128 @@ def test_command_speed_reward_penalizes_wrong_motion_without_gate_terms() -> Non
     assert reward == pytest.approx(-0.192)
 
 
+def test_command_trajectory_reward_uses_horizon_not_only_current_point() -> None:
+    prev_obs = sample_obs()
+    obs = sample_obs()
+    reward_model = ReferenceCommandReward(
+        pos_error_coef=1.0,
+        vel_error_coef=1.0,
+        heading_coef=0.0,
+        action_coef=0.0,
+        action_delta_coef=0.0,
+        progress_bonus=1.0,
+        trajectory_cross_track_coef=1.0,
+        trajectory_along_speed_coef=1.0,
+        trajectory_reverse_speed_coef=1.0,
+        trajectory_overshoot_coef=1.0,
+        semantic_brake_speed_coef=0.0,
+        semantic_slow_speed_coef=0.0,
+        semantic_slow_stop_coef=0.0,
+        semantic_recover_speed_coef=0.0,
+        crash_penalty=0.0,
+    )
+    reference = ReferenceFrame(
+        phase="cruise",
+        phase_id=1,
+        target_gate=0,
+        current_point=np.zeros(3, dtype=np.float32),
+        next_point=np.array([0.8, 0.0, 0.0], dtype=np.float32),
+        lookahead_point=np.array([1.2, 0.0, 0.0], dtype=np.float32),
+        desired_velocity=np.array([0.30, 0.0, 0.0], dtype=np.float32),
+        desired_heading=np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        desired_speed=0.30,
+        gate_local_position=np.zeros(3, dtype=np.float32),
+        aperture_yz=np.zeros(2, dtype=np.float32),
+        obstacle_relative=np.zeros(3, dtype=np.float32),
+        obstacle_distance=10.0,
+        obstacle_detected=0.0,
+        waypoint_type="pass_through",
+        waypoint_type_id=0,
+        stop_signal=0.0,
+        brake_mask=0.0,
+        slow_through_mask=0.0,
+    )
+    prev_obs["pos"] = np.array([-0.10, 0.0, 0.0], dtype=np.float32)
+    obs["pos"] = np.array([0.40, 0.0, 0.0], dtype=np.float32)
+    obs["vel"] = np.array([0.30, 0.0, 0.0], dtype=np.float32)
+
+    reward, diagnostics = reward_model.compute(
+        prev_obs,
+        obs,
+        reference,
+        np.zeros(4, dtype=np.float32),
+        np.zeros(4, dtype=np.float32),
+        terminated=False,
+        truncated=False,
+    )
+
+    assert diagnostics["tracker/pos_error"] == pytest.approx(0.40)
+    assert diagnostics["tracker/command_position_error"] == pytest.approx(0.14)
+    assert diagnostics["tracker/trajectory_cross_track_error"] == pytest.approx(0.0)
+    assert diagnostics["tracker/moving_along_speed_error"] == pytest.approx(0.0, abs=1e-6)
+    assert diagnostics["tracker/command_progress"] == pytest.approx(0.50)
+    assert reward == pytest.approx(0.36)
+
+
+def test_command_trajectory_reward_penalizes_brake_overshoot() -> None:
+    prev_obs = sample_obs()
+    obs = sample_obs()
+    reward_model = ReferenceCommandReward(
+        pos_error_coef=1.0,
+        vel_error_coef=0.0,
+        heading_coef=0.0,
+        action_coef=0.0,
+        action_delta_coef=0.0,
+        progress_bonus=0.0,
+        trajectory_cross_track_coef=1.0,
+        trajectory_along_speed_coef=1.0,
+        trajectory_reverse_speed_coef=1.0,
+        trajectory_overshoot_coef=1.0,
+        semantic_brake_speed_coef=0.0,
+        semantic_slow_speed_coef=0.0,
+        semantic_slow_stop_coef=0.0,
+        semantic_recover_speed_coef=0.0,
+        crash_penalty=0.0,
+    )
+    reference = ReferenceFrame(
+        phase="slowdown",
+        phase_id=2,
+        target_gate=0,
+        current_point=np.zeros(3, dtype=np.float32),
+        next_point=np.zeros(3, dtype=np.float32),
+        lookahead_point=np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        desired_velocity=np.zeros(3, dtype=np.float32),
+        desired_heading=np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        desired_speed=0.05,
+        gate_local_position=np.zeros(3, dtype=np.float32),
+        aperture_yz=np.zeros(2, dtype=np.float32),
+        obstacle_relative=np.zeros(3, dtype=np.float32),
+        obstacle_distance=10.0,
+        obstacle_detected=0.0,
+        waypoint_type="hold_or_brake",
+        waypoint_type_id=1,
+        stop_signal=1.0,
+        brake_mask=1.0,
+        slow_through_mask=0.0,
+    )
+    obs["pos"] = np.array([0.20, 0.0, 0.0], dtype=np.float32)
+
+    reward, diagnostics = reward_model.compute(
+        prev_obs,
+        obs,
+        reference,
+        np.zeros(4, dtype=np.float32),
+        np.zeros(4, dtype=np.float32),
+        terminated=False,
+        truncated=False,
+    )
+
+    assert diagnostics["tracker/brake_hold_overshoot"] == pytest.approx(0.20)
+    assert diagnostics["tracker/command_position_error"] == pytest.approx(0.20)
+    assert diagnostics["tracker/command_cross_track_error"] == pytest.approx(0.0)
+    assert reward == pytest.approx(-0.40)
+
+
 def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Path) -> None:
     v1_path = tmp_path / "tracker_v1.ckpt"
     v2_path = tmp_path / "tracker_v2.ckpt"
@@ -416,15 +537,13 @@ def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Pat
         load_tracker_checkpoint(v2_path)
 
     v2_agent, v2_metadata = load_tracker_checkpoint(
-        v2_path,
-        expected_layout=SEMANTIC_REFERENCE_TRACKER_LAYOUT,
+        v2_path, expected_layout=SEMANTIC_REFERENCE_TRACKER_LAYOUT
     )
     assert v2_agent.obs_dim == SEMANTIC_REFERENCE_TRACKER_OBS_DIM
     assert v2_metadata["observation_layout"] == SEMANTIC_REFERENCE_TRACKER_LAYOUT
 
     v3_agent, v3_metadata = load_tracker_checkpoint(
-        v3_path,
-        expected_layout=COMMAND_REFERENCE_TRACKER_LAYOUT,
+        v3_path, expected_layout=COMMAND_REFERENCE_TRACKER_LAYOUT
     )
     assert v3_agent.obs_dim == REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM
     assert v3_metadata["observation_layout"] == COMMAND_REFERENCE_TRACKER_LAYOUT
@@ -477,9 +596,7 @@ def test_polyline_reference_terminal_hold_zeroes_desired_speed() -> None:
     assert reference.desired_speed == pytest.approx(0.0)
     np.testing.assert_allclose(reference.desired_velocity, np.zeros(3), atol=1e-6)
     np.testing.assert_allclose(
-        reference.current_point,
-        np.array([0.9, 0.0, 0.65], dtype=np.float32),
-        atol=1e-6,
+        reference.current_point, np.array([0.9, 0.0, 0.65], dtype=np.float32), atol=1e-6
     )
 
 
@@ -526,9 +643,7 @@ def test_level3_geometric_planner_advances_conservatively() -> None:
     assert cruise.phase == "cruise"
     assert cruise.desired_speed == pytest.approx(0.82)
     np.testing.assert_allclose(
-        cruise.current_point,
-        np.array([-1.05, 0.0, 0.75], dtype=np.float32),
-        atol=1e-6,
+        cruise.current_point, np.array([-1.05, 0.0, 0.75], dtype=np.float32), atol=1e-6
     )
 
     obs["pos"] = np.array([-1.00, 0.0, 0.75], dtype=np.float32)
@@ -571,15 +686,15 @@ def test_level3_geometric_planner_clamps_phase3_to_phase4_reference_jump() -> No
     assert first_cross.phase == "cross"
     assert first_cross.desired_speed == pytest.approx(0.32)
     assert np.linalg.norm(first_cross.current_point - align.current_point) == pytest.approx(
-        GeometricSlowGatePlanner.CROSS_ENTRY_MAX_REFERENCE_STEP_M,
-        abs=1e-6,
+        GeometricSlowGatePlanner.CROSS_ENTRY_MAX_REFERENCE_STEP_M, abs=1e-6
     )
 
     second_cross = generator.reference(obs)
     assert second_cross.phase == "cross"
-    assert np.linalg.norm(
-        second_cross.current_point - first_cross.current_point
-    ) <= GeometricSlowGatePlanner.CROSS_ENTRY_MAX_REFERENCE_STEP_M + 1e-6
+    assert (
+        np.linalg.norm(second_cross.current_point - first_cross.current_point)
+        <= GeometricSlowGatePlanner.CROSS_ENTRY_MAX_REFERENCE_STEP_M + 1e-6
+    )
     assert second_cross.current_point[0] > first_cross.current_point[0]
 
 
@@ -624,14 +739,8 @@ def test_gate_axis_speed_uses_gate_local_x_velocity() -> None:
 
 def test_level3_geometric_planner_uses_hysteresis_and_gate_reset() -> None:
     obs = sample_obs()
-    obs["gates_pos"] = np.array(
-        [[0.0, 0.0, 0.75], [2.0, 0.0, 0.75]],
-        dtype=np.float32,
-    )
-    obs["gates_quat"] = np.array(
-        [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
-        dtype=np.float32,
-    )
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75], [2.0, 0.0, 0.75]], dtype=np.float32)
+    obs["gates_quat"] = np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
     obs["gates_visited"] = np.array([False, False])
     obs["obstacles_visited"] = np.array([False])
     generator = ReferenceTrajectoryGenerator("level3")
@@ -713,10 +822,7 @@ def test_tracker_training_configs_resolve_modes() -> None:
         np.array([0.0, 0.0, 0.65], dtype=np.float32),
         atol=1e-6,
     )
-    assert (
-        tracker_env_mode_from_config(gate_config, "gate_aperture_reference")
-        == "gate_aperture"
-    )
+    assert tracker_env_mode_from_config(gate_config, "gate_aperture_reference") == "gate_aperture"
     np.testing.assert_allclose(
         np.asarray(gate_config.env.track.drones[0]["pos"], dtype=np.float32),
         np.array([0.55, 0.0, 0.75], dtype=np.float32),

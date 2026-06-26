@@ -202,6 +202,23 @@ gate-progress, gate-cross, gate-recover, gate-linger, obstacle, finish,
 race-progress, or stage-progress terms. Keep the legacy reward path only for old
 v1/v2 compatibility and gate-aperture diagnostics.
 
+Do not leave v60 as a pure current-point chase. The input already contains
+`current_point`, `next_point`, `lookahead_point`, desired velocity/speed, and
+desired heading. The reward should use that horizon directly:
+
+- moving commands: penalize cross-track error to the short horizon, penalize
+  along-track speed mismatch and reverse motion, and reward progress along the
+  horizon;
+- `hold_or_brake`: keep point accuracy and low speed dominant, and penalize
+  overshoot past the commanded stop point along the horizon direction;
+- diagnostics should expose command-position error, command-velocity error,
+  cross-track error, along speed, reverse speed, brake overshoot, and command
+  progress for W&B analysis.
+
+These are still generic tracker rewards. They must not depend on gate,
+aperture, obstacle, planner phase, race progress, or target-gate transition
+state.
+
 Avoid full-race global progress reward during early tracker qualification. It
 can hide the real failure mode: the policy may move forward without being able
 to stop, align, or follow the reference precisely.
