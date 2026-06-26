@@ -203,6 +203,7 @@ def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> No
         semantic_brake_speed_coef=0.2,
         semantic_slow_speed_coef=0.3,
         semantic_slow_stop_coef=0.4,
+        semantic_recover_speed_coef=0.5,
         crash_penalty=250.0,
     )
 
@@ -215,6 +216,156 @@ def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> No
     assert coefficients["gate_linger_penalty_coef"] == pytest.approx(0.0)
     assert coefficients["pos_error_coef"] == pytest.approx(3.0)
     assert coefficients["semantic_brake_speed_coef"] == pytest.approx(0.2)
+    assert coefficients["semantic_recover_speed_coef"] == pytest.approx(0.5)
+
+
+def test_v60_default_reward_has_command_speed_shaping_without_gate_reward() -> None:
+    args = Namespace(
+        task="reference_command_no_gate_reward",
+        pos_error_coef=3.0,
+        vel_error_coef=0.6,
+        heading_coef=0.35,
+        gate_center_coef=9.0,
+        obstacle_margin=0.28,
+        obstacle_coef=0.8,
+        action_coef=0.02,
+        action_delta_coef=0.04,
+        progress_bonus=0.3,
+        gate_x_progress_coef=9.0,
+        gate_cross_bonus=9.0,
+        gate_recover_bonus=9.0,
+        gate_linger_penalty_coef=9.0,
+        semantic_brake_speed_coef=1.0,
+        semantic_slow_speed_coef=0.8,
+        semantic_slow_stop_coef=0.8,
+        semantic_recover_speed_coef=0.4,
+        crash_penalty=250.0,
+    )
+
+    coefficients = reward_coefficients_from_args(args)
+
+    assert coefficients["gate_center_coef"] == pytest.approx(0.0)
+    assert coefficients["gate_x_progress_coef"] == pytest.approx(0.0)
+    assert coefficients["gate_cross_bonus"] == pytest.approx(0.0)
+    assert coefficients["gate_recover_bonus"] == pytest.approx(0.0)
+    assert coefficients["gate_linger_penalty_coef"] == pytest.approx(0.0)
+    assert coefficients["semantic_brake_speed_coef"] > 0.0
+    assert coefficients["semantic_slow_speed_coef"] > 0.0
+    assert coefficients["semantic_slow_stop_coef"] > 0.0
+    assert coefficients["semantic_recover_speed_coef"] > 0.0
+
+
+def test_command_speed_reward_penalizes_wrong_motion_without_gate_terms() -> None:
+    prev_obs = sample_obs()
+    obs = sample_obs()
+    reward_model = ReferenceTrackerReward(
+        pos_error_coef=0.0,
+        vel_error_coef=0.0,
+        heading_coef=0.0,
+        gate_center_coef=0.0,
+        obstacle_coef=0.0,
+        action_coef=0.0,
+        action_delta_coef=0.0,
+        progress_bonus=0.0,
+        gate_x_progress_coef=0.0,
+        gate_cross_bonus=0.0,
+        gate_recover_bonus=0.0,
+        gate_linger_penalty_coef=0.0,
+        semantic_brake_speed_coef=1.0,
+        semantic_slow_speed_coef=0.8,
+        semantic_slow_stop_coef=0.8,
+        semantic_recover_speed_coef=0.4,
+        crash_penalty=0.0,
+    )
+
+    brake_reference = ReferenceFrame(
+        phase="slowdown",
+        phase_id=2,
+        target_gate=0,
+        current_point=np.zeros(3, dtype=np.float32),
+        next_point=np.zeros(3, dtype=np.float32),
+        lookahead_point=np.array([0.1, 0.0, 0.0], dtype=np.float32),
+        desired_velocity=np.zeros(3, dtype=np.float32),
+        desired_heading=np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        desired_speed=0.05,
+        gate_local_position=np.zeros(3, dtype=np.float32),
+        aperture_yz=np.zeros(2, dtype=np.float32),
+        obstacle_relative=np.zeros(3, dtype=np.float32),
+        obstacle_distance=10.0,
+        obstacle_detected=0.0,
+        waypoint_type="hold_or_brake",
+        waypoint_type_id=1,
+        stop_signal=1.0,
+        brake_mask=1.0,
+        slow_through_mask=0.0,
+    )
+    obs["vel"] = np.array([0.32, 0.0, 0.0], dtype=np.float32)
+
+    reward, diagnostics = reward_model.compute(
+        prev_obs,
+        obs,
+        brake_reference,
+        np.zeros(4, dtype=np.float32),
+        np.zeros(4, dtype=np.float32),
+        terminated=False,
+        truncated=False,
+    )
+
+    assert diagnostics["tracker/brake_hold_speed_excess"] == pytest.approx(0.20)
+    assert diagnostics["tracker/valid_aperture_cross_event"] == pytest.approx(0.0)
+    assert reward == pytest.approx(-0.20)
+
+    slow_reference = replace(
+        brake_reference,
+        phase="cross",
+        phase_id=4,
+        desired_speed=0.30,
+        waypoint_type="low_speed_through",
+        waypoint_type_id=2,
+        stop_signal=0.0,
+        brake_mask=0.0,
+        slow_through_mask=1.0,
+    )
+    obs["vel"] = np.zeros(3, dtype=np.float32)
+
+    reward, diagnostics = reward_model.compute(
+        prev_obs,
+        obs,
+        slow_reference,
+        np.zeros(4, dtype=np.float32),
+        np.zeros(4, dtype=np.float32),
+        terminated=False,
+        truncated=False,
+    )
+
+    assert diagnostics["tracker/slow_through_speed_error"] == pytest.approx(0.30)
+    assert diagnostics["tracker/slow_through_stop_error"] == pytest.approx(0.12)
+    assert reward == pytest.approx(-0.336)
+
+    recover_reference = replace(
+        brake_reference,
+        phase="recover",
+        phase_id=5,
+        desired_speed=0.48,
+        waypoint_type="recover_speed",
+        waypoint_type_id=3,
+        stop_signal=0.0,
+        brake_mask=0.0,
+        slow_through_mask=0.0,
+    )
+
+    reward, diagnostics = reward_model.compute(
+        prev_obs,
+        obs,
+        recover_reference,
+        np.zeros(4, dtype=np.float32),
+        np.zeros(4, dtype=np.float32),
+        terminated=False,
+        truncated=False,
+    )
+
+    assert diagnostics["tracker/recover_speed_error"] == pytest.approx(0.48)
+    assert reward == pytest.approx(-0.192)
 
 
 def test_tracker_checkpoint_layout_versioning_preserves_v1_default(tmp_path: Path) -> None:

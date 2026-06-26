@@ -97,9 +97,10 @@ REFERENCE_TRACKER_REWARD_DEFAULTS = {
     "gate_cross_bonus": 0.0,
     "gate_recover_bonus": 0.0,
     "gate_linger_penalty_coef": 0.0,
-    "semantic_brake_speed_coef": 0.0,
-    "semantic_slow_speed_coef": 0.0,
-    "semantic_slow_stop_coef": 0.0,
+    "semantic_brake_speed_coef": 1.0,
+    "semantic_slow_speed_coef": 0.8,
+    "semantic_slow_stop_coef": 0.8,
+    "semantic_recover_speed_coef": 0.4,
     "crash_penalty": 250.0,
 }
 
@@ -1422,6 +1423,9 @@ class ReferenceTrackerReward:
         semantic_slow_stop_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
             "semantic_slow_stop_coef"
         ],
+        semantic_recover_speed_coef: float = REFERENCE_TRACKER_REWARD_DEFAULTS[
+            "semantic_recover_speed_coef"
+        ],
         crash_penalty: float = REFERENCE_TRACKER_REWARD_DEFAULTS["crash_penalty"],
     ):
         """Set reward coefficients for dense local reference tracking."""
@@ -1441,6 +1445,7 @@ class ReferenceTrackerReward:
         self.semantic_brake_speed_coef = float(semantic_brake_speed_coef)
         self.semantic_slow_speed_coef = float(semantic_slow_speed_coef)
         self.semantic_slow_stop_coef = float(semantic_slow_stop_coef)
+        self.semantic_recover_speed_coef = float(semantic_recover_speed_coef)
         self.crash_penalty = float(crash_penalty)
 
     def coefficients(self) -> dict[str, float]:
@@ -1499,6 +1504,7 @@ class ReferenceTrackerReward:
             - self.semantic_brake_speed_coef * semantic_terms["brake_hold_speed_excess"]
             - self.semantic_slow_speed_coef * semantic_terms["slow_through_speed_error"]
             - self.semantic_slow_stop_coef * semantic_terms["slow_through_stop_error"]
+            - self.semantic_recover_speed_coef * semantic_terms["recover_speed_error"]
         )
         if terminated and not truncated:
             reward -= self.crash_penalty
@@ -1525,6 +1531,7 @@ class ReferenceTrackerReward:
             "tracker/brake_hold_speed_excess": semantic_terms["brake_hold_speed_excess"],
             "tracker/slow_through_speed_error": semantic_terms["slow_through_speed_error"],
             "tracker/slow_through_stop_error": semantic_terms["slow_through_stop_error"],
+            "tracker/recover_speed_error": semantic_terms["recover_speed_error"],
         }
         return float(reward), diagnostics
 
@@ -1536,11 +1543,14 @@ class ReferenceTrackerReward:
         brake_excess = max(0.0, speed - 0.12) * float(reference.brake_mask)
         slow_speed_error = desired_speed_error * float(reference.slow_through_mask)
         slow_stop_error = max(0.0, 0.12 - speed) * float(reference.slow_through_mask)
+        recover_mask = 1.0 if reference.waypoint_type == "recover_speed" else 0.0
+        recover_speed_error = desired_speed_error * recover_mask
         return {
             "desired_speed_error": desired_speed_error,
             "brake_hold_speed_excess": brake_excess,
             "slow_through_speed_error": slow_speed_error,
             "slow_through_stop_error": slow_stop_error,
+            "recover_speed_error": recover_speed_error,
         }
 
     @staticmethod
