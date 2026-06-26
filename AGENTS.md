@@ -60,7 +60,13 @@
   `level3_reference_tracker_command_v3`: self state, reference horizon, desired
   velocity/speed/heading, generic command masks, last action, and short history
   only. Do not include gate, obstacle, or planner phase inputs in this clean
-  bottom-tracker baseline.
+  bottom-tracker baseline. V60 training references must be dense rolling
+  planner-like mini-trajectories, not sparse waypoints: moving commands use
+  `desired_velocity` along `current -> lookahead`; hold/brake keeps the horizon
+  clustered near the stop point with near-zero velocity; point spacing should
+  match `desired_speed * dt`; direction, height, curvature, speed, phase
+  duration, braking distance, slow-through distance, and recovery angle should
+  be randomized.
 - Current v59 tracker proposal: after v60 no-gate command tracking is proven, allow a
   small local safety reflex in the tracker. The tracker still follows planner
   references as its main job; safety features such as nearest obstacle relative
@@ -309,7 +315,9 @@
   risks adding gate-like semantics/rewards to the bottom tracker. The next
   proposed lane is `v60_reference_command_tracker_no_gate_reward`: teach the
   tracker to follow generic trajectory commands with hold/low-speed behavior
-  but no gate/aperture/race reward.
+  but no gate/aperture/race reward. Its generator should resemble a conservative
+  planner approach: smooth cruise, slowdown/hold, low-speed-through, and smooth
+  recovery, with dense low-jump reference horizons.
 - v59 remains a future extension, not the immediate training command:
   `v59_reference_tracker_with_local_safety_reflex` keeps reference tracking
   dominant and adds only weak local obstacle/frame safety penalties or inputs

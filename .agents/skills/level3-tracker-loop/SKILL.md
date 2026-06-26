@@ -125,6 +125,19 @@ overshoot past the brake point along the horizon direction. Keep these terms
 generic: no gate, aperture, obstacle, planner-phase, finish, race-progress, or
 stage-progress reward may be introduced into v60.
 
+As of the dense-command-generator update, v60 training references must be
+planner-like rolling mini-trajectories, not sparse waypoints. For moving
+commands (`pass_through`, `low_speed_through`, `recover_speed`), set
+`desired_velocity` mainly along the visible horizon `current -> lookahead`.
+For `hold_or_brake`, keep `current`, `next`, and `lookahead` clustered near the
+brake/hold point and make `desired_velocity` near zero. Keep per-step reference
+motion consistent with `desired_speed * dt` so a low-speed command does not
+hide a large target jump. Randomize direction, length, height, curvature,
+speed, phase duration, braking distance, slow-through distance, and recovery
+angle so the tracker learns generic command following rather than one memorized
+path. The sequence should resemble a conservative Level3 planner approach:
+smooth cruise, slowdown/hold, low-speed-through, then smooth recovery.
+
 For v59, the tracker may gain a small local safety reflex, but it must not
 become an autonomous Level3 racer. Treat this as:
 

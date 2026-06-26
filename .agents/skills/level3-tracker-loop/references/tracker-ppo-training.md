@@ -82,6 +82,20 @@ nearly stationary short horizon with low desired speed and alignment heading;
 a low-speed-through command should look like future points moving through a
 constrained segment with low but nonzero speed.
 
+The v60 reference generator should present dense rolling mini-trajectories, not
+a few sparse waypoints. For moving commands, set `desired_velocity` along the
+short visible horizon (`current -> lookahead`) so the policy learns to follow
+the trajectory segment. For hold/brake, keep `current`, `next`, and `lookahead`
+near the same brake point and make `desired_velocity` near zero. Point spacing
+should be consistent with the commanded speed and simulator `dt`; for example,
+at `0.30m/s` and `50Hz`, the visible reference should advance only a few
+millimeters per simulator step, with `next` and `lookahead` only modestly ahead.
+Randomize direction, length, altitude, curvature, speed, phase duration,
+braking distance, slow-through distance, and recovery angle so the bottom
+tracker learns generic command following rather than a single fixed route.
+Keep the sequence shaped like the future conservative Level3 planner: cruise,
+slowdown/hold, low-speed-through, and smooth speed recovery.
+
 Recommended generic command intents:
 
 - `pass_through`: pass smoothly through the point at the commanded speed;

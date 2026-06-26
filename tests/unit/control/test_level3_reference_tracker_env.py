@@ -124,9 +124,9 @@ def test_reference_command_layout_is_clean_tracker_baseline() -> None:
 def test_reference_command_task_emits_explicit_no_gate_intents() -> None:
     obs = sample_obs()
     generator = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
-    generator.reset(obs)
+    generator.reset(obs, seed=11)
 
-    references = [generator.reference(obs) for _ in range(130)]
+    references = [generator.reference(obs) for _ in range(220)]
     types = {reference.waypoint_type for reference in references}
 
     assert {"pass_through", "hold_or_brake", "low_speed_through", "recover_speed"} <= types
@@ -139,6 +139,9 @@ def test_reference_command_task_emits_explicit_no_gate_intents() -> None:
     assert brake.stop_signal == pytest.approx(1.0)
     assert brake.brake_mask == pytest.approx(1.0)
     assert brake.desired_speed <= 0.10
+    np.testing.assert_allclose(brake.desired_velocity, np.zeros(3), atol=1e-6)
+    assert np.linalg.norm(brake.next_point - brake.current_point) <= 0.02
+    assert np.linalg.norm(brake.lookahead_point - brake.current_point) <= 0.03
     assert slow.slow_through_mask == pytest.approx(1.0)
     assert 0.25 <= slow.desired_speed <= 0.35
 
@@ -146,31 +149,96 @@ def test_reference_command_task_emits_explicit_no_gate_intents() -> None:
 def test_semantic_reference_intent_is_encoded_by_horizon_speed_and_heading() -> None:
     obs = sample_obs()
     generator = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
-    generator.reset(obs)
+    generator.reset(obs, seed=12)
 
-    references = [generator.reference(obs) for _ in range(130)]
-    through = references[0]
-    brake = references[30]
-    slow = references[70]
-    recover = references[115]
+    references = [generator.reference(obs) for _ in range(220)]
+    through = next(
+        reference for reference in references if reference.waypoint_type == "pass_through"
+    )
+    brake = next(
+        reference for reference in references if reference.waypoint_type == "hold_or_brake"
+    )
+    slow = next(
+        reference for reference in references if reference.waypoint_type == "low_speed_through"
+    )
+    recover = next(
+        reference for reference in references if reference.waypoint_type == "recover_speed"
+    )
 
     assert through.waypoint_type == "pass_through"
-    assert np.linalg.norm(through.next_point - through.current_point) > 0.04
-    assert through.desired_speed == pytest.approx(0.62)
+    assert 0.55 <= through.desired_speed <= 0.78
+    assert np.linalg.norm(through.next_point - through.current_point) <= (
+        through.desired_speed * generator.dt * 4.0 + 0.02
+    )
+    through_horizon = through.lookahead_point - through.current_point
+    assert np.dot(safe_normalize_for_test(through_horizon), through.desired_velocity) > 0.0
 
     assert brake.waypoint_type == "hold_or_brake"
-    np.testing.assert_allclose(brake.next_point, brake.current_point, atol=1e-6)
-    assert np.linalg.norm(brake.lookahead_point - brake.current_point) > 0.20
-    assert brake.desired_speed == pytest.approx(0.05)
+    assert np.linalg.norm(brake.next_point - brake.current_point) <= 0.02
+    assert np.linalg.norm(brake.lookahead_point - brake.current_point) <= 0.03
+    assert 0.02 <= brake.desired_speed <= 0.07
+    np.testing.assert_allclose(brake.desired_velocity, np.zeros(3), atol=1e-6)
 
     assert slow.waypoint_type == "low_speed_through"
-    assert np.linalg.norm(slow.next_point - slow.current_point) > 0.04
-    assert slow.desired_speed == pytest.approx(0.30)
-    assert slow.desired_heading[0] > 0.9
+    assert np.linalg.norm(slow.lookahead_point - slow.current_point) <= (
+        slow.desired_speed * generator.dt * 10.0 + 0.03
+    )
+    assert 0.25 <= slow.desired_speed <= 0.35
+    slow_horizon = slow.lookahead_point - slow.current_point
+    np.testing.assert_allclose(
+        slow.desired_velocity, safe_normalize_for_test(slow_horizon) * slow.desired_speed, atol=1e-5
+    )
 
     assert recover.waypoint_type == "recover_speed"
-    assert np.linalg.norm(recover.next_point - recover.current_point) > 0.04
-    assert recover.desired_speed == pytest.approx(0.48)
+    assert np.linalg.norm(recover.lookahead_point - recover.current_point) <= (
+        recover.desired_speed * generator.dt * 10.0 + 0.03
+    )
+    assert 0.25 <= recover.desired_speed <= 0.62
+    recover_horizon = recover.lookahead_point - recover.current_point
+    np.testing.assert_allclose(
+        recover.desired_velocity,
+        safe_normalize_for_test(recover_horizon) * recover.desired_speed,
+        atol=1e-5,
+    )
+
+
+def safe_normalize_for_test(vector: np.ndarray) -> np.ndarray:
+    norm = float(np.linalg.norm(vector))
+    if norm <= 1e-6:
+        return np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    return (np.asarray(vector, dtype=np.float32) / norm).astype(np.float32)
+
+
+def test_reference_command_generator_is_dense_continuous_and_randomized() -> None:
+    obs = sample_obs()
+    generator_a = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
+    generator_a.reset(obs, seed=21)
+    refs_a = [generator_a.reference(obs) for _ in range(220)]
+
+    current_jumps = np.array(
+        [
+            np.linalg.norm(next_ref.current_point - reference.current_point)
+            for reference, next_ref in zip(refs_a[:-1], refs_a[1:], strict=True)
+        ],
+        dtype=np.float32,
+    )
+    assert float(np.max(current_jumps)) <= 0.06
+
+    for reference in refs_a:
+        if reference.waypoint_type == "hold_or_brake":
+            continue
+        assert np.linalg.norm(reference.next_point - reference.current_point) <= (
+            reference.desired_speed * generator_a.dt * 4.0 + 0.025
+        )
+        assert np.linalg.norm(reference.lookahead_point - reference.current_point) <= (
+            reference.desired_speed * generator_a.dt * 10.0 + 0.045
+        )
+
+    generator_b = ReferenceTrajectoryGenerator("reference_command_no_gate_reward")
+    generator_b.reset(obs, seed=22)
+    ref_a = refs_a[0]
+    ref_b = generator_b.reference(obs)
+    assert not np.allclose(ref_a.lookahead_point, ref_b.lookahead_point)
 
 
 def test_no_gate_command_tracker_forces_gate_reward_coefficients_to_zero() -> None:
