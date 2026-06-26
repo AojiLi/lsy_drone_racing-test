@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from lsy_drone_racing.control.level3_reference_tracker import (
-    GeometricSlowGatePlanner,
     REFERENCE_TRACKER_OBS_DIM,
+    GeometricSlowGatePlanner,
     ReferenceFrame,
     ReferenceTrackerReward,
     ReferenceTrackerVectorEnv,
@@ -137,12 +137,43 @@ def test_level3_geometric_planner_advances_conservatively() -> None:
     obs["pos"] = np.array([-0.24, 0.0, 0.75], dtype=np.float32)
     cross = generator.reference(obs)
     assert cross.phase == "cross"
-    assert cross.current_point[0] > 0.0
+    assert (
+        np.linalg.norm(cross.current_point - align.current_point)
+        <= GeometricSlowGatePlanner.CROSS_ENTRY_MAX_REFERENCE_STEP_M + 1e-6
+    )
     assert cross.desired_speed == pytest.approx(0.32)
 
     obs["pos"] = np.array([0.34, 0.0, 0.75], dtype=np.float32)
     still_cross = generator.reference(obs)
     assert still_cross.phase == "cross"
+
+
+def test_level3_geometric_planner_clamps_phase3_to_phase4_reference_jump() -> None:
+    obs = sample_obs()
+    obs["gates_pos"] = np.array([[0.0, 0.0, 0.75]], dtype=np.float32)
+    obs["obstacles_visited"] = np.array([False])
+    generator = ReferenceTrajectoryGenerator("level3")
+
+    obs["pos"] = np.array([-0.50, 0.0, 0.75], dtype=np.float32)
+    generator.reset(obs)
+    align = generator.reference(obs)
+    assert align.phase == "align"
+
+    obs["pos"] = np.array([-0.24, 0.0, 0.75], dtype=np.float32)
+    first_cross = generator.reference(obs)
+    assert first_cross.phase == "cross"
+    assert first_cross.desired_speed == pytest.approx(0.32)
+    assert np.linalg.norm(first_cross.current_point - align.current_point) == pytest.approx(
+        GeometricSlowGatePlanner.CROSS_ENTRY_MAX_REFERENCE_STEP_M,
+        abs=1e-6,
+    )
+
+    second_cross = generator.reference(obs)
+    assert second_cross.phase == "cross"
+    assert np.linalg.norm(
+        second_cross.current_point - first_cross.current_point
+    ) <= GeometricSlowGatePlanner.CROSS_ENTRY_MAX_REFERENCE_STEP_M + 1e-6
+    assert second_cross.current_point[0] > first_cross.current_point[0]
 
 
 def test_level3_geometric_planner_requires_alignment_before_crossing() -> None:

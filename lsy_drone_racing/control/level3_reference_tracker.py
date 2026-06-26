@@ -890,16 +890,19 @@ class GeometricSlowGatePlanner:
     NEAR_PLANE_BACKOUT_X_M = 0.35
     NEAR_PLANE_BACKOUT_YZ_M = 0.30
     CROSS_SPEED_MPS = 0.32
+    CROSS_ENTRY_MAX_REFERENCE_STEP_M = 0.28
 
     def __init__(self) -> None:
         """Initialize gate/phase memory for hysteretic rolling replanning."""
         self._target_gate = -1
         self._phase_id = 1
+        self._last_current_local: np.ndarray | None = None
 
     def reset(self, obs: dict[str, Any]) -> None:
         """Reset planner phase when a new episode starts."""
         self._target_gate = self._target_gate_from_obs(obs)
         self._phase_id = 1
+        self._last_current_local = None
 
     def plan(
         self,
@@ -915,6 +918,7 @@ class GeometricSlowGatePlanner:
         if target_gate != self._target_gate:
             self._target_gate = target_gate
             self._phase_id = self._initial_phase_id(gate_local)
+            self._last_current_local = None
         self._phase_id = self._advance_phase(self._phase_id, gate_local, aperture, obs)
         points, speed = self._phase_points(self._phase_id, aperture)
         points = self._avoid_visible_obstacles(
@@ -924,6 +928,9 @@ class GeometricSlowGatePlanner:
             gate_rot=gate_rot,
             points=points,
         )
+        if self._phase_id == 4 and self._last_current_local is not None:
+            points = self._clamp_cross_entry_reference(points, self._last_current_local)
+        self._last_current_local = points[0].astype(np.float32).copy()
         phase = REFERENCE_TRACKER_PHASES[int(np.clip(self._phase_id, 0, 5))]
         return GeometricPlannerOutput(
             phase=phase,
@@ -1008,6 +1015,25 @@ class GeometricSlowGatePlanner:
         if phase_id == 4:
             return [post_gate, recovery, recovery_far], cls.CROSS_SPEED_MPS
         return [recovery, recovery_far, cls._local_point(cls.RECOVERY_X + 0.52, yz)], 0.62
+
+    @classmethod
+    def _clamp_cross_entry_reference(
+        cls,
+        points: list[np.ndarray],
+        previous_current: np.ndarray,
+    ) -> list[np.ndarray]:
+        previous = np.asarray(previous_current, dtype=np.float32)
+        target = np.asarray(points[0], dtype=np.float32)
+        delta = target - previous
+        distance = float(np.linalg.norm(delta))
+        if distance <= cls.CROSS_ENTRY_MAX_REFERENCE_STEP_M:
+            return points
+        clamped_current = previous + delta * (cls.CROSS_ENTRY_MAX_REFERENCE_STEP_M / distance)
+        horizon_shift = clamped_current - target
+        return [
+            (np.asarray(point, dtype=np.float32) + horizon_shift).astype(np.float32)
+            for point in points
+        ]
 
     @staticmethod
     def _local_point(x: float, yz: np.ndarray) -> np.ndarray:
