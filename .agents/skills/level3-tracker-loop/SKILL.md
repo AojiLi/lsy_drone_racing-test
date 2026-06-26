@@ -423,3 +423,14 @@ deterministic gate-frame planner with phase hysteresis, near-gate slowdown,
 pre-gate alignment, pre/aperture/post/recovery references, and a simple visible
 obstacle waypoint offset. If planner smoke fails, inspect the generated
 references before adding MPPI or retraining the tracker.
+
+For the next planner-only gate-front tuning lane, use the repo skill:
+
+```text
+.agents/skills/level3-geometric-planner-loop/SKILL.md
+```
+
+That skill owns `v56_geometric_gate_crossing_tuning_loop`: fixed seeds
+`101-120`, 500-step trace smoke, no PPO training, no checkpoint changes, no
+`config/level3.toml` edits, and task metrics for align stabilization, cross
+slowdown, near-plane backout, and recover-after-real-gate-switch behavior.

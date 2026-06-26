@@ -15,6 +15,8 @@
   `.agents/skills/level3-mppi-loop/SKILL.md`.
 - For v54/v55 low-level reference-tracker qualification, use the repo skill
   `.agents/skills/level3-tracker-loop/SKILL.md`.
+- For v56 deterministic gate-front planner tuning, use the repo skill
+  `.agents/skills/level3-geometric-planner-loop/SKILL.md`.
 
 ## Level3 PPO Objective
 
@@ -262,6 +264,14 @@
   planner-only `GeometricSlowGatePlanner` tuning pass: align longer, cross
   slower, handle near-plane/off-aperture states by backing out to pre-gate, and
   prevent recover before a real target-gate switch.
+- The immediate next loop is `v56_geometric_gate_crossing_tuning_loop`, defined
+  by `.agents/skills/level3-geometric-planner-loop/SKILL.md`. Keep the
+  zigzag-qualified PPO tracker checkpoint fixed, run unchanged `config/level3.toml`
+  on seeds `101-120` for 500 steps with trace output, and iterate only on
+  deterministic gate-front planner policy until the smoke target reaches
+  `gate0_pass_count >= 10/20`, contact terminations `<= 8/20`, and first-gate
+  progress `20/20`. Do not start PPO training or long Level3 training during
+  this loop.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

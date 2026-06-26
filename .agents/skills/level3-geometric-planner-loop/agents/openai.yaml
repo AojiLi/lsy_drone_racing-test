@@ -1,0 +1,4 @@
+interface:
+  display_name: "Level3 Geometric Planner Loop"
+  short_description: "Tune Level3 gate-crossing geometry"
+  default_prompt: "Use $level3-geometric-planner-loop to tune GeometricSlowGatePlanner gate-crossing behavior on unchanged Level3."
