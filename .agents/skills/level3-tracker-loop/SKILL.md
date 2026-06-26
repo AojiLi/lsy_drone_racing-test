@@ -653,3 +653,24 @@ That skill owns `v56_geometric_gate_crossing_tuning_loop`: fixed seeds
 `101-120`, 500-step trace smoke, no PPO training, no checkpoint changes, no
 `config/level3.toml` edits, and task metrics for align stabilization, cross
 slowdown, near-plane backout, and recover-after-real-gate-switch behavior.
+
+## Speed Backend Notes
+
+SBX was tested as a packaged PPO backend and rejected for this project because
+it remained too slow for the v60 tracker speed problem. Keep the active
+speed-oriented route on the Brax/JAX side.
+
+The current backend evidence is:
+
+- `scripts/benchmark_v60_brax_rollout.py`: pure JAX/Brax-style rollout probe,
+  about `1.6M env steps/s` after compile on `1024 envs x 32 steps`;
+- `scripts/train_v60_brax_ppo_smoke.py`: minimal JAX actor-critic + JAX rollout
+  + GAE + clipped PPO + Optax update + checkpoint + W&B smoke. A
+  `262144`-step smoke reached about `1.27M env steps/s` steady-state, roughly
+  `31.9x` the PyTorch fast path, while keeping finite metrics and saving a
+  loadable checkpoint.
+
+Treat v62 as backend plumbing evidence, not a tracker-stage pass. Before using
+it for a real v60 maturation run, promote it through builder/checker into a
+maintained trainer lane with milestone checkpoints, resume support, and stage
+evaluation wiring.

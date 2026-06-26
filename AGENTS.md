@@ -332,9 +332,19 @@
   implements a minimal Brax-style `brax.envs.base.State` rollout probe for the
   v60 command tracker. On `1024 envs x 32 steps`, after compile/autotune, it ran
   around `0.020s` per rollout, about `1.6M env steps/s`, versus the PyTorch v60
-  fast path's roughly `39.8k env steps/s` for a 1M-step smoke. This probe does
-  not include PPO updates yet. The next speed-oriented step is a real Brax PPO
-  adapter/checkpoint path, then a bounded PPO smoke before any long training.
+  fast path's roughly `39.8k env steps/s` for a 1M-step smoke.
+- Current v62 PPO-backend smoke finding: `scripts/train_v60_brax_ppo_smoke.py`
+  extends the v61 rollout probe into a minimal device-resident PPO loop using a
+  JAX actor-critic, JAX rollout, GAE, clipped PPO loss, Optax update,
+  checkpoint write/read verification, W&B logging, and deterministic short eval.
+  A `1024 envs x 32 steps`, `262144`-step smoke on
+  `config/level3_tracker_free_space.toml` stayed finite, saved
+  `/tmp/v62_brax_ppo_smoke.pkl`, logged W&B offline run
+  `v62_brax_ppo_smoke_20260627`, and reached about `1.27M env steps/s`
+  steady-state, roughly `31.9x` the PyTorch fast path. This is backend plumbing
+  evidence only, not a tracker-skill pass. The next speed-oriented step is to
+  promote v62 into a maintained trainer lane with milestone checkpoint/resume
+  support and a bounded 1M learning-signal run before any long v60 maturation.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
