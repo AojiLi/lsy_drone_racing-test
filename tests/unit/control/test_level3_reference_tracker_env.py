@@ -138,6 +138,7 @@ def test_level3_geometric_planner_advances_conservatively() -> None:
     cross = generator.reference(obs)
     assert cross.phase == "cross"
     assert cross.current_point[0] > 0.0
+    assert cross.desired_speed == pytest.approx(0.32)
 
     obs["pos"] = np.array([0.34, 0.0, 0.75], dtype=np.float32)
     still_cross = generator.reference(obs)

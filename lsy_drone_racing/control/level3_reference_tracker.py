@@ -889,6 +889,7 @@ class GeometricSlowGatePlanner:
     ALIGN_TO_CROSS_MAX_GATE_X_SPEED_MPS = 0.85
     NEAR_PLANE_BACKOUT_X_M = 0.35
     NEAR_PLANE_BACKOUT_YZ_M = 0.30
+    CROSS_SPEED_MPS = 0.32
 
     def __init__(self) -> None:
         """Initialize gate/phase memory for hysteretic rolling replanning."""
@@ -1005,7 +1006,7 @@ class GeometricSlowGatePlanner:
         if phase_id == 3:
             return [pre_align, aperture_point, post_gate], 0.28
         if phase_id == 4:
-            return [post_gate, recovery, recovery_far], 0.52
+            return [post_gate, recovery, recovery_far], cls.CROSS_SPEED_MPS
         return [recovery, recovery_far, cls._local_point(cls.RECOVERY_X + 0.52, yz)], 0.62
 
     @staticmethod
