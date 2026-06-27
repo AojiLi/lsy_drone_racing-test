@@ -126,7 +126,6 @@
         }
       ],
       "best_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_005000000.pkl",
-      "post_audit": null,
       "post_audit": {
         "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_005000000.pkl",
         "checkpoint_global_step": 5013504,
@@ -134,7 +133,7 @@
         "action_sampling_logprob": "ok",
         "advantage_scale": "ok",
         "reward_scale": "large",
-        "stored_vs_env_logprob_abs_mean": 9.043833415489644e-7,
+        "stored_vs_env_logprob_abs_mean": 9.043833415489644e-07,
         "value_target_scale": 50.0
       },
       "decision": {
@@ -152,6 +151,141 @@
           "update_epochs": 1,
           "value_target_scale": 50.0
         }
+      }
+    },
+    {
+      "id": "v62d_002",
+      "family": "D_PPO_stabilizer",
+      "hypothesis": "Keep value_target_scale=50.0 but restore conservative v62c-like PPO update pressure to isolate the v62d_001 update-pressure confounder.",
+      "changed_knobs": {
+        "num_minibatches": 4,
+        "update_epochs": 1,
+        "value_target_scale": 50.0
+      },
+      "status": "rejected_not_promoted",
+      "lane_name": "v62d_002_value_scale50_conservative_ppo_30m",
+      "train_from_scratch": true,
+      "training_command": "pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_002_value_scale50_conservative_ppo_30m --config level3_tracker_free_space.toml --seed 26421 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_002_value_scale50_conservative_ppo_30m_summary.json --action-distribution tanh_squashed_gaussian --value-target-scale 50.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_002_value_scale50_conservative_ppo_30m --wandb-run-id v62d_002_value_scale50_conservative_ppo_30m_20260627 --jax-device gpu",
+      "wandb": {
+        "project": "ADR-PPO-Racing-Level3",
+        "entity": "aojili77-technical-university-of-munich",
+        "run_id": "v62d_002_value_scale50_conservative_ppo_30m_20260627",
+        "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_002_value_scale50_conservative_ppo_30m_20260627"
+      },
+      "milestones": [
+        {
+          "label": "5M",
+          "global_step": 5013504,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_005000000.pkl",
+          "reward_mean": -6.925845369696617,
+          "command_position_error": 0.4065961027517915,
+          "cross_track_error": 0.34389545395970345,
+          "command_velocity_error": 0.7721090689301491,
+          "done_mean": 0.016153335571289062,
+          "action_delta_penalty": 0.0027630760450847447,
+          "balanced_score": -9.001022065640427
+        },
+        {
+          "label": "10M",
+          "global_step": 10027008,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_010000000.pkl",
+          "reward_mean": -9.553152918815613,
+          "command_position_error": 0.3169012386351824,
+          "cross_track_error": 0.2898518340662122,
+          "command_velocity_error": 1.2990985736250877,
+          "done_mean": 0.02646636962890625,
+          "action_delta_penalty": 0.01282050769077614,
+          "balanced_score": -11.886361789074726
+        },
+        {
+          "label": "15M",
+          "global_step": 15007744,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_015000000.pkl",
+          "reward_mean": -10.447436451911926,
+          "command_position_error": 0.2836956297978759,
+          "cross_track_error": 0.25477387104183435,
+          "command_velocity_error": 1.3301774635910988,
+          "done_mean": 0.031003952026367188,
+          "action_delta_penalty": 0.019772743340581656,
+          "balanced_score": -12.744206622708589
+        },
+        {
+          "label": "20M",
+          "global_step": 20021248,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_020000000.pkl",
+          "reward_mean": -10.341932475566864,
+          "command_position_error": 0.27620828337967396,
+          "cross_track_error": 0.2526121735572815,
+          "command_velocity_error": 1.275138758122921,
+          "done_mean": 0.030939102172851562,
+          "action_delta_penalty": 0.03242763155139983,
+          "balanced_score": -12.60386765608564
+        },
+        {
+          "label": "25M",
+          "global_step": 25001984,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_025000000.pkl",
+          "reward_mean": -9.83926236629486,
+          "command_position_error": 0.26592322904616594,
+          "cross_track_error": 0.2480888683348894,
+          "command_velocity_error": 1.184666395187378,
+          "done_mean": 0.0292816162109375,
+          "action_delta_penalty": 0.027689221780747175,
+          "balanced_score": -11.97993652895093
+        },
+        {
+          "label": "30M",
+          "global_step": 30015488,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_030000000.pkl",
+          "reward_mean": -9.427494943141937,
+          "command_position_error": 0.3862182144075632,
+          "cross_track_error": 0.32769361790269613,
+          "command_velocity_error": 1.2421274408698082,
+          "done_mean": 0.025087356567382812,
+          "action_delta_penalty": 0.01609672198537737,
+          "balanced_score": -11.906134389108047
+        },
+        {
+          "label": "final",
+          "global_step": 30015488,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_final.pkl",
+          "reward_mean": -9.427494943141937,
+          "command_position_error": 0.3862182144075632,
+          "cross_track_error": 0.32769361790269613,
+          "command_velocity_error": 1.2421274408698082,
+          "done_mean": 0.025087356567382812,
+          "action_delta_penalty": 0.01609672198537737,
+          "balanced_score": -11.906134389108047
+        }
+      ],
+      "best_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_005000000.pkl",
+      "post_audit": {
+        "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_005000000.pkl",
+        "checkpoint_global_step": 5013504,
+        "action_clipping": "ok",
+        "action_sampling_logprob": "ok",
+        "advantage_scale": "ok",
+        "reward_scale": "ok",
+        "stored_vs_env_logprob_abs_mean": 7.098960850271396e-07,
+        "value_target_scale": 50.0
+      },
+      "decision": {
+        "outcome": "switch_candidate_family",
+        "promoted": false,
+        "packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_002_decision.md",
+        "reason": "Conservative PPO improved v62d_001 but still regressed velocity, done, reward, and action_delta versus v62c 7M."
+      },
+      "next_recommendation": {
+        "candidate_id": "v62d_003",
+        "family": "B_velocity_obedience_reward_numbers",
+        "lane_name": "v62d_003_velocity_coef_2x",
+        "changed_knobs": {
+          "ReferenceCommandReward.vel_error_coef": "0.6 -> 1.2",
+          "value_target_scale": 1.0,
+          "num_minibatches": 4,
+          "update_epochs": 1
+        },
+        "requires_builder_checker": true
       }
     }
   ]

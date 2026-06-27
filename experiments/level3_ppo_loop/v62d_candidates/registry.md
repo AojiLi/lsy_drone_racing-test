@@ -27,6 +27,7 @@ Under the 16-rollout tracker evaluation protocol:
 | id | family | hypothesis | changed knobs | status | best checkpoint | decision |
 |---|---|---|---|---|---|---|
 | v62d_001 | A_value_return_stabilization | reduce critic target magnitude without changing rewards/obs | `value_target_scale=50.0`, `num_minibatches=8`, `update_epochs=4` | rejected_not_promoted | `v62d_001...step_005000000.pkl` | critic scale fixed, but velocity/done/action_delta regressed; next isolate conservative PPO |
+| v62d_002 | D_PPO_stabilizer | test value scale under conservative v62c-like PPO update pressure | `value_target_scale=50.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_002...step_005000000.pkl` | cleaner than v62d_001 but still worse than v62c 7M on velocity/done/action_delta; next switch to velocity reward numbers |
 
 ## v62d_001 Result
 
@@ -73,4 +74,71 @@ pressure:
 ```text
 --num-minibatches 4
 --update-epochs 1
+```
+
+## v62d_002 Plan
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_002_hypothesis.md
+```
+
+This candidate isolates the PPO-update-pressure confounder from `v62d_001`.
+It trains from scratch for 30,015,488 steps with the same value target scale but
+with `4` minibatches and `1` update epoch.
+
+## v62d_002 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_002_value_scale50_conservative_ppo_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_002_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_002_value_scale50_conservative_ppo_30m/v62d_002_value_scale50_conservative_ppo_30m_step_005000000.pkl
+```
+
+It is not promoted. It is much cleaner than v62d_001, but it still fails the
+v62c 7M frontier on velocity, done rate, reward, action smoothness, and
+balanced score.
+
+| Metric | v62c 7M | v62d_002 best |
+|---|---:|---:|
+| reward | -4.8459 | -6.9258 |
+| command position error | 0.6573 | 0.4066 |
+| cross-track error | 0.5214 | 0.3439 |
+| command velocity error | 0.7397 | 0.7721 |
+| done mean | 0.00391 | 0.01615 |
+| action delta | 0.000006 | 0.00276 |
+| balanced score | -7.5365 | -9.0010 |
+
+Next recommended candidate:
+
+```text
+v62d_003_velocity_coef_2x
+```
+
+Switch to Family B velocity-obedience reward numbers, with one generic tracker
+reward knob:
+
+```text
+ReferenceCommandReward vel_error_coef: 0.6 -> 1.2
+```
+
+Return to v62c-style update/value settings:
+
+```text
+value_target_scale=1.0
+num_minibatches=4
+update_epochs=1
 ```
