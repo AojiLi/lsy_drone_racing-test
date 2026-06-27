@@ -33,7 +33,7 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | rejected_not_promoted | `v62d_005...step_015000000.pkl` | critic diagnostics improved, but velocity/action smoothness regressed badly |
 | v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | rejected_not_promoted | `v62d_006...step_020000000.pkl` | valid long-rollout run, but no velocity/frontier improvement; next combine speed-bin generator with velocity coef |
 | v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | rejected_not_promoted | `v62d_007...step_015000000.pkl` | best-of-family combination failed velocity objective and late drifted; next switch back to generator velocity distribution |
-| v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | planned_support_required | pending | implement generator profile with builder/checker before 30M |
+| v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | support_passed_ready_to_train | pending 30M | support smoke/checker passed; launch 30M from scratch |
 
 ## v62d_001 Result
 
@@ -675,4 +675,59 @@ num_envs=1024
 num_steps=32
 ```
 
-Do not launch 30M until support smoke and checker pass.
+## v62d_008 Support
+
+Support packet:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_008_velocity_contrast_constant_speed_support.md
+```
+
+Support decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_008_support_decision.md
+```
+
+Checker result:
+
+```text
+ALL GREEN
+```
+
+Support smoke completed `262,144` steps with:
+
+```text
+command_generator_profile=velocity_contrast_constant_speed
+action_distribution=tanh_squashed_gaussian
+reward_coefficients={}
+actual_timesteps=262144
+steady_state_steps_per_s=1258804
+action_clipping=ok
+action_sampling_logprob=ok
+stored_vs_env_logprob_abs_mean ~= 3.11e-7
+```
+
+The support checkpoint metadata records:
+
+```text
+observation_layout=level3_reference_tracker_command_v3
+action_distribution=tanh_squashed_gaussian
+command_generator_profile=velocity_contrast_constant_speed
+reward_coefficients={}
+num_envs=1024
+num_steps=32
+value_target_scale=1.0
+```
+
+Both configs remain unchanged:
+
+```text
+config/level3.toml
+config/level3_tracker_free_space.toml
+```
+
+Support passes. Launch the 30M candidate from scratch with the command recorded
+in the support decision packet. Do not promote or reject `v62d_008` until the
+30M run, milestone eval, best-checkpoint audit, three-review analysis, decision
+packet, reader note, and registry/state update are complete.

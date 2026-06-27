@@ -1271,8 +1271,8 @@
           "cross_track_error": 0.1813418092,
           "command_velocity_error": 0.8263065107,
           "done_mean": 0.0,
-          "action_delta_penalty": 0.0000201400,
-          "balanced_score": -3.9703465950
+          "action_delta_penalty": 2.014e-05,
+          "balanced_score": -3.970346595
         },
         {
           "label": "10M",
@@ -1283,19 +1283,19 @@
           "cross_track_error": 0.1891576331,
           "command_velocity_error": 0.8533090726,
           "done_mean": 0.0,
-          "action_delta_penalty": 0.0000368314,
+          "action_delta_penalty": 3.68314e-05,
           "balanced_score": -4.0830050463
         },
         {
           "label": "15M",
           "global_step": 15007744,
           "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_007_speedbin_velocity_coef_2x_30m/v62d_007_speedbin_velocity_coef_2x_30m_step_015000000.pkl",
-          "reward_mean": -2.5724307150,
+          "reward_mean": -2.572430715,
           "command_position_error": 0.2026194567,
           "cross_track_error": 0.1710131001,
           "command_velocity_error": 0.7943181954,
           "done_mean": 0.0,
-          "action_delta_penalty": 0.0000875483,
+          "action_delta_penalty": 8.75483e-05,
           "balanced_score": -3.8301030216
         },
         {
@@ -1307,7 +1307,7 @@
           "cross_track_error": 0.1758741699,
           "command_velocity_error": 0.8108879589,
           "done_mean": 0.0,
-          "action_delta_penalty": 0.0000590500,
+          "action_delta_penalty": 5.905e-05,
           "balanced_score": -3.9028689954
         },
         {
@@ -1319,7 +1319,7 @@
           "cross_track_error": 0.1807223149,
           "command_velocity_error": 0.8252113648,
           "done_mean": 0.0,
-          "action_delta_penalty": 0.0000779838,
+          "action_delta_penalty": 7.79838e-05,
           "balanced_score": -3.9656750317
         },
         {
@@ -1329,7 +1329,7 @@
           "reward_mean": -3.1670230031,
           "command_position_error": 0.2595528048,
           "cross_track_error": 0.2328535849,
-          "command_velocity_error": 1.0490960330,
+          "command_velocity_error": 1.049096033,
           "done_mean": 0.0,
           "action_delta_penalty": 0.0004562255,
           "balanced_score": -4.8231434656
@@ -1341,7 +1341,7 @@
           "reward_mean": -3.1670230031,
           "command_position_error": 0.2595528048,
           "cross_track_error": 0.2328535849,
-          "command_velocity_error": 1.0490960330,
+          "command_velocity_error": 1.049096033,
           "done_mean": 0.0,
           "action_delta_penalty": 0.0004562255,
           "balanced_score": -4.8231434656
@@ -1356,12 +1356,12 @@
         "advantage_scale": "ok",
         "reward_scale": "ok",
         "initial_std": "ok",
-        "stored_vs_env_logprob_abs_mean": 3.2298339647240937e-7,
+        "stored_vs_env_logprob_abs_mean": 3.2298339647240937e-07,
         "sample_clip_fraction": 0.0,
         "advantage_mean": -14.8409271912,
         "advantage_std": 6.0399328434,
-        "value_mean": -143.9121502070,
-        "value_std": 0.0017723310,
+        "value_mean": -143.912150207,
+        "value_std": 0.001772331,
         "return_mean": -158.7530773943,
         "return_std": 6.0407995705
       },
@@ -1403,18 +1403,61 @@
         "num_minibatches": 4,
         "update_epochs": 1
       },
-      "status": "planned_support_required",
+      "status": "support_passed_ready_to_train",
       "lane_name": "v62d_008_velocity_contrast_constant_speed_generator_30m",
       "train_from_scratch": true,
       "hypothesis_packet": "experiments/level3_ppo_loop/v62d_candidates/v62d_008_hypothesis.md",
       "requires_builder_checker": true,
       "support_command": "Implement velocity_contrast_constant_speed generator profile first, then run the support smoke recorded in the v62d_008 hypothesis packet.",
-      "training_command": null,
+      "training_command": "mkdir -p lsy_drone_racing/control/checkpoints/v62d_008_velocity_contrast_constant_speed_generator_30m experiments/level3_ppo_loop/analysis/tracker_stage_metrics && pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_008_velocity_contrast_constant_speed_generator_30m --config level3_tracker_free_space.toml --seed 26481 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_008_velocity_contrast_constant_speed_generator_30m/v62d_008_velocity_contrast_constant_speed_generator_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_008_velocity_contrast_constant_speed_generator_30m_summary.json --action-distribution tanh_squashed_gaussian --command-generator-profile velocity_contrast_constant_speed --value-target-scale 1.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_008_velocity_contrast_constant_speed_generator_30m --wandb-run-id v62d_008_velocity_contrast_constant_speed_generator_30m_20260627 --jax-device gpu",
       "wandb": {
         "project": "ADR-PPO-Racing-Level3",
         "entity": "aojili77-technical-university-of-munich",
         "run_id": "v62d_008_velocity_contrast_constant_speed_generator_30m_20260627",
         "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_008_velocity_contrast_constant_speed_generator_30m_20260627"
+      },
+      "support": {
+        "status": "support_passed_ready_to_train",
+        "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_008_velocity_contrast_constant_speed_support.md",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_008_support_decision.md",
+        "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_008_velocity_contrast_constant_speed_support_summary.json",
+        "audit_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_008_velocity_contrast_constant_speed_support_audit.json",
+        "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_008_velocity_contrast_constant_speed_support/v62d_008_velocity_contrast_constant_speed_support_final.pkl",
+        "wandb_url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_008_velocity_contrast_constant_speed_support_20260627",
+        "checker_result": "ALL GREEN",
+        "metrics": {
+          "actual_timesteps": 262144,
+          "steady_state_steps_per_s": 1258804.3895,
+          "action_clipping": "ok",
+          "action_sampling_logprob": "ok",
+          "stored_vs_env_logprob_abs_mean": 3.1095805753e-07,
+          "sample_clip_fraction": 0.0,
+          "final_reward_mean": -3.1853604317,
+          "final_command_position_error": 0.5013257749,
+          "final_command_velocity_error": 0.8039198667,
+          "final_cross_track_error": 0.3195430674,
+          "final_done_mean": 0.0
+        },
+        "metadata": {
+          "observation_layout": "level3_reference_tracker_command_v3",
+          "action_distribution": "tanh_squashed_gaussian",
+          "action_logprob_mode": "tanh_squashed_gaussian_logprob_with_jacobian",
+          "command_generator_profile": "velocity_contrast_constant_speed",
+          "reward_coefficients": {},
+          "num_envs": 1024,
+          "num_steps": 32,
+          "value_target_scale": 1.0
+        }
+      },
+      "decision": {
+        "outcome": "support_passed_launch_30m",
+        "packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_008_support_decision.md",
+        "promoted": false,
+        "reason": "Support smoke, metadata readback, audit, and independent checker passed; candidate still must be judged only after 30M training and milestone analysis."
+      },
+      "next_recommendation": {
+        "action": "run_30m_candidate_from_scratch",
+        "lane_name": "v62d_008_velocity_contrast_constant_speed_generator_30m"
       }
     }
   ]

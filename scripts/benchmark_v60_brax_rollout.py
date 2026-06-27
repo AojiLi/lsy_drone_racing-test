@@ -26,7 +26,11 @@ from lsy_drone_racing.control.level3_reference_tracker import (
 from lsy_drone_racing.utils import load_config
 
 ROOT = Path(__file__).parents[1]
-COMMAND_GENERATOR_PROFILES = ("default", "speed_bin_balanced")
+COMMAND_GENERATOR_PROFILES = (
+    "default",
+    "speed_bin_balanced",
+    "velocity_contrast_constant_speed",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -187,13 +191,57 @@ def sample_command_plans(
     num_envs = origin.shape[0]
     if command_generator_profile not in COMMAND_GENERATOR_PROFILES:
         raise ValueError(f"Unknown command generator profile: {command_generator_profile}")
-    keys = jax.random.split(key, 24 if command_generator_profile == "speed_bin_balanced" else 18)
+    key_count = 27 if command_generator_profile == "velocity_contrast_constant_speed" else 24
+    if command_generator_profile == "default":
+        key_count = 18
+    keys = jax.random.split(key, key_count)
     yaw = jax.random.uniform(keys[0], (num_envs,), minval=-jnp.pi, maxval=jnp.pi)
     forward = jnp.stack([jnp.cos(yaw), jnp.sin(yaw), jnp.zeros_like(yaw)], axis=1)
     side = jnp.stack([-forward[:, 1], forward[:, 0], jnp.zeros_like(yaw)], axis=1)
     up = jnp.tile(jnp.array([[0.0, 0.0, 1.0]], dtype=jnp.float32), (num_envs, 1))
 
-    if command_generator_profile == "speed_bin_balanced":
+    if command_generator_profile == "velocity_contrast_constant_speed":
+        contrast_bin = jax.random.randint(keys[1], (num_envs,), minval=0, maxval=3)
+
+        def contrast_uniform(
+            value_key: jax.Array, bins: jax.Array, *, scale: float = 1.0
+        ) -> jax.Array:
+            low = bins[contrast_bin, 0] * scale
+            high = bins[contrast_bin, 1] * scale
+            unit = jax.random.uniform(value_key, (num_envs,), minval=0.0, maxval=1.0)
+            return low + unit * (high - low)
+
+        pass_speed = contrast_uniform(
+            keys[2],
+            jnp.array([[0.32, 0.44], [0.52, 0.64], [0.72, 0.88]], dtype=jnp.float32),
+        )
+        brake_entry_speed = jnp.clip(
+            pass_speed * jax.random.uniform(keys[3], (num_envs,), minval=0.26, maxval=0.38),
+            0.10,
+            0.24,
+        )
+        hold_speed = jax.random.uniform(keys[4], (num_envs,), minval=0.00, maxval=0.05)
+        slow_speed = contrast_uniform(
+            keys[5],
+            jnp.array([[0.16, 0.22], [0.24, 0.31], [0.32, 0.40]], dtype=jnp.float32),
+        )
+        recover_speed = contrast_uniform(
+            keys[6],
+            jnp.array([[0.34, 0.46], [0.50, 0.64], [0.68, 0.86]], dtype=jnp.float32),
+        )
+        pass_dist = jax.random.uniform(keys[7], (num_envs,), minval=0.62, maxval=1.02)
+        slow_dist = jax.random.uniform(keys[8], (num_envs,), minval=0.40, maxval=0.74)
+        recover_dist = jax.random.uniform(keys[9], (num_envs,), minval=0.55, maxval=0.95)
+        pass_curve = jax.random.uniform(keys[10], (num_envs,), minval=-0.16, maxval=0.16)
+        slow_curve = jax.random.uniform(keys[11], (num_envs,), minval=-0.07, maxval=0.07)
+        recover_turn = jax.random.uniform(keys[12], (num_envs,), minval=-0.48, maxval=0.48)
+        altitude_keys = (keys[13], keys[14], keys[15], keys[16], keys[17], keys[18])
+        hold_steps = jax.random.randint(keys[19], (num_envs,), minval=46, maxval=81)
+        decel_fraction = 0.70
+        pass_decel_min_steps = 42
+        slow_min_steps = 62
+        recover_min_steps = 56
+    elif command_generator_profile == "speed_bin_balanced":
         pass_speed = uniform_from_bins(
             keys[1],
             keys[2],
