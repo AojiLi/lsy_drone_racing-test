@@ -694,3 +694,15 @@ final checkpoint still had any-dim clipping `40.12%` and logprob mismatch
 no-gate reward unchanged for the next v62b fix; first lower initial std, lower
 or disable entropy pressure, and make the PPO logprob path consistent with the
 environment action.
+
+The v62b 10M fix is recorded in
+`experiments/level3_ppo_loop/analysis/2026-06-27_v62b_brax_ppo_signal_fix_10m.md`.
+The code now defaults to `initial_log_std=-2.0` and `ent_coef=0.0`, stores the
+env-executed bounded action in the PPO batch, and computes the stored logprob
+from that same action. The 10,027,008-step run kept action clipping and
+logprob/env-action consistency error at `0.0`, ran around `1.297M env steps/s`,
+and produced positive deterministic eval signal: reward `-4.1090 -> -2.7413`,
+position error `0.5153 -> 0.4006`, cross-track error `0.4351 -> 0.2803`, and
+done mean `0.00417 -> 0.0`. Velocity error worsened and value/advantage scale
+remained high in the final training batch. Next, evaluate saved milestones and
+inspect value/return scale before reward tuning.

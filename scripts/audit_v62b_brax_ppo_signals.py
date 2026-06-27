@@ -93,8 +93,9 @@ def build_audit_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
         state, key = carry
         key, action_key, plan_key = jax.random.split(key, 3)
         mean, log_std, value = ppo_smoke.actor_critic_apply(params, state.obs)
-        action_sample = mean + jnp.exp(log_std) * jax.random.normal(action_key, mean.shape)
-        action_for_env = jnp.clip(action_sample, -1.0, 1.0)
+        action_sample, action_for_env, stored_logprob, clip_mask = ppo_smoke.sample_env_action(
+            mean, log_std, action_key
+        )
         raw_logprob = ppo_smoke.gaussian_logprob(action_sample, mean, log_std)
         clipped_logprob = ppo_smoke.gaussian_logprob(action_for_env, mean, log_std)
         next_state, metrics = env_step(state, action_for_env, plan_key)
@@ -104,9 +105,10 @@ def build_audit_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
             "log_std": jnp.broadcast_to(log_std, action_sample.shape),
             "action_sample": action_sample,
             "action_for_env": action_for_env,
-            "clip_mask": (jnp.abs(action_sample) > 1.0).astype(jnp.float32),
+            "clip_mask": clip_mask,
             "raw_logprob": raw_logprob,
             "clipped_logprob": clipped_logprob,
+            "stored_logprob": stored_logprob,
             "values": value,
             "rewards": next_state.reward,
             "dones": next_state.done,
@@ -160,11 +162,9 @@ def verdicts_for_metrics(metrics: dict[str, Any]) -> dict[str, str]:
     log_std = metrics["initial_or_policy_log_std"]
     return {
         "action_sampling_logprob": (
-            "bad"
-            if action["sample_clip_fraction"] > 0.05
-            or action["raw_vs_clipped_logprob_abs_mean"] > 0.05
-            else "ok"
+            "bad" if action["stored_vs_env_logprob_abs_mean"] > 1e-6 else "ok"
         ),
+        "action_clipping": "high" if action["sample_clip_fraction"] > 0.05 else "ok",
         "advantage_scale": "large" if adv["std"] > 25.0 or abs(adv["mean"]) > 25.0 else "ok",
         "reward_scale": "large" if reward["abs_mean"] > 3.0 or reward["abs_p95"] > 10.0 else "ok",
         "initial_std": "too_large" if np.exp(log_std["mean"]) > 0.35 else "ok",
@@ -192,7 +192,9 @@ def summarize_rollout(
     clip_mask = np.asarray(transitions["clip_mask"], dtype=bool)
     raw_logprob = np.asarray(transitions["raw_logprob"])
     clipped_logprob = np.asarray(transitions["clipped_logprob"])
+    stored_logprob = np.asarray(transitions["stored_logprob"])
     raw_vs_clipped = raw_logprob - clipped_logprob
+    stored_vs_env = stored_logprob - clipped_logprob
     sample_delta = action_sample - action_for_env
     log_std = np.asarray(transitions["log_std"])
     rewards = np.asarray(transitions["rewards"])
@@ -212,8 +214,11 @@ def summarize_rollout(
             "raw_vs_clipped_logprob_mean": float(np.mean(raw_vs_clipped)),
             "raw_vs_clipped_logprob_abs_mean": float(np.mean(np.abs(raw_vs_clipped))),
             "raw_vs_clipped_logprob_abs_p95": percentile(np.abs(raw_vs_clipped), 95),
+            "stored_vs_env_logprob_abs_mean": float(np.mean(np.abs(stored_vs_env))),
+            "stored_vs_env_logprob_abs_p95": percentile(np.abs(stored_vs_env), 95),
             "raw_logprob": scalar_stats(raw_logprob),
             "clipped_action_logprob_proxy": scalar_stats(clipped_logprob),
+            "stored_logprob": scalar_stats(stored_logprob),
         },
         "advantage": scalar_stats(advantages),
         "normalized_advantage": scalar_stats(
@@ -311,6 +316,7 @@ def main() -> None:
             checkpoint_metrics["checkpoint_global_step"] = int(global_step)
             scenarios.append(checkpoint_metrics)
 
+        default_scenario = scenarios[0] if scenarios else None
         summary = {
             "audit": "v62b_brax_ppo_signal_audit",
             "config": args.config,
@@ -319,21 +325,18 @@ def main() -> None:
             "seed": int(args.seed),
             "scenarios": scenarios,
             "overall_findings": {
-                "default_initial_log_std": next(
-                    (
-                        item["verdicts"]
-                        for item in scenarios
-                        if item["label"] == "initial_log_std_-0.5"
-                    ),
-                    None,
+                "default_or_first_scenario": (
+                    {"label": default_scenario["label"], "verdicts": default_scenario["verdicts"]}
+                    if default_scenario is not None
+                    else None
                 ),
                 "reward_tuning_should_wait": any(
                     item["verdicts"]["action_sampling_logprob"] == "bad"
+                    or item["verdicts"]["action_clipping"] == "high"
                     or item["verdicts"]["advantage_scale"] == "large"
                     or item["verdicts"]["reward_scale"] == "large"
                     or item["verdicts"]["initial_std"] == "too_large"
                     for item in scenarios
-                    if item["label"] == "initial_log_std_-0.5"
                 ),
             },
         }

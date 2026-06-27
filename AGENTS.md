@@ -369,6 +369,21 @@
   with lower initial std, lower or zero entropy pressure, and clipped/squashed
   action logprob consistency; keep the clean no-gate reward unchanged until the
   audit checks are healthy.
+- Current v62b 10M signal-fix finding:
+  `scripts/train_v60_brax_ppo_smoke.py` and
+  `scripts/train_v62_brax_reference_command_tracker.py` now default to
+  `initial_log_std=-2.0` and `ent_coef=0.0`, and PPO stores/logprobs the
+  env-executed bounded action. The bounded `10,027,008`-step run
+  `v62b_brax_ppo_signal_fix_10m` kept action clipping `0.0` and
+  logprob/env-action consistency error `0.0`, ran at about `1.297M env
+  steps/s`, and produced positive deterministic eval signal: reward
+  `-4.1090 -> -2.7413`, command position error `0.5153 -> 0.4006`,
+  cross-track error `0.4351 -> 0.2803`, and done mean `0.00417 -> 0.0`.
+  Velocity error worsened `0.5479 -> 0.6811`, and final training-batch
+  advantage/value-loss pressure remained high. Do not jump straight to reward
+  tuning. Next inspect the saved 1M-9M milestones plus final and review
+  value/return scale before deciding whether to continue v62b, add
+  value/return normalization, or tune command reward numbers.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

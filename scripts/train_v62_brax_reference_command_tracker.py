@@ -46,10 +46,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--clip-coef", type=float, default=0.2)
-    parser.add_argument("--ent-coef", type=float, default=0.01)
+    parser.add_argument("--ent-coef", type=float, default=0.0)
     parser.add_argument("--vf-coef", type=float, default=0.5)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
-    parser.add_argument("--initial-log-std", type=float, default=-0.5)
+    parser.add_argument("--initial-log-std", type=float, default=-2.0)
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
     parser.add_argument("--eval-rollouts", type=int, default=4)
@@ -119,6 +119,9 @@ def save_lane_checkpoint(
             "backend": "jax_brax_state_optax_ppo",
             "reward_scope": "no gate/aperture/obstacle/race/finish/stage reward",
             "wandb_run_id": args.wandb_run_id,
+            "initial_log_std": float(args.initial_log_std),
+            "ent_coef": float(args.ent_coef),
+            "action_logprob_mode": "env_clipped_action_gaussian_logprob",
         },
         "metrics": jsonable(metrics),
     }
@@ -278,6 +281,9 @@ def main() -> None:
                 "batch_size": batch_size,
                 "actual_timesteps": actual_timesteps,
                 "initial_global_step": int(global_step),
+                "initial_log_std": float(args.initial_log_std),
+                "ent_coef": float(args.ent_coef),
+                "action_logprob_mode": "env_clipped_action_gaussian_logprob",
                 "initial_eval": initial_eval,
             }
         )
@@ -368,6 +374,9 @@ def main() -> None:
             "last_train_metrics": last_metrics,
             "milestone_checkpoints": milestone_checkpoints,
             "checkpoint": str(args.checkpoint_path),
+            "initial_log_std": float(args.initial_log_std),
+            "ent_coef": float(args.ent_coef),
+            "action_logprob_mode": "env_clipped_action_gaussian_logprob",
         }
         save_lane_checkpoint(
             args.checkpoint_path,

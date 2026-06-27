@@ -42,10 +42,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--clip-coef", type=float, default=0.2)
-    parser.add_argument("--ent-coef", type=float, default=0.01)
+    parser.add_argument("--ent-coef", type=float, default=0.0)
     parser.add_argument("--vf-coef", type=float, default=0.5)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
-    parser.add_argument("--initial-log-std", type=float, default=-0.5)
+    parser.add_argument("--initial-log-std", type=float, default=-2.0)
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
     parser.add_argument("--eval-rollouts", type=int, default=2)
@@ -106,6 +106,22 @@ def gaussian_logprob(action: jax.Array, mean: jax.Array, log_std: jax.Array) -> 
 def gaussian_entropy(log_std: jax.Array) -> jax.Array:
     """Entropy for a diagonal Gaussian."""
     return 0.5 * jnp.sum(LOG_2PI_E + 2.0 * log_std)
+
+
+def sample_env_action(
+    mean: jax.Array, log_std: jax.Array, key: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Sample an action and return the exact bounded action used by the env.
+
+    PPO stores/logprobs the action after env-bound clipping. With low initial
+    std this clipping should be rare, but when it happens the batch action still
+    matches what the environment executed.
+    """
+    action_sample = mean + jnp.exp(log_std) * jax.random.normal(key, mean.shape)
+    action_for_env = jnp.clip(action_sample, -1.0, 1.0)
+    logprob = gaussian_logprob(action_for_env, mean, log_std)
+    clip_mask = (jnp.abs(action_sample) > 1.0).astype(jnp.float32)
+    return action_sample, action_for_env, logprob, clip_mask
 
 
 def select_done(done: jax.Array, old_value: jax.Array, new_value: jax.Array) -> jax.Array:
@@ -199,17 +215,26 @@ def build_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
         key, action_key, plan_key = jax.random.split(key, 3)
         obs = state.obs
         mean, log_std, value = actor_critic_apply(params, obs)
-        action_sample = mean + jnp.exp(log_std) * jax.random.normal(action_key, mean.shape)
-        action_for_env = jnp.clip(action_sample, -1.0, 1.0)
-        logprob = gaussian_logprob(action_sample, mean, log_std)
+        action_sample, action_for_env, logprob, clip_mask = sample_env_action(
+            mean, log_std, action_key
+        )
+        raw_logprob = gaussian_logprob(action_sample, mean, log_std)
+        env_logprob_recomputed = gaussian_logprob(action_for_env, mean, log_std)
         next_state, metrics = env_step(state, action_for_env, plan_key)
         transition = {
             "obs": obs,
-            "actions": action_sample,
+            "actions": action_for_env,
             "logprobs": logprob,
             "values": value,
             "rewards": next_state.reward,
             "dones": next_state.done,
+            "action_clip_fraction": jnp.mean(clip_mask),
+            "action_any_dim_clipped_fraction": jnp.mean(jnp.max(clip_mask, axis=-1)),
+            "action_sample_env_delta_abs_mean": jnp.mean(jnp.abs(action_sample - action_for_env)),
+            "action_raw_vs_env_logprob_abs_mean": jnp.mean(jnp.abs(raw_logprob - logprob)),
+            "action_logprob_env_consistency_error": jnp.mean(
+                jnp.abs(logprob - env_logprob_recomputed)
+            ),
             "reward_mean": metrics["reward_mean"],
             "done_mean": metrics["done_mean"],
             "obs_abs_mean": metrics["obs_abs_mean"],
@@ -415,6 +440,19 @@ def compute_advantage_batch(
         "rollout_done_mean": jnp.mean(transitions["done_mean"]),
         "rollout_obs_abs_mean": jnp.mean(transitions["obs_abs_mean"]),
         "rollout_action_abs_mean": jnp.mean(transitions["action_abs_mean"]),
+        "rollout_action_clip_fraction": jnp.mean(transitions["action_clip_fraction"]),
+        "rollout_action_any_dim_clipped_fraction": jnp.mean(
+            transitions["action_any_dim_clipped_fraction"]
+        ),
+        "rollout_action_sample_env_delta_abs_mean": jnp.mean(
+            transitions["action_sample_env_delta_abs_mean"]
+        ),
+        "rollout_action_raw_vs_env_logprob_abs_mean": jnp.mean(
+            transitions["action_raw_vs_env_logprob_abs_mean"]
+        ),
+        "rollout_action_logprob_env_consistency_error": jnp.mean(
+            transitions["action_logprob_env_consistency_error"]
+        ),
         "rollout_command_position_error": jnp.mean(transitions["command_position_error"]),
         "rollout_command_velocity_error": jnp.mean(transitions["command_velocity_error"]),
         "rollout_cross_track_error": jnp.mean(transitions["cross_track_error"]),
@@ -484,6 +522,9 @@ def save_checkpoint(
             "num_steps": int(args.num_steps),
             "backend": "jax_brax_state_optax_ppo_smoke",
             "wandb_run_id": args.wandb_run_id,
+            "initial_log_std": float(args.initial_log_std),
+            "ent_coef": float(args.ent_coef),
+            "action_logprob_mode": "env_clipped_action_gaussian_logprob",
         },
         "metrics": metrics,
     }
