@@ -29,7 +29,8 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_001 | A_value_return_stabilization | reduce critic target magnitude without changing rewards/obs | `value_target_scale=50.0`, `num_minibatches=8`, `update_epochs=4` | rejected_not_promoted | `v62d_001...step_005000000.pkl` | critic scale fixed, but velocity/done/action_delta regressed; next isolate conservative PPO |
 | v62d_002 | D_PPO_stabilizer | test value scale under conservative v62c-like PPO update pressure | `value_target_scale=50.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_002...step_005000000.pkl` | cleaner than v62d_001 but still worse than v62c 7M on velocity/done/action_delta; next switch to velocity reward numbers |
 | v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_003...step_020000000.pkl` | 2.4% velocity gain is below promotion threshold and action delta worsened 7.9x; next switch to generator distribution |
-| v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | `command_generator_profile=speed_bin_balanced`, defaults preserved | support_passed_ready_to_train | pending | builder/checker passed; launch 30M training from scratch |
+| v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | `command_generator_profile=speed_bin_balanced`, defaults preserved | rejected_not_promoted | `v62d_004...step_005000000.pkl` | useful distribution signal, but velocity gain below threshold and action_delta worsened |
+| v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | proposed_training | pending | train from scratch; test narrower value target scale before more reward/generator tuning |
 
 ## v62d_001 Result
 
@@ -322,4 +323,71 @@ pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py \
   --wandb-run-name v62d_004_speed_bin_balanced_generator_30m \
   --wandb-run-id v62d_004_speed_bin_balanced_generator_30m_20260627 \
   --jax-device gpu
+```
+
+## v62d_004 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_004_speed_bin_balanced_generator_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_004_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_004_speed_bin_balanced_generator_30m/v62d_004_speed_bin_balanced_generator_30m_step_005000000.pkl
+```
+
+It is not promoted. Under the same `speed_bin_balanced` eval distribution it
+improves velocity versus v62c 7M by only `5.37%`, below the `10%-15%` promotion
+threshold, and action delta worsens `3.42x`. Against the standing v62c 7M
+default frontier, velocity is `4.63%` worse and action delta is `18.2x` worse.
+
+| Metric | v62c 7M default | v62c 7M speed-bin | v62d_004 best |
+|---|---:|---:|---:|
+| reward | -4.8459 | -2.1434 | -2.0530 |
+| command position error | 0.6573 | 0.2095 | 0.1958 |
+| cross-track error | 0.5214 | 0.1786 | 0.1634 |
+| command velocity error | 0.7397 | 0.8179 | 0.7740 |
+| done mean | 0.00391 | 0.00000 | 0.00000 |
+| action delta | 0.000006 | 0.000034 | 0.000116 |
+| balanced score | -7.5365 | -3.4438 | -3.2704 |
+
+Post-audit on the best checkpoint passed for action/logprob semantics:
+
+```text
+action_clipping=ok
+action_sampling_logprob=ok
+advantage_scale=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=3.11e-7
+```
+
+The failure is behavioral and critic-stability related, not an action-path bug.
+The next candidate should keep `speed_bin_balanced` but test a narrower
+value/return stabilization knob.
+
+## v62d_005 Plan
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_005_hypothesis.md
+```
+
+This candidate trains from scratch with:
+
+```text
+command_generator_profile=speed_bin_balanced
+value_target_scale=10.0
+command_vel_error_coef=default
+num_minibatches=4
+update_epochs=1
 ```
