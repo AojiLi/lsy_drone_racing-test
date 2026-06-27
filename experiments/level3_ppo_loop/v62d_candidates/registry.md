@@ -31,7 +31,8 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_003...step_020000000.pkl` | 2.4% velocity gain is below promotion threshold and action delta worsened 7.9x; next switch to generator distribution |
 | v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | `command_generator_profile=speed_bin_balanced`, defaults preserved | rejected_not_promoted | `v62d_004...step_005000000.pkl` | useful distribution signal, but velocity gain below threshold and action_delta worsened |
 | v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | rejected_not_promoted | `v62d_005...step_015000000.pkl` | critic diagnostics improved, but velocity/action smoothness regressed badly |
-| v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | support_passed_ready_to_train | pending | support ALL GREEN; launch one 30M from scratch |
+| v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | rejected_not_promoted | `v62d_006...step_020000000.pkl` | valid long-rollout run, but no velocity/frontier improvement; next combine speed-bin generator with velocity coef |
+| v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | planned_support_required | pending | run support/checker before 30M |
 
 ## v62d_001 Result
 
@@ -509,3 +510,80 @@ Approved next command is the 30M command recorded in:
 ```text
 experiments/level3_ppo_loop/v62d_candidates/v62d_006_hypothesis.md
 ```
+
+## v62d_006 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_006_speedbin_longrollout_256x128_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_006_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_006_speedbin_longrollout_256x128_30m/v62d_006_speedbin_longrollout_256x128_30m_step_020000000.pkl
+```
+
+It is not promoted. The longer rollout is semantically valid and action/logprob
+clean, but it does not beat the current formal frontier or the prior speed-bin
+local best.
+
+| Metric | v62c 7M default | v62c 7M speed-bin | v62d_004 best | v62d_006 best |
+|---|---:|---:|---:|---:|
+| reward | -4.8459 | -2.1434 | -2.0530 | -2.0644 |
+| command position error | 0.6573 | 0.2095 | 0.1958 | 0.1964 |
+| cross-track error | 0.5214 | 0.1786 | 0.1634 | 0.1640 |
+| command velocity error | 0.7397 | 0.8179 | 0.7740 | 0.7789 |
+| done mean | 0.00391 | 0.00000 | 0.00000 | 0.00000 |
+| action delta | 0.000006 | 0.000034 | 0.000116 | 0.000092 |
+| balanced score | -7.5365 | -3.4438 | -3.2704 | -3.2878 |
+
+Post-audit on the best checkpoint:
+
+```text
+action_clipping=ok
+action_sampling_logprob=ok
+advantage_scale=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=3.20e-7
+```
+
+The best milestone is `20M`; `30M/final` regresses to velocity error `1.0318`
+and balanced score `-4.1597`, so do not continue this candidate to 60M.
+
+## v62d_007 Plan
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_007_hypothesis.md
+```
+
+This candidate combines the two useful partial signals:
+
+```text
+v62d_004: speed_bin_balanced generator
+v62d_003: command_vel_error_coef=1.2
+```
+
+Use:
+
+```text
+command_generator_profile=speed_bin_balanced
+command_vel_error_coef=1.2
+num_envs=1024
+num_steps=32
+value_target_scale=1.0
+num_minibatches=4
+update_epochs=1
+```
+
+Run support/checker before the 30M command because this combines a generator
+distribution knob with a reward-number knob.
