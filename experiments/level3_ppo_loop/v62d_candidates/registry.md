@@ -30,7 +30,8 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_002 | D_PPO_stabilizer | test value scale under conservative v62c-like PPO update pressure | `value_target_scale=50.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_002...step_005000000.pkl` | cleaner than v62d_001 but still worse than v62c 7M on velocity/done/action_delta; next switch to velocity reward numbers |
 | v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_003...step_020000000.pkl` | 2.4% velocity gain is below promotion threshold and action delta worsened 7.9x; next switch to generator distribution |
 | v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | `command_generator_profile=speed_bin_balanced`, defaults preserved | rejected_not_promoted | `v62d_004...step_005000000.pkl` | useful distribution signal, but velocity gain below threshold and action_delta worsened |
-| v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | proposed_training | pending | train from scratch; test narrower value target scale before more reward/generator tuning |
+| v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | rejected_not_promoted | `v62d_005...step_015000000.pkl` | critic diagnostics improved, but velocity/action smoothness regressed badly |
+| v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | proposed_support | pending | run builder/checker support before 30M training |
 
 ## v62d_001 Result
 
@@ -390,4 +391,76 @@ value_target_scale=10.0
 command_vel_error_coef=default
 num_minibatches=4
 update_epochs=1
+```
+
+## v62d_005 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_005_speedbin_value_scale10_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_005_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_005_speedbin_value_scale10_30m/v62d_005_speedbin_value_scale10_30m_step_015000000.pkl
+```
+
+It is not promoted. It improves critic/value diagnostics and spatial tracking,
+but velocity obedience and action smoothness regress badly.
+
+| Metric | v62c 7M default | v62c 7M speed-bin | v62d_004 best | v62d_005 best |
+|---|---:|---:|---:|---:|
+| reward | -4.8459 | -2.1434 | -2.0530 | -2.5289 |
+| command position error | 0.6573 | 0.2095 | 0.1958 | 0.2022 |
+| cross-track error | 0.5214 | 0.1786 | 0.1634 | 0.1725 |
+| command velocity error | 0.7397 | 0.8179 | 0.7740 | 0.9929 |
+| done mean | 0.00391 | 0.00000 | 0.00000 | 0.00108 |
+| action delta | 0.000006 | 0.000034 | 0.000116 | 0.011608 |
+| balanced score | -7.5365 | -3.4438 | -3.2704 | -3.9707 |
+
+Post-audit on the best checkpoint:
+
+```text
+action_clipping=ok
+action_sampling_logprob=bad
+advantage_scale=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=1.76e-6
+```
+
+The next candidate should stop Family A value scaling and test a PPO stabilizer
+that changes temporal credit horizon while keeping reward semantics fixed.
+
+## v62d_006 Plan
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_006_hypothesis.md
+```
+
+This candidate changes rollout geometry, so support validation is required
+before 30M training:
+
+```text
+1024 envs x 32 steps -> 256 envs x 128 steps
+```
+
+Keep:
+
+```text
+command_generator_profile=speed_bin_balanced
+value_target_scale=1.0
+command_vel_error_coef=default
+action_distribution=tanh_squashed_gaussian
+observation_layout=level3_reference_tracker_command_v3
+no gate/aperture/race/finish/stage reward
 ```
