@@ -29,7 +29,7 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_001 | A_value_return_stabilization | reduce critic target magnitude without changing rewards/obs | `value_target_scale=50.0`, `num_minibatches=8`, `update_epochs=4` | rejected_not_promoted | `v62d_001...step_005000000.pkl` | critic scale fixed, but velocity/done/action_delta regressed; next isolate conservative PPO |
 | v62d_002 | D_PPO_stabilizer | test value scale under conservative v62c-like PPO update pressure | `value_target_scale=50.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_002...step_005000000.pkl` | cleaner than v62d_001 but still worse than v62c 7M on velocity/done/action_delta; next switch to velocity reward numbers |
 | v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_003...step_020000000.pkl` | 2.4% velocity gain is below promotion threshold and action delta worsened 7.9x; next switch to generator distribution |
-| v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | pending builder/checker | proposed_support | pending | implement speed-bin balanced generator support before 30M training |
+| v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | `command_generator_profile=speed_bin_balanced`, defaults preserved | support_passed_ready_to_train | pending | builder/checker passed; launch 30M training from scratch |
 
 ## v62d_001 Result
 
@@ -261,3 +261,65 @@ This candidate changes generator semantics, so builder/checker support is
 required before any 30M training. It must keep `config/level3.toml` unchanged,
 keep actor observation `level3_reference_tracker_command_v3`, and avoid all
 gate/aperture/race/finish/stage rewards.
+
+## v62d_004 Support
+
+Support packet:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_004_speed_bin_balanced_generator_support.md
+```
+
+Decision packet:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_004_support_decision.md
+```
+
+The support change adds a gated command-generator profile:
+
+```text
+--command-generator-profile speed_bin_balanced
+```
+
+Checker result:
+
+```text
+ALL GREEN
+```
+
+The checker verified default generator behavior is preserved unless the new
+profile is selected, the formal trainer and audit paths propagate the profile,
+checkpoint/summary metadata record it, smoke/audit checks pass, and both
+`config/level3.toml` and `config/level3_tracker_free_space.toml` remain
+unchanged.
+
+Approved next training command:
+
+```bash
+mkdir -p lsy_drone_racing/control/checkpoints/v62d_004_speed_bin_balanced_generator_30m \
+  experiments/level3_ppo_loop/analysis/tracker_stage_metrics && \
+pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py \
+  --lane-name v62d_004_speed_bin_balanced_generator_30m \
+  --config level3_tracker_free_space.toml \
+  --seed 26441 \
+  --num-envs 1024 \
+  --num-steps 32 \
+  --total-timesteps 30015488 \
+  --num-minibatches 4 \
+  --update-epochs 1 \
+  --checkpoint-interval 5000000 \
+  --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_004_speed_bin_balanced_generator_30m/v62d_004_speed_bin_balanced_generator_30m_final.pkl \
+  --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_004_speed_bin_balanced_generator_30m_summary.json \
+  --action-distribution tanh_squashed_gaussian \
+  --command-generator-profile speed_bin_balanced \
+  --value-target-scale 1.0 \
+  --eval-rollouts 16 \
+  --wandb-enabled \
+  --wandb-mode online \
+  --wandb-project-name ADR-PPO-Racing-Level3 \
+  --wandb-entity aojili77-technical-university-of-munich \
+  --wandb-run-name v62d_004_speed_bin_balanced_generator_30m \
+  --wandb-run-id v62d_004_speed_bin_balanced_generator_30m_20260627 \
+  --jax-device gpu
+```

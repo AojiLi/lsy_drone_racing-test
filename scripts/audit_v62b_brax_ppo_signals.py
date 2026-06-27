@@ -42,6 +42,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
+    parser.add_argument(
+        "--command-generator-profile",
+        choices=v60_rollout.COMMAND_GENERATOR_PROFILES,
+        default="default",
+        help="Command reference generator profile used for audit rollouts.",
+    )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument(
@@ -292,6 +298,7 @@ def main() -> None:
             action_low,
             action_high,
             dt=1.0 / float(config.env.freq),
+            command_generator_profile=args.command_generator_profile,
         )
         rollout = build_audit_rollout_fn(
             env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
@@ -303,7 +310,11 @@ def main() -> None:
 
         def make_state() -> Any:
             return v60_rollout.make_initial_state(
-                env, raw_obs, plan_key, dt=1.0 / float(config.env.freq)
+                env,
+                raw_obs,
+                plan_key,
+                dt=1.0 / float(config.env.freq),
+                command_generator_profile=args.command_generator_profile,
             )
 
         scenarios = []
@@ -355,6 +366,7 @@ def main() -> None:
             "seed": int(args.seed),
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
+            "command_generator_profile": args.command_generator_profile,
             "scenarios": scenarios,
             "overall_findings": {
                 "default_or_first_scenario": (

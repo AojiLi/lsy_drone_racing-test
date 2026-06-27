@@ -26,6 +26,7 @@ from lsy_drone_racing.control.level3_reference_tracker import (
 from lsy_drone_racing.utils import load_config
 
 ROOT = Path(__file__).parents[1]
+COMMAND_GENERATOR_PROFILES = ("default", "speed_bin_balanced")
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,6 +40,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
+    parser.add_argument(
+        "--command-generator-profile",
+        choices=COMMAND_GENERATOR_PROFILES,
+        default="default",
+        help="Command reference generator profile; default preserves the original v60 generator.",
+    )
     parser.add_argument("--jax-device", default="gpu")
     return parser.parse_args()
 
@@ -162,27 +169,86 @@ def polyline_lengths(points: jax.Array) -> jax.Array:
     return jnp.sum(jnp.linalg.norm(points[:, 1:] - points[:, :-1], axis=2), axis=1)
 
 
-def sample_command_plans(key: jax.Array, origin: jax.Array, dt: float) -> dict[str, jax.Array]:
+def uniform_from_bins(
+    bin_key: jax.Array, value_key: jax.Array, bins: jax.Array, shape: tuple[int, ...]
+) -> jax.Array:
+    """Sample uniformly from uniformly selected [low, high] bins."""
+    bin_index = jax.random.randint(bin_key, shape, minval=0, maxval=bins.shape[0])
+    low = bins[bin_index, 0]
+    high = bins[bin_index, 1]
+    unit = jax.random.uniform(value_key, shape, minval=0.0, maxval=1.0)
+    return low + unit * (high - low)
+
+
+def sample_command_plans(
+    key: jax.Array, origin: jax.Array, dt: float, command_generator_profile: str = "default"
+) -> dict[str, jax.Array]:
     """Sample dense v60-style command plans using JAX only."""
     num_envs = origin.shape[0]
-    keys = jax.random.split(key, 18)
+    if command_generator_profile not in COMMAND_GENERATOR_PROFILES:
+        raise ValueError(f"Unknown command generator profile: {command_generator_profile}")
+    keys = jax.random.split(key, 24 if command_generator_profile == "speed_bin_balanced" else 18)
     yaw = jax.random.uniform(keys[0], (num_envs,), minval=-jnp.pi, maxval=jnp.pi)
     forward = jnp.stack([jnp.cos(yaw), jnp.sin(yaw), jnp.zeros_like(yaw)], axis=1)
     side = jnp.stack([-forward[:, 1], forward[:, 0], jnp.zeros_like(yaw)], axis=1)
     up = jnp.tile(jnp.array([[0.0, 0.0, 1.0]], dtype=jnp.float32), (num_envs, 1))
 
-    pass_speed = jax.random.uniform(keys[1], (num_envs,), minval=0.55, maxval=0.78)
-    brake_entry_speed = jax.random.uniform(keys[2], (num_envs,), minval=0.15, maxval=0.24)
-    hold_speed = jax.random.uniform(keys[3], (num_envs,), minval=0.02, maxval=0.07)
-    slow_speed = jax.random.uniform(keys[4], (num_envs,), minval=0.25, maxval=0.35)
-    recover_speed = jax.random.uniform(keys[5], (num_envs,), minval=0.42, maxval=0.62)
-
-    pass_dist = jax.random.uniform(keys[6], (num_envs,), minval=0.30, maxval=0.46)
-    slow_dist = jax.random.uniform(keys[7], (num_envs,), minval=0.20, maxval=0.34)
-    recover_dist = jax.random.uniform(keys[8], (num_envs,), minval=0.28, maxval=0.48)
-    pass_curve = jax.random.uniform(keys[9], (num_envs,), minval=-0.14, maxval=0.14)
-    slow_curve = jax.random.uniform(keys[10], (num_envs,), minval=-0.05, maxval=0.05)
-    recover_turn = jax.random.uniform(keys[11], (num_envs,), minval=-0.45, maxval=0.45)
+    if command_generator_profile == "speed_bin_balanced":
+        pass_speed = uniform_from_bins(
+            keys[1],
+            keys[2],
+            jnp.array([[0.45, 0.55], [0.55, 0.68], [0.68, 0.82]], dtype=jnp.float32),
+            (num_envs,),
+        )
+        brake_entry_speed = uniform_from_bins(
+            keys[3],
+            keys[4],
+            jnp.array([[0.10, 0.15], [0.15, 0.20], [0.20, 0.24]], dtype=jnp.float32),
+            (num_envs,),
+        )
+        hold_speed = jax.random.uniform(keys[5], (num_envs,), minval=0.00, maxval=0.06)
+        slow_speed = uniform_from_bins(
+            keys[6],
+            keys[7],
+            jnp.array([[0.20, 0.26], [0.26, 0.34], [0.34, 0.42]], dtype=jnp.float32),
+            (num_envs,),
+        )
+        recover_speed = uniform_from_bins(
+            keys[8],
+            keys[9],
+            jnp.array([[0.40, 0.52], [0.52, 0.66], [0.66, 0.82]], dtype=jnp.float32),
+            (num_envs,),
+        )
+        pass_dist = jax.random.uniform(keys[10], (num_envs,), minval=0.42, maxval=0.72)
+        slow_dist = jax.random.uniform(keys[11], (num_envs,), minval=0.34, maxval=0.66)
+        recover_dist = jax.random.uniform(keys[12], (num_envs,), minval=0.40, maxval=0.76)
+        pass_curve = jax.random.uniform(keys[13], (num_envs,), minval=-0.18, maxval=0.18)
+        slow_curve = jax.random.uniform(keys[14], (num_envs,), minval=-0.08, maxval=0.08)
+        recover_turn = jax.random.uniform(keys[15], (num_envs,), minval=-0.55, maxval=0.55)
+        altitude_keys = (keys[16], keys[17], keys[18], keys[19], keys[20], keys[21])
+        hold_steps = jax.random.randint(keys[22], (num_envs,), minval=44, maxval=73)
+        decel_fraction = 0.42
+        pass_decel_min_steps = 34
+        slow_min_steps = 54
+        recover_min_steps = 48
+    else:
+        pass_speed = jax.random.uniform(keys[1], (num_envs,), minval=0.55, maxval=0.78)
+        brake_entry_speed = jax.random.uniform(keys[2], (num_envs,), minval=0.15, maxval=0.24)
+        hold_speed = jax.random.uniform(keys[3], (num_envs,), minval=0.02, maxval=0.07)
+        slow_speed = jax.random.uniform(keys[4], (num_envs,), minval=0.25, maxval=0.35)
+        recover_speed = jax.random.uniform(keys[5], (num_envs,), minval=0.42, maxval=0.62)
+        pass_dist = jax.random.uniform(keys[6], (num_envs,), minval=0.30, maxval=0.46)
+        slow_dist = jax.random.uniform(keys[7], (num_envs,), minval=0.20, maxval=0.34)
+        recover_dist = jax.random.uniform(keys[8], (num_envs,), minval=0.28, maxval=0.48)
+        pass_curve = jax.random.uniform(keys[9], (num_envs,), minval=-0.14, maxval=0.14)
+        slow_curve = jax.random.uniform(keys[10], (num_envs,), minval=-0.05, maxval=0.05)
+        recover_turn = jax.random.uniform(keys[11], (num_envs,), minval=-0.45, maxval=0.45)
+        altitude_keys = (keys[12], keys[13], keys[14], keys[15], keys[16], keys[17])
+        hold_steps = jnp.full((num_envs,), 36, dtype=jnp.int32)
+        decel_fraction = 0.60
+        pass_decel_min_steps = 18
+        slow_min_steps = 30
+        recover_min_steps = 32
     recover_dir = safe_normalize(
         forward * jnp.cos(recover_turn)[:, None] + side * jnp.sin(recover_turn)[:, None]
     )
@@ -196,33 +262,34 @@ def sample_command_plans(key: jax.Array, origin: jax.Array, dt: float) -> dict[s
         origin
         + forward * pass_dist[:, None]
         + side * pass_curve[:, None]
-        + up * jax.random.uniform(keys[12], (num_envs, 1), minval=-0.03, maxval=0.08)
+        + up * jax.random.uniform(altitude_keys[0], (num_envs, 1), minval=-0.03, maxval=0.08)
     )
     pass_mid = clamp_workspace(
         origin
         + forward * (0.5 * pass_dist)[:, None]
         + side
-        * (0.5 * pass_curve + jax.random.uniform(keys[13], (num_envs,), minval=-0.04, maxval=0.04))[
-            :, None
-        ]
-        + up * jax.random.uniform(keys[14], (num_envs, 1), minval=-0.02, maxval=0.05)
+        * (
+            0.5 * pass_curve
+            + jax.random.uniform(altitude_keys[1], (num_envs,), minval=-0.04, maxval=0.04)
+        )[:, None]
+        + up * jax.random.uniform(altitude_keys[2], (num_envs, 1), minval=-0.02, maxval=0.05)
     )
     slow_end = clamp_workspace(
         brake_point
         + forward * slow_dist[:, None]
         + side * slow_curve[:, None]
-        + up * jax.random.uniform(keys[15], (num_envs, 1), minval=-0.02, maxval=0.04)
+        + up * jax.random.uniform(altitude_keys[3], (num_envs, 1), minval=-0.02, maxval=0.04)
     )
     slow_mid = clamp_workspace(
         brake_point
         + forward * (0.5 * slow_dist)[:, None]
         + side * (0.5 * slow_curve)[:, None]
-        + up * jax.random.uniform(keys[16], (num_envs, 1), minval=-0.01, maxval=0.03)
+        + up * jax.random.uniform(altitude_keys[4], (num_envs, 1), minval=-0.01, maxval=0.03)
     )
     recover_end = clamp_workspace(
         slow_end
         + recover_dir * recover_dist[:, None]
-        + up * jax.random.uniform(keys[17], (num_envs, 1), minval=-0.02, maxval=0.06)
+        + up * jax.random.uniform(altitude_keys[5], (num_envs, 1), minval=-0.02, maxval=0.06)
     )
     recover_mid = clamp_workspace(slow_end + recover_dir * (0.5 * recover_dist)[:, None])
 
@@ -230,7 +297,6 @@ def sample_command_plans(key: jax.Array, origin: jax.Array, dt: float) -> dict[s
     slow_points = jnp.stack([brake_point, slow_mid, slow_end], axis=1)
     recover_points = jnp.stack([slow_end, recover_mid, recover_end], axis=1)
     pass_length = polyline_lengths(pass_points)
-    decel_fraction = 0.60
     pass_decel_start_m = pass_length * decel_fraction
     pass_cruise_steps = jnp.maximum(
         8, jnp.ceil(pass_decel_start_m / jnp.maximum(pass_speed * dt, 1e-4)).astype(jnp.int32)
@@ -238,22 +304,21 @@ def sample_command_plans(key: jax.Array, origin: jax.Array, dt: float) -> dict[s
     pass_decel_length = jnp.maximum(0.0, pass_length - pass_decel_start_m)
     pass_decel_avg_speed = 0.5 * (pass_speed + brake_entry_speed)
     pass_decel_steps = jnp.maximum(
-        18,
+        pass_decel_min_steps,
         jnp.ceil(pass_decel_length / jnp.maximum(pass_decel_avg_speed * dt, 1e-4)).astype(
             jnp.int32
         ),
     )
     pass_steps = pass_cruise_steps + pass_decel_steps
-    hold_steps = jnp.full((num_envs,), 36, dtype=jnp.int32)
     slow_steps = jnp.maximum(
-        30,
+        slow_min_steps,
         jnp.ceil(polyline_lengths(slow_points) / jnp.maximum(slow_speed * dt, 1e-4)).astype(
             jnp.int32
         ),
     )
     avg_recover_speed = 0.5 * (slow_speed + recover_speed)
     recover_steps = jnp.maximum(
-        32,
+        recover_min_steps,
         jnp.ceil(
             polyline_lengths(recover_points) / jnp.maximum(avg_recover_speed * dt, 1e-4)
         ).astype(jnp.int32),
@@ -576,10 +641,14 @@ def command_reward(
 
 
 def make_initial_state(
-    env: Any, raw_obs: dict[str, jax.Array], key: jax.Array, dt: float
+    env: Any,
+    raw_obs: dict[str, jax.Array],
+    key: jax.Array,
+    dt: float,
+    command_generator_profile: str = "default",
 ) -> brax_base.State:
     """Create a Brax-style State carrying race data and v60 tracker state."""
-    plans = sample_command_plans(key, raw_obs["pos"], dt)
+    plans = sample_command_plans(key, raw_obs["pos"], dt, command_generator_profile)
     command_steps = jnp.zeros((raw_obs["pos"].shape[0],), dtype=jnp.int32)
     history_row = history_rows(raw_obs)
     history = jnp.repeat(history_row[:, None, :], REFERENCE_TRACKER_HISTORY, axis=1)
@@ -688,7 +757,13 @@ def main() -> None:
         raw_obs_np, _info = env.reset(seed=args.seed)
         raw_obs = {key: jax.device_put(value, device) for key, value in raw_obs_np.items()}
         init_key, policy_key = jax.random.split(jax.random.PRNGKey(args.seed))
-        state = make_initial_state(env, raw_obs, init_key, dt=1.0 / float(config.env.freq))
+        state = make_initial_state(
+            env,
+            raw_obs,
+            init_key,
+            dt=1.0 / float(config.env.freq),
+            command_generator_profile=args.command_generator_profile,
+        )
         policy_params = init_policy_params(
             policy_key, REFERENCE_TRACKER_CLEAN_COMMAND_OBS_DIM, args.hidden_dim, 4
         )
@@ -723,6 +798,7 @@ def main() -> None:
             "config": args.config,
             "num_envs": int(args.num_envs),
             "num_steps": int(args.num_steps),
+            "command_generator_profile": args.command_generator_profile,
             "steps_per_rollout": steps,
             "compile_plus_first_run_s": compile_elapsed,
             "mean_run_s": mean_elapsed,

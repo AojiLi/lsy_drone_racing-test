@@ -68,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
+    parser.add_argument(
+        "--command-generator-profile",
+        choices=v60_rollout.COMMAND_GENERATOR_PROFILES,
+        default="default",
+        help="Command reference generator profile; default preserves the original v60 generator.",
+    )
     parser.add_argument("--eval-rollouts", type=int, default=4)
     parser.add_argument("--checkpoint-path", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--checkpoint-interval", type=int, default=262_144)
@@ -141,6 +147,7 @@ def save_lane_checkpoint(
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
             "reward_coefficients": ppo_smoke.command_reward_coefficients(args),
+            "command_generator_profile": args.command_generator_profile,
         },
         "metrics": jsonable(metrics),
     }
@@ -248,7 +255,11 @@ def main() -> None:
 
         def make_tracker_state(plan_key: jax.Array) -> Any:
             return v60_rollout.make_initial_state(
-                env, raw_obs, plan_key, dt=1.0 / float(config.env.freq)
+                env,
+                raw_obs,
+                plan_key,
+                dt=1.0 / float(config.env.freq),
+                command_generator_profile=args.command_generator_profile,
             )
 
         state = make_tracker_state(keys[0])
@@ -258,6 +269,7 @@ def main() -> None:
             action_high,
             dt=1.0 / float(config.env.freq),
             reward_coefficients=ppo_smoke.command_reward_coefficients(args),
+            command_generator_profile=args.command_generator_profile,
         )
         rollout = ppo_smoke.build_rollout_fn(
             env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
@@ -313,6 +325,7 @@ def main() -> None:
                 "value_target_scale": float(args.value_target_scale),
                 "action_distribution": args.action_distribution,
                 "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
+                "command_generator_profile": args.command_generator_profile,
                 "initial_eval": initial_eval,
             }
         )
@@ -414,6 +427,7 @@ def main() -> None:
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
             "reward_coefficients": ppo_smoke.command_reward_coefficients(args),
+            "command_generator_profile": args.command_generator_profile,
         }
         save_lane_checkpoint(
             args.checkpoint_path,

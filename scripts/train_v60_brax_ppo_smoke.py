@@ -65,6 +65,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
+    parser.add_argument(
+        "--command-generator-profile",
+        choices=v60_rollout.COMMAND_GENERATOR_PROFILES,
+        default="default",
+        help="Command reference generator profile; default preserves the original v60 generator.",
+    )
     parser.add_argument("--eval-rollouts", type=int, default=2)
     parser.add_argument("--checkpoint-path", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--wandb-enabled", action="store_true")
@@ -239,6 +245,7 @@ def build_command_env_step(
     *,
     dt: float,
     reward_coefficients: dict[str, float] | None = None,
+    command_generator_profile: str = "default",
 ) -> Any:
     """Build one JAX command-tracker env step."""
 
@@ -275,7 +282,9 @@ def build_command_env_step(
         last_action_norm = jnp.where(done[:, None], jnp.zeros_like(action_for_env), action_for_env)
         old_steps = state.info["command_steps"]
         command_steps = jnp.where(done, 0, old_steps + 1)
-        new_plans = v60_rollout.sample_command_plans(plan_key, raw_obs["pos"], dt)
+        new_plans = v60_rollout.sample_command_plans(
+            plan_key, raw_obs["pos"], dt, command_generator_profile
+        )
         plans = jax.tree_util.tree_map(
             lambda old, new: select_done(done, old, new), state.info["plans"], new_plans
         )
@@ -662,6 +671,7 @@ def save_checkpoint(
             "action_distribution": args.action_distribution,
             "action_logprob_mode": action_logprob_mode(args.action_distribution),
             "reward_coefficients": command_reward_coefficients(args),
+            "command_generator_profile": args.command_generator_profile,
         },
         "metrics": metrics,
     }
@@ -706,10 +716,18 @@ def main() -> None:
         raw_obs = {key: jax.device_put(value, device) for key, value in raw_obs_np.items()}
         keys = jax.random.split(jax.random.PRNGKey(args.seed), 6)
         state = v60_rollout.make_initial_state(
-            env, raw_obs, keys[0], dt=1.0 / float(config.env.freq)
+            env,
+            raw_obs,
+            keys[0],
+            dt=1.0 / float(config.env.freq),
+            command_generator_profile=args.command_generator_profile,
         )
         eval_state = v60_rollout.make_initial_state(
-            env, raw_obs, keys[1], dt=1.0 / float(config.env.freq)
+            env,
+            raw_obs,
+            keys[1],
+            dt=1.0 / float(config.env.freq),
+            command_generator_profile=args.command_generator_profile,
         )
         params = init_actor_critic_params(
             keys[2],
@@ -729,6 +747,7 @@ def main() -> None:
             action_high,
             dt=1.0 / float(config.env.freq),
             reward_coefficients=command_reward_coefficients(args),
+            command_generator_profile=args.command_generator_profile,
         )
         rollout = build_rollout_fn(
             env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
@@ -765,6 +784,7 @@ def main() -> None:
                 "value_target_scale": float(args.value_target_scale),
                 "action_distribution": args.action_distribution,
                 "action_logprob_mode": action_logprob_mode(args.action_distribution),
+                "command_generator_profile": args.command_generator_profile,
             }
         )
 
@@ -835,6 +855,7 @@ def main() -> None:
             "post_warmup_vs_pytorch_ratio": post_warmup_steps_per_s / PYTORCH_FAST_PATH_STEPS_PER_S,
             "steady_state_vs_pytorch_ratio": steady_state_steps_per_s
             / PYTORCH_FAST_PATH_STEPS_PER_S,
+            "command_generator_profile": args.command_generator_profile,
         }
         final_metrics |= {f"eval/{name}": value for name, value in eval_metrics.items()}
         final_metrics |= last_metrics

@@ -466,24 +466,56 @@
       "family": "C_generator_velocity_distribution",
       "hypothesis": "Rebalance the command generator toward speed-bin coverage, brake ramps, low-speed-through, and recover-speed transitions so speed obedience is learned from reference horizons instead of a larger scalar velocity penalty.",
       "changed_knobs": {
-        "generator_velocity_distribution": "pending builder/checker support",
+        "command_generator_profile": "speed_bin_balanced",
+        "generator_velocity_distribution": "explicit speed bins, longer brake ramps, longer low-speed-through, longer recover transitions",
         "command_vel_error_coef": "default",
         "value_target_scale": 1.0,
         "num_minibatches": 4,
         "update_epochs": 1
       },
-      "status": "proposed_support",
+      "status": "support_passed_ready_to_train",
       "lane_name": "v62d_004_speed_bin_balanced_generator_30m",
       "train_from_scratch": true,
       "hypothesis_packet": "experiments/level3_ppo_loop/v62d_candidates/v62d_004_hypothesis.md",
       "requires_builder_checker": true,
-      "training_command": null,
-      "wandb": null,
+      "training_command": "mkdir -p lsy_drone_racing/control/checkpoints/v62d_004_speed_bin_balanced_generator_30m experiments/level3_ppo_loop/analysis/tracker_stage_metrics && pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_004_speed_bin_balanced_generator_30m --config level3_tracker_free_space.toml --seed 26441 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_004_speed_bin_balanced_generator_30m/v62d_004_speed_bin_balanced_generator_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_004_speed_bin_balanced_generator_30m_summary.json --action-distribution tanh_squashed_gaussian --command-generator-profile speed_bin_balanced --value-target-scale 1.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_004_speed_bin_balanced_generator_30m --wandb-run-id v62d_004_speed_bin_balanced_generator_30m_20260627 --jax-device gpu",
+      "wandb": {
+        "project": "ADR-PPO-Racing-Level3",
+        "entity": "aojili77-technical-university-of-munich",
+        "run_id": "v62d_004_speed_bin_balanced_generator_30m_20260627",
+        "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_004_speed_bin_balanced_generator_30m_20260627"
+      },
       "milestones": [],
       "best_checkpoint": null,
       "post_audit": null,
-      "decision": null,
-      "next_recommendation": null
+      "decision": {
+        "outcome": "support_passed_ready_to_train",
+        "packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_004_support_decision.md",
+        "promoted": false,
+        "reason": "Builder/checker support passed; no 30M training result yet."
+      },
+      "next_recommendation": {
+        "action": "launch_30m_training_from_scratch",
+        "training_command": "mkdir -p lsy_drone_racing/control/checkpoints/v62d_004_speed_bin_balanced_generator_30m experiments/level3_ppo_loop/analysis/tracker_stage_metrics && pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_004_speed_bin_balanced_generator_30m --config level3_tracker_free_space.toml --seed 26441 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_004_speed_bin_balanced_generator_30m/v62d_004_speed_bin_balanced_generator_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_004_speed_bin_balanced_generator_30m_summary.json --action-distribution tanh_squashed_gaussian --command-generator-profile speed_bin_balanced --value-target-scale 1.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_004_speed_bin_balanced_generator_30m --wandb-run-id v62d_004_speed_bin_balanced_generator_30m_20260627 --jax-device gpu",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_004_support_decision.md"
+      },
+      "support": {
+        "packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_004_speed_bin_balanced_generator_support.md",
+        "checker_result": "ALL GREEN",
+        "builder_checks": [
+          "py_compile touched scripts passed",
+          "default generator equivalence max_delta=0.0",
+          "speed_bin_balanced generator stats inspected",
+          "tiny trainer smoke passed",
+          "tiny audit smoke passed",
+          "git diff --check passed",
+          "config/level3.toml unchanged",
+          "config/level3_tracker_free_space.toml unchanged"
+        ],
+        "smoke_summary": "/tmp/v62d_004_speed_bin_balanced_generator_support_smoke.json",
+        "audit_summary": "/tmp/v62d_004_speed_bin_balanced_generator_support_audit.json",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_004_support_decision.md"
+      }
     }
   ]
 }
