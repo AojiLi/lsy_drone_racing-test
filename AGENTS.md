@@ -342,9 +342,21 @@
   `/tmp/v62_brax_ppo_smoke.pkl`, logged W&B offline run
   `v62_brax_ppo_smoke_20260627`, and reached about `1.27M env steps/s`
   steady-state, roughly `31.9x` the PyTorch fast path. This is backend plumbing
-  evidence only, not a tracker-skill pass. The next speed-oriented step is to
-  promote v62 into a maintained trainer lane with milestone checkpoint/resume
-  support and a bounded 1M learning-signal run before any long v60 maturation.
+  evidence only, not a tracker-skill pass.
+- Current v62 formal-lane finding: `scripts/train_v62_brax_reference_command_tracker.py`
+  defines the maintained `v62_brax_reference_command_tracker` lane with
+  milestone checkpoints, final checkpoint, resume-capable checkpoint metadata,
+  W&B logging, and deterministic pre/post eval. A bounded `1,048,576`-step run
+  on `config/level3_tracker_free_space.toml` preserved speed
+  (`~1.3047M env steps/s` steady-state, about `32.78x` the PyTorch fast path)
+  and stayed finite, but deterministic eval got worse:
+  reward `-3.3313 -> -7.2119`, command position error `0.5496 -> 0.6459`,
+  velocity error `0.6065 -> 1.5760`, and
+  `has_eval_learning_signal=false`. Do not launch 8M+ v62/v60 maturation from
+  this configuration. The next move is a v62b learning-signal fix: reduce
+  exploration pressure and/or correct clipped/squashed action PPO log-prob,
+  add reward scaling or return/value normalization, then rerun the same bounded
+  1M gate.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

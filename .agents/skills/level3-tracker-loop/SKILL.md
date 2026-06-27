@@ -668,9 +668,17 @@ The current backend evidence is:
   + GAE + clipped PPO + Optax update + checkpoint + W&B smoke. A
   `262144`-step smoke reached about `1.27M env steps/s` steady-state, roughly
   `31.9x` the PyTorch fast path, while keeping finite metrics and saving a
-  loadable checkpoint.
+  loadable checkpoint;
+- `scripts/train_v62_brax_reference_command_tracker.py`: formal maintained
+  lane with checkpoint milestones, final checkpoint, resume metadata, W&B, and
+  deterministic pre/post eval. A bounded `1,048,576`-step run reached about
+  `1.3047M env steps/s` steady-state, roughly `32.78x` the PyTorch fast path.
+  PPO stayed finite, with final KL about `0.000248`, but deterministic eval
+  worsened and `has_eval_learning_signal=false`.
 
-Treat v62 as backend plumbing evidence, not a tracker-stage pass. Before using
-it for a real v60 maturation run, promote it through builder/checker into a
-maintained trainer lane with milestone checkpoints, resume support, and stage
-evaluation wiring.
+Treat v62 as backend plumbing evidence, not a tracker-stage pass. Do not launch
+an 8M+ v62/v60 maturation run from the current configuration. Next, create a
+v62b learning-signal fix: reduce exploration pressure, address the mismatch
+between unclipped Gaussian log-prob and clipped env actions or implement a
+squashed-action PPO path, add reward scaling/return normalization, then rerun
+the same bounded 1M pre/post eval gate.
