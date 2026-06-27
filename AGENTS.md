@@ -424,6 +424,19 @@
   keep `level3_reference_tracker_command_v3`, keep no gate/aperture/race
   rewards, and use builder/checker to address value/return scale and generic
   command-velocity obedience before another bounded follow-up.
+- Current v62d high-budget tracker search finding:
+  candidates `v62d_001` through `v62d_008` have completed. The current formal
+  comparison baseline remains `v62c 7M` unless a future decision explicitly
+  promotes a candidate. `v62d_008_velocity_contrast_constant_speed_generator_30m`
+  is the first candidate with a strong velocity-obedience signal: best
+  checkpoint `30M` improves command velocity error by `22.84%`
+  (`0.7397 -> 0.5708`) and passes action/logprob audit. It is not promoted
+  because position error worsens by `20.84%` (`0.6573 -> 0.7943`), violating
+  the `<=5%` promotion guardrail. The next candidate is
+  `v62d_009_velocity_contrast_spatial_guarded_generator`: preserve v62d_008's
+  low/medium/high velocity contrast while adding speed-bin-like spatial guards.
+  Use builder/checker before any 30M run because this changes generator
+  semantics.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

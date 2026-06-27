@@ -33,7 +33,8 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | rejected_not_promoted | `v62d_005...step_015000000.pkl` | critic diagnostics improved, but velocity/action smoothness regressed badly |
 | v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | rejected_not_promoted | `v62d_006...step_020000000.pkl` | valid long-rollout run, but no velocity/frontier improvement; next combine speed-bin generator with velocity coef |
 | v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | rejected_not_promoted | `v62d_007...step_015000000.pkl` | best-of-family combination failed velocity objective and late drifted; next switch back to generator velocity distribution |
-| v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | support_passed_ready_to_train | pending 30M | support smoke/checker passed; launch 30M from scratch |
+| v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | rejected_not_promoted | `v62d_008...step_030000000.pkl` | velocity improved 22.84%, but position worsened 20.84%; next combine velocity contrast with spatial guards |
+| v62d_009 | E_best_of_family_combination | preserve velocity contrast while restoring spatial discipline | `command_generator_profile=velocity_contrast_spatial_guarded` | planned_support_required | pending | implement guarded generator profile with builder/checker before 30M |
 
 ## v62d_001 Result
 
@@ -731,3 +732,93 @@ Support passes. Launch the 30M candidate from scratch with the command recorded
 in the support decision packet. Do not promote or reject `v62d_008` until the
 30M run, milestone eval, best-checkpoint audit, three-review analysis, decision
 packet, reader note, and registry/state update are complete.
+
+## v62d_008 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_008_velocity_contrast_constant_speed_generator_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_008_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_008_velocity_contrast_constant_speed_generator_30m/v62d_008_velocity_contrast_constant_speed_generator_30m_step_030000000.pkl
+```
+
+It is not promoted. It is the first candidate to clearly improve velocity, but
+it violates the spatial guardrail.
+
+| Metric | v62c 7M | v62d_008 best |
+|---|---:|---:|
+| reward | -4.8459 | -4.6294 |
+| command position error | 0.6573 | 0.7943 |
+| cross-track error | 0.5214 | 0.5449 |
+| command velocity error | 0.7397 | 0.5708 |
+| done mean | 0.00391 | 0.00219 |
+| action delta | 0.000006 | 0.000016 |
+| balanced score | -7.5365 | -7.4853 |
+
+Promotion contract check:
+
+```text
+velocity improvement: 22.84%, passes
+position worsening: 20.84%, fails the <=5% guardrail
+cross-track worsening: 4.50%, barely passes
+done mean: improves
+action/logprob audit: ok
+```
+
+Post-audit on the best checkpoint:
+
+```text
+action_clipping=ok
+action_sampling_logprob=ok
+advantage_scale=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=3.26e-7
+```
+
+The next candidate should preserve v62d_008's velocity signal but recover the
+spatial discipline seen in the speed-bin generator family.
+
+## v62d_009 Plan
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_009_hypothesis.md
+```
+
+This candidate is a best-of-family generator combination:
+
+```text
+v62d_008: paired low/medium/high velocity contrast
+v62d_004: speed-bin-like spatial discipline
+```
+
+Use a new explicit profile:
+
+```text
+command_generator_profile=velocity_contrast_spatial_guarded
+```
+
+Keep:
+
+```text
+observation_layout=level3_reference_tracker_command_v3
+action_distribution=tanh_squashed_gaussian
+command_vel_error_coef=default
+value_target_scale=1.0
+num_envs=1024
+num_steps=32
+```
+
+Do not launch 30M until support smoke and checker pass.
