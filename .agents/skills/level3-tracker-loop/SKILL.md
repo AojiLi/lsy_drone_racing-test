@@ -717,3 +717,14 @@ about `3.21e-7`, and unchanged Level3/tracker configs. Do not resume v62b
 clipped-Gaussian checkpoints into v62c unless a future decision explicitly
 approves a cross-distribution experiment. The next step is a bounded v62c 10M
 W&B run, not immediate 60M+ maturation or reward tuning.
+
+The v62c 10M learning-sanity run is recorded in
+`experiments/level3_ppo_loop/analysis/2026-06-27_v62c_tanh_squashed_gaussian_10m_analysis.md`.
+It produced positive eval signal with the formal tanh action path: reward
+`-4.6670 -> -3.0376`, position error `0.4990 -> 0.4440`, cross-track error
+`0.4116 -> 0.3254`, and done mean `0.0064 -> 0.0`. The final checkpoint audit
+kept action/logprob/std/reward/advantage verdicts ok. Treat this as evidence
+that JAX/Brax v62c can learn and should remain the active speed backend.
+Do not jump to 60M+ yet: velocity error worsened, action magnitude/delta
+increased, and train-batch value loss stayed high. Next perform
+`v62c_milestone_value_velocity_review` before changing reward or budget.

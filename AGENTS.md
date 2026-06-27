@@ -396,6 +396,19 @@
   checkpoints into v62c unless a future decision explicitly approves a
   cross-distribution experiment. Next run a bounded v62c 10M W&B chunk before
   any 60M+ maturation and monitor value/advantage scale.
+- Current v62c 10M learning-sanity finding:
+  `v62c_tanh_squashed_gaussian_10m` ran `10,027,008` steps with online W&B at
+  `~1.305M env steps/s` steady-state. Pre/post deterministic eval improved on
+  reward `-4.6670 -> -3.0376`, command position error `0.4990 -> 0.4440`,
+  cross-track error `0.4116 -> 0.3254`, and done mean `0.0064 -> 0.0`, so the
+  JAX/tanh PPO backend can learn. The action path stayed clean:
+  action clipping `0.0`, logprob/env consistency about `3.15e-7`, and final
+  checkpoint audit verdicts all ok. Do not blame JAX as the primary bottleneck
+  based on current evidence. However, velocity error worsened
+  `0.6070 -> 0.7457`, action magnitude/delta increased, and train-batch value
+  loss remained high. Do not start 60M+ maturation yet. Next run
+  `v62c_milestone_value_velocity_review`: rank saved 1M-9M milestones plus
+  final and inspect W&B value/advantage/velocity curves.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 
