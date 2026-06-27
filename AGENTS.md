@@ -448,8 +448,12 @@
   `v62c 7M`, triggering the active objective's hold condition. The current
   decision packet is
   `experiments/level3_ppo_loop/decisions/2026-06-27_v62d_10_candidate_hold.md`.
-  Do not launch `v62d_011`, continue `v62d_010`, or run 60M+ maturation until
-  the user reviews the hold and approves the next direction.
+  User-review options are summarized in
+  `experiments/level3_ppo_loop/analysis/2026-06-27_v62d_user_review_options_after_10_candidate_hold.md`.
+  The recommended direction is Option A: command-conditioned reward/generator
+  support plus staged per-command gates before any v62d_011 training. Do not
+  launch `v62d_011`, start support work, continue `v62d_010`, or run 60M+
+  maturation until the user reviews the hold and approves the next direction.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

@@ -1887,13 +1887,15 @@
     "id": "user_review_required_after_v62d_10_candidate_meta_review",
     "status": "hold_for_user_review",
     "reason": "v62d_001 through v62d_010 all failed to promote over v62c 7M; active objective requires pausing candidate execution after 10 consecutive non-improving candidates.",
+    "options_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_user_review_options_after_10_candidate_hold.md",
+    "recommended_direction": "Option A: command-conditioned reward/generator support plus staged per-command gates before any v62d_011 training.",
     "must_not_launch_training_until_user_approves": true,
     "allowed_review_directions": [
-      "command_conditioned_reward_or_generator_fix",
-      "targeted_critic_value_support",
-      "staged_command_curriculum",
-      "architecture_or_capacity_change",
-      "stop_v62d_and_return_to_planner_or_another_lane"
+      "A_command_conditioned_reward_plus_staged_curriculum",
+      "B_targeted_critic_value_support",
+      "C_architecture_or_capacity_change",
+      "D_stop_v62d_return_to_planner_integration",
+      "E_hold_all_training_search"
     ],
     "triggered_by_decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_10_candidate_hold.md"
   }
