@@ -32,7 +32,8 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | `command_generator_profile=speed_bin_balanced`, defaults preserved | rejected_not_promoted | `v62d_004...step_005000000.pkl` | useful distribution signal, but velocity gain below threshold and action_delta worsened |
 | v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | rejected_not_promoted | `v62d_005...step_015000000.pkl` | critic diagnostics improved, but velocity/action smoothness regressed badly |
 | v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | rejected_not_promoted | `v62d_006...step_020000000.pkl` | valid long-rollout run, but no velocity/frontier improvement; next combine speed-bin generator with velocity coef |
-| v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | planned_support_required | pending | run support/checker before 30M |
+| v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | rejected_not_promoted | `v62d_007...step_015000000.pkl` | best-of-family combination failed velocity objective and late drifted; next switch back to generator velocity distribution |
+| v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | planned_support_required | pending | implement generator profile with builder/checker before 30M |
 
 ## v62d_001 Result
 
@@ -587,3 +588,91 @@ update_epochs=1
 
 Run support/checker before the 30M command because this combines a generator
 distribution knob with a reward-number knob.
+
+## v62d_007 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_007_speedbin_velocity_coef_2x_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_007_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_007_speedbin_velocity_coef_2x_30m/v62d_007_speedbin_velocity_coef_2x_30m_step_015000000.pkl
+```
+
+It is not promoted. The action/logprob path is clean, but the candidate fails
+the velocity-obedience objective and late-trains worse.
+
+| Metric | v62c 7M default | v62c 7M speed-bin | v62d_004 best | v62d_006 best | v62d_007 best |
+|---|---:|---:|---:|---:|---:|
+| reward | -4.8459 | -2.1434 | -2.0530 | -2.0644 | -2.5724 |
+| command position error | 0.6573 | 0.2095 | 0.1958 | 0.1964 | 0.2026 |
+| cross-track error | 0.5214 | 0.1786 | 0.1634 | 0.1640 | 0.1710 |
+| command velocity error | 0.7397 | 0.8179 | 0.7740 | 0.7789 | 0.7943 |
+| done mean | 0.00391 | 0.00000 | 0.00000 | 0.00000 | 0.00000 |
+| action delta | 0.000006 | 0.000034 | 0.000116 | 0.000092 | 0.000088 |
+| balanced score | -7.5365 | -3.4438 | -3.2704 | -3.2878 | -3.8301 |
+
+Post-audit on the best checkpoint:
+
+```text
+action_clipping=ok
+action_sampling_logprob=ok
+advantage_scale=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=3.23e-7
+```
+
+Final/30M drift:
+
+```text
+15M velocity_error=0.7943
+30M/final velocity_error=1.0491
+15M action_delta=0.0000875
+30M/final action_delta=0.000456
+```
+
+The next candidate should not add another blunt velocity reward coefficient.
+Switch back to a single Family C generator-distribution knob.
+
+## v62d_008 Plan
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_008_hypothesis.md
+```
+
+This candidate requires builder/checker support before training because it adds
+a new command-generator profile:
+
+```text
+command_generator_profile=velocity_contrast_constant_speed
+```
+
+The intended generator change is to over-sample longer constant-speed windows
+and paired low/medium/high desired-speed variants on similar geometry while
+preserving brake ramps, low-speed-through windows, and smooth recover-speed
+windows.
+
+Keep:
+
+```text
+observation_layout=level3_reference_tracker_command_v3
+action_distribution=tanh_squashed_gaussian
+command_vel_error_coef=default
+value_target_scale=1.0
+num_envs=1024
+num_steps=32
+```
+
+Do not launch 30M until support smoke and checker pass.
