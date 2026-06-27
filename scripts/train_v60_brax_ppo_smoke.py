@@ -50,6 +50,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--initial-log-std", type=float, default=-2.0)
     parser.add_argument(
+        "--value-target-scale",
+        type=float,
+        default=1.0,
+        help=("Scale critic targets by this positive value while keeping GAE in raw reward units."),
+    )
+    parser.add_argument(
         "--action-distribution", choices=ACTION_DISTRIBUTIONS, default="tanh_squashed_gaussian"
     )
     parser.add_argument("--max-episode-steps", type=int, default=500)
@@ -515,18 +521,27 @@ def compute_advantage_batch(
     transitions: dict[str, jax.Array],
     gamma: float,
     gae_lambda: float,
+    value_target_scale: float = 1.0,
 ) -> tuple[dict[str, jax.Array], dict[str, jax.Array]]:
     """Compute flattened PPO batch plus rollout summary metrics."""
     _mean, _log_std, next_value = actor_critic_apply_raw(params, final_obs)
+    scale = jnp.maximum(jnp.asarray(value_target_scale, dtype=jnp.float32), 1e-6)
+    raw_values = transitions["values"] * scale
+    raw_next_value = next_value * scale
     advantages, returns = compute_gae(
         transitions["rewards"],
         transitions["dones"],
-        transitions["values"],
-        next_value,
+        raw_values,
+        raw_next_value,
         gamma=gamma,
         gae_lambda=gae_lambda,
     )
-    batch = flatten_rollout(transitions, advantages, returns)
+    value_targets = returns / scale
+    batch = flatten_rollout(transitions, advantages, value_targets)
+    returns_var = jnp.var(returns)
+    explained_variance = jnp.where(
+        returns_var > 1e-8, 1.0 - jnp.var(returns - raw_values) / returns_var, jnp.nan
+    )
     summary = {
         "rollout_reward_mean": jnp.mean(transitions["reward_mean"]),
         "rollout_done_mean": jnp.mean(transitions["done_mean"]),
@@ -552,7 +567,15 @@ def compute_advantage_batch(
         "advantages_mean": jnp.mean(advantages),
         "advantages_std": jnp.std(advantages),
         "returns_mean": jnp.mean(returns),
-        "values_mean": jnp.mean(transitions["values"]),
+        "returns_std": jnp.std(returns),
+        "value_target_scale": scale,
+        "value_targets_mean": jnp.mean(value_targets),
+        "value_targets_std": jnp.std(value_targets),
+        "value_target_abs_mean": jnp.mean(jnp.abs(value_targets)),
+        "values_mean": jnp.mean(raw_values),
+        "values_std": jnp.std(raw_values),
+        "values_scaled_mean": jnp.mean(transitions["values"]),
+        "explained_variance": explained_variance,
         "all_finite": (
             jnp.all(jnp.isfinite(transitions["obs"]))
             & jnp.all(jnp.isfinite(transitions["actions"]))
@@ -616,6 +639,7 @@ def save_checkpoint(
             "wandb_run_id": args.wandb_run_id,
             "initial_log_std": float(args.initial_log_std),
             "ent_coef": float(args.ent_coef),
+            "value_target_scale": float(args.value_target_scale),
             "action_distribution": args.action_distribution,
             "action_logprob_mode": action_logprob_mode(args.action_distribution),
         },
@@ -648,6 +672,8 @@ def main() -> None:
     args = parse_args()
     if args.num_envs < 1 or args.num_steps < 1:
         raise ValueError("--num-envs and --num-steps must be positive.")
+    if args.value_target_scale <= 0.0:
+        raise ValueError("--value-target-scale must be positive.")
     batch_size = int(args.num_envs) * int(args.num_steps)
     if batch_size % int(args.num_minibatches) != 0:
         raise ValueError("--num-envs * --num-steps must be divisible by --num-minibatches.")
@@ -715,6 +741,7 @@ def main() -> None:
                 "actual_timesteps": actual_timesteps,
                 "num_minibatches": int(args.num_minibatches),
                 "update_epochs": int(args.update_epochs),
+                "value_target_scale": float(args.value_target_scale),
                 "action_distribution": args.action_distribution,
                 "action_logprob_mode": action_logprob_mode(args.action_distribution),
             }
@@ -724,7 +751,12 @@ def main() -> None:
             update_start = time.perf_counter()
             state, train_key, transitions = rollout(state, params, train_key)
             batch, rollout_summary = compute_advantage_batch(
-                params, state.obs, transitions, float(args.gamma), float(args.gae_lambda)
+                params,
+                state.obs,
+                transitions,
+                float(args.gamma),
+                float(args.gae_lambda),
+                float(args.value_target_scale),
             )
             params, opt_state, update_key, train_metrics = ppo_update(
                 params, opt_state, batch, update_key

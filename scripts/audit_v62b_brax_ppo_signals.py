@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pickle
 from pathlib import Path
 from typing import Any
 
@@ -149,14 +150,16 @@ def compute_advantage_summary(
     *,
     gamma: float,
     gae_lambda: float,
+    value_target_scale: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute raw advantages and returns."""
     _mean, _log_std, next_value = ppo_smoke.actor_critic_apply_raw(params, final_obs)
+    scale = jnp.maximum(jnp.asarray(value_target_scale, dtype=jnp.float32), 1e-6)
     advantages, returns = ppo_smoke.compute_gae(
         transitions["rewards"],
         transitions["dones"],
-        transitions["values"],
-        next_value,
+        transitions["values"] * scale,
+        next_value * scale,
         gamma=gamma,
         gae_lambda=gae_lambda,
     )
@@ -189,12 +192,18 @@ def summarize_rollout(
     key: jax.Array,
     gamma: float,
     gae_lambda: float,
+    value_target_scale: float = 1.0,
 ) -> dict[str, Any]:
     """Run and summarize one audit rollout."""
     final_state, _next_key, transitions = rollout(state, params, key)
     jax.tree_util.tree_map(lambda value: value.block_until_ready(), transitions)
     advantages, returns = compute_advantage_summary(
-        params, final_state.obs, transitions, gamma=gamma, gae_lambda=gae_lambda
+        params,
+        final_state.obs,
+        transitions,
+        gamma=gamma,
+        gae_lambda=gae_lambda,
+        value_target_scale=value_target_scale,
     )
     action_sample = np.asarray(transitions["action_sample"])
     action_for_env = np.asarray(transitions["action_for_env"])
@@ -208,9 +217,11 @@ def summarize_rollout(
     log_std = np.asarray(transitions["log_std"])
     rewards = np.asarray(transitions["rewards"])
     values = np.asarray(transitions["values"])
+    raw_values = values * float(value_target_scale)
     dones = np.asarray(transitions["dones"])
     metrics = {
         "label": label,
+        "value_target_scale": float(value_target_scale),
         "initial_or_policy_log_std": scalar_stats(log_std),
         "initial_or_policy_std": scalar_stats(np.exp(log_std)),
         "action_sampling": {
@@ -234,7 +245,8 @@ def summarize_rollout(
             (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         ),
         "return": scalar_stats(returns),
-        "value": scalar_stats(values),
+        "value": scalar_stats(raw_values),
+        "scaled_value": scalar_stats(values),
         "reward": scalar_stats(rewards),
         "done_fraction": float(np.mean(dones)),
         "tracker_metrics": {
@@ -308,11 +320,17 @@ def main() -> None:
                     key=rollout_key,
                     gamma=float(args.gamma),
                     gae_lambda=float(args.gae_lambda),
+                    value_target_scale=1.0,
                 )
             )
         if not args.skip_checkpoint and args.checkpoint.exists():
             params, _opt_state, global_step, _rng_keys = v62_lane.load_lane_checkpoint(
                 args.checkpoint, device
+            )
+            with args.checkpoint.open("rb") as handle:
+                checkpoint_payload = pickle.load(handle)
+            value_target_scale = float(
+                checkpoint_payload.get("metadata", {}).get("value_target_scale", 1.0)
             )
             checkpoint_metrics = summarize_rollout(
                 label=f"checkpoint_step_{global_step}",
@@ -322,6 +340,7 @@ def main() -> None:
                 key=rollout_key,
                 gamma=float(args.gamma),
                 gae_lambda=float(args.gae_lambda),
+                value_target_scale=value_target_scale,
             )
             checkpoint_metrics["checkpoint"] = str(args.checkpoint)
             checkpoint_metrics["checkpoint_global_step"] = int(global_step)

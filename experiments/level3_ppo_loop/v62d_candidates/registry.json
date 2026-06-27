@@ -1,0 +1,158 @@
+{
+  "baseline": {
+    "id": "v62c_7m",
+    "checkpoint": "lsy_drone_racing/control/checkpoints/v62c_tanh_squashed_gaussian_10m/v62c_tanh_squashed_gaussian_10m_step_007340032.pkl",
+    "eval_protocol": {
+      "config": "level3_tracker_free_space.toml",
+      "seed": 26310,
+      "num_envs": 1024,
+      "num_steps": 32,
+      "eval_rollouts": 16,
+      "action_distribution": "tanh_squashed_gaussian"
+    },
+    "metrics": {
+      "reward_mean": -4.8458733559,
+      "command_position_error": 0.6573137622,
+      "cross_track_error": 0.521412231,
+      "command_velocity_error": 0.7397233648,
+      "done_mean": 0.00390625,
+      "balanced_score": -7.5364870216
+    }
+  },
+  "candidates": [
+    {
+      "id": "v62d_001",
+      "family": "A_value_return_stabilization",
+      "hypothesis": "Reduce critic target magnitude while keeping reward semantics, GAE, and actor observation unchanged.",
+      "changed_knobs": {
+        "num_minibatches": 8,
+        "update_epochs": 4,
+        "value_target_scale": 50.0
+      },
+      "status": "rejected_not_promoted",
+      "lane_name": "v62d_001_value_target_scale50_30m",
+      "train_from_scratch": true,
+      "training_command": "pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_001_value_target_scale50_30m --config level3_tracker_free_space.toml --seed 26411 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 8 --update-epochs 4 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_001_value_target_scale50_30m_summary.json --action-distribution tanh_squashed_gaussian --value-target-scale 50.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_001_value_target_scale50_30m --wandb-run-id v62d_001_value_target_scale50_30m_20260627 --jax-device gpu",
+      "wandb": {
+        "project": "ADR-PPO-Racing-Level3",
+        "entity": "aojili77-technical-university-of-munich",
+        "run_id": "v62d_001_value_target_scale50_30m_20260627",
+        "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_001_value_target_scale50_30m_20260627"
+      },
+      "milestones": [
+        {
+          "label": "5M",
+          "global_step": 5013504,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_005000000.pkl",
+          "reward_mean": -9.7540858388,
+          "command_position_error": 0.2850977425,
+          "cross_track_error": 0.2632515635,
+          "command_velocity_error": 1.2017989308,
+          "done_mean": 0.0290260315,
+          "action_delta_penalty": 0.0167452708,
+          "balanced_score": -11.9442587236
+        },
+        {
+          "label": "10M",
+          "global_step": 10027008,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_010000000.pkl",
+          "reward_mean": -10.5905266404,
+          "command_position_error": 0.2638047291,
+          "cross_track_error": 0.2470510332,
+          "command_velocity_error": 1.304757148,
+          "done_mean": 0.0326595306,
+          "action_delta_penalty": 0.0236202689,
+          "balanced_score": -12.8411163536
+        },
+        {
+          "label": "15M",
+          "global_step": 15007744,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_015000000.pkl",
+          "reward_mean": -10.9814408422,
+          "command_position_error": 0.2582779387,
+          "cross_track_error": 0.242343164,
+          "command_velocity_error": 1.3519174755,
+          "done_mean": 0.0341587067,
+          "action_delta_penalty": 0.0278062981,
+          "balanced_score": -13.2726492351
+        },
+        {
+          "label": "20M",
+          "global_step": 20021248,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_020000000.pkl",
+          "reward_mean": -11.1196032763,
+          "command_position_error": 0.25623558,
+          "cross_track_error": 0.2396881273,
+          "command_velocity_error": 1.3648353443,
+          "done_mean": 0.0346546173,
+          "action_delta_penalty": 0.0275864168,
+          "balanced_score": -13.416952142
+        },
+        {
+          "label": "25M",
+          "global_step": 25001984,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_025000000.pkl",
+          "reward_mean": -11.1266774535,
+          "command_position_error": 0.2558147563,
+          "cross_track_error": 0.2396021644,
+          "command_velocity_error": 1.3611100018,
+          "done_mean": 0.0347232819,
+          "action_delta_penalty": 0.0272788615,
+          "balanced_score": -13.4203332555
+        },
+        {
+          "label": "30M",
+          "global_step": 30015488,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_030000000.pkl",
+          "reward_mean": -10.9436267614,
+          "command_position_error": 0.2573858453,
+          "cross_track_error": 0.2409324655,
+          "command_velocity_error": 1.3398643136,
+          "done_mean": 0.0340061188,
+          "action_delta_penalty": 0.029030077,
+          "balanced_score": -13.2228167274
+        },
+        {
+          "label": "final",
+          "global_step": 30015488,
+          "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_final.pkl",
+          "reward_mean": -10.9436267614,
+          "command_position_error": 0.2573858453,
+          "cross_track_error": 0.2409324655,
+          "command_velocity_error": 1.3398643136,
+          "done_mean": 0.0340061188,
+          "action_delta_penalty": 0.029030077,
+          "balanced_score": -13.2228167274
+        }
+      ],
+      "best_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_005000000.pkl",
+      "post_audit": null,
+      "post_audit": {
+        "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_001_value_target_scale50_30m/v62d_001_value_target_scale50_30m_step_005000000.pkl",
+        "checkpoint_global_step": 5013504,
+        "action_clipping": "ok",
+        "action_sampling_logprob": "ok",
+        "advantage_scale": "ok",
+        "reward_scale": "large",
+        "stored_vs_env_logprob_abs_mean": 9.043833415489644e-7,
+        "value_target_scale": 50.0
+      },
+      "decision": {
+        "outcome": "switch_candidate_family",
+        "packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_001_decision.md",
+        "promoted": false,
+        "reason": "Critic scale fixed, but command_velocity_error, done_mean, reward, and action_delta regressed versus v62c 7M."
+      },
+      "next_recommendation": {
+        "candidate_id": "v62d_002",
+        "family": "D_PPO_stabilizer",
+        "lane_name": "v62d_002_value_scale50_conservative_ppo",
+        "changed_knobs": {
+          "num_minibatches": 4,
+          "update_epochs": 1,
+          "value_target_scale": 50.0
+        }
+      }
+    }
+  ]
+}

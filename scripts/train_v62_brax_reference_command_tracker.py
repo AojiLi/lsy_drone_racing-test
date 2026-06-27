@@ -51,6 +51,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--initial-log-std", type=float, default=-2.0)
     parser.add_argument(
+        "--value-target-scale",
+        type=float,
+        default=1.0,
+        help=("Scale critic targets by this positive value while keeping GAE in raw reward units."),
+    )
+    parser.add_argument(
         "--action-distribution",
         choices=ppo_smoke.ACTION_DISTRIBUTIONS,
         default="tanh_squashed_gaussian",
@@ -126,6 +132,7 @@ def save_lane_checkpoint(
             "wandb_run_id": args.wandb_run_id,
             "initial_log_std": float(args.initial_log_std),
             "ent_coef": float(args.ent_coef),
+            "value_target_scale": float(args.value_target_scale),
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
         },
@@ -197,6 +204,8 @@ def main() -> None:
     args = parse_args()
     if args.num_envs < 1 or args.num_steps < 1:
         raise ValueError("--num-envs and --num-steps must be positive.")
+    if args.value_target_scale <= 0.0:
+        raise ValueError("--value-target-scale must be positive.")
     batch_size = int(args.num_envs) * int(args.num_steps)
     if batch_size % int(args.num_minibatches) != 0:
         raise ValueError("--num-envs * --num-steps must be divisible by --num-minibatches.")
@@ -294,6 +303,7 @@ def main() -> None:
                 "initial_global_step": int(global_step),
                 "initial_log_std": float(args.initial_log_std),
                 "ent_coef": float(args.ent_coef),
+                "value_target_scale": float(args.value_target_scale),
                 "action_distribution": args.action_distribution,
                 "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
                 "initial_eval": initial_eval,
@@ -304,7 +314,12 @@ def main() -> None:
             update_start = time.perf_counter()
             state, train_key, transitions = rollout(state, params, train_key)
             batch, rollout_summary = ppo_smoke.compute_advantage_batch(
-                params, state.obs, transitions, float(args.gamma), float(args.gae_lambda)
+                params,
+                state.obs,
+                transitions,
+                float(args.gamma),
+                float(args.gae_lambda),
+                float(args.value_target_scale),
             )
             params, opt_state, update_key, train_metrics = ppo_update(
                 params, opt_state, batch, update_key
@@ -388,6 +403,7 @@ def main() -> None:
             "checkpoint": str(args.checkpoint_path),
             "initial_log_std": float(args.initial_log_std),
             "ent_coef": float(args.ent_coef),
+            "value_target_scale": float(args.value_target_scale),
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
         }
