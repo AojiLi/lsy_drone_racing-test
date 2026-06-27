@@ -425,7 +425,7 @@
   rewards, and use builder/checker to address value/return scale and generic
   command-velocity obedience before another bounded follow-up.
 - Current v62d high-budget tracker search finding:
-  candidates `v62d_001` through `v62d_008` have completed. The current formal
+  candidates `v62d_001` through `v62d_009` have completed. The current formal
   comparison baseline remains `v62c 7M` unless a future decision explicitly
   promotes a candidate. `v62d_008_velocity_contrast_constant_speed_generator_30m`
   is the first candidate with a strong velocity-obedience signal: best
@@ -435,15 +435,16 @@
   the `<=5%` promotion guardrail. The next candidate is
   `v62d_009_velocity_contrast_spatial_guarded_generator`: preserve v62d_008's
   low/medium/high velocity contrast while adding speed-bin-like spatial guards.
-  Its support gate has passed: the new generator profile is exposed through
-  `COMMAND_GENERATOR_PROFILES`, support smoke completed `262,144` steps, the
-  checkpoint metadata records `level3_reference_tracker_command_v3`,
-  `tanh_squashed_gaussian`, `command_generator_profile=velocity_contrast_spatial_guarded`,
-  and `reward_coefficients={}`, action/logprob audit passed, and read-only
-  checker reported `ALL GREEN`. The immediate next action is to launch the
-  approved 30M v62d_009 candidate from scratch, then evaluate 5M milestones,
-  audit the best checkpoint, run the three required reviews, and decide whether
-  it beats the v62c 7M frontier.
+  Its support gate passed and the 30M run completed. Best balanced checkpoint
+  is `15M`: position error is effectively tied with v62c 7M (`0.6570` vs
+  `0.6573`) and cross-track improves (`0.4833` vs `0.5214`), but velocity
+  worsens (`0.7811` vs `0.7397`) and balanced score is slightly worse
+  (`-7.5566` vs `-7.5365`). The 30M/final checkpoint improves velocity only
+  about `5.08%`, below the `10%-15%` promotion threshold, while position and
+  cross-track collapse. Do not promote v62d_009 and do not continue it as-is.
+  The immediate next action is a v62d meta-review before v62d_010, comparing
+  v62c 7M plus v62d_003/v62d_004/v62d_008/v62d_009 per-command failures and
+  critic/value diagnostics to choose one next knob.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

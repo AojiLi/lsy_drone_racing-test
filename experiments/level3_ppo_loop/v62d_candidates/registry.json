@@ -1676,7 +1676,7 @@
         "num_minibatches": 4,
         "update_epochs": 1
       },
-      "status": "support_passed_ready_to_train",
+      "status": "rejected_not_promoted",
       "lane_name": "v62d_009_velocity_contrast_spatial_guarded_generator_30m",
       "training_command": "pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_009_velocity_contrast_spatial_guarded_generator_30m --config level3_tracker_free_space.toml --seed 26491 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_009_velocity_contrast_spatial_guarded_generator_30m/v62d_009_velocity_contrast_spatial_guarded_generator_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_generator_30m_summary.json --action-distribution tanh_squashed_gaussian --command-generator-profile velocity_contrast_spatial_guarded --value-target-scale 1.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_009_velocity_contrast_spatial_guarded_generator_30m --wandb-run-id v62d_009_velocity_contrast_spatial_guarded_generator_30m_20260627 --jax-device gpu",
       "wandb": {
@@ -1685,8 +1685,8 @@
         "run_id": "v62d_009_velocity_contrast_spatial_guarded_generator_30m_20260627",
         "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_009_velocity_contrast_spatial_guarded_generator_30m_20260627"
       },
-      "decision": "support_passed_launch_30m_from_scratch",
-      "next_recommendation": null,
+      "decision": "hold_for_user_review_meta_review_before_v62d010",
+      "next_recommendation": "Run v62d meta-review before v62d_010; compare velocity/spatial tradeoff and critic/value diagnostics across v62c/v62d_003/v62d_004/v62d_008/v62d_009.",
       "support": {
         "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_009_velocity_contrast_spatial_guarded_support.md",
         "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_009_support_decision.md",
@@ -1700,7 +1700,46 @@
         "action_logprob_audit": "ok",
         "config_level3_unchanged": true,
         "config_tracker_free_space_unchanged": true
-      }
+      },
+      "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_009_velocity_contrast_spatial_guarded_generator_30m_analysis.md",
+      "subagent_reviews": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_009_velocity_contrast_spatial_guarded_generator_30m_subagent_reviews.md",
+      "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_009_decision.md",
+      "reader_note": "drone_notes/level3_loops/v62d-009-spatial-guarded-generator.md",
+      "milestone_eval": {
+        "json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_generator_30m_milestone_eval.json",
+        "csv": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_generator_30m_milestone_eval.csv"
+      },
+      "best_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_009_velocity_contrast_spatial_guarded_generator_30m/v62d_009_velocity_contrast_spatial_guarded_generator_30m_step_015000000.pkl",
+      "best_checkpoint_label": "15M",
+      "best_metrics": {
+        "reward_mean": -4.892676487565041,
+        "command_position_error": 0.6570462472736835,
+        "cross_track_error": 0.483308594673872,
+        "command_velocity_error": 0.7811050601303577,
+        "done_mean": 0.00390625,
+        "action_delta_penalty": 1.2151282135164365e-05,
+        "balanced_score": -7.556647471785254,
+        "velocity_change_vs_v62c_7m": 0.055942122793048776,
+        "position_change_vs_v62c_7m": -0.0004069821360031259,
+        "cross_change_vs_v62c_7m": -0.07307775707347373
+      },
+      "post_audit": {
+        "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_009_velocity_contrast_spatial_guarded_generator_30m/v62d_009_velocity_contrast_spatial_guarded_generator_30m_step_015000000.pkl",
+        "checkpoint_global_step": 15007744,
+        "action_clipping": "ok",
+        "action_sampling_logprob": "ok",
+        "advantage_scale": "ok",
+        "reward_scale": "ok",
+        "initial_std": "ok",
+        "stored_vs_env_logprob_abs_mean": 3.1775016395840794e-07,
+        "sample_clip_fraction": 0.0,
+        "value_mean": -143.87073567835614,
+        "value_std": 0.0029800687761880793,
+        "return_mean": -153.71954941563308,
+        "return_std": 4.856230069210643
+      },
+      "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_generator_30m_summary.json",
+      "reason": "Spatial guards restored position/cross-track at 15M but lost the v62d_008 velocity breakthrough; the 30M velocity point improves only 5.08% and collapses spatial tracking."
     }
   ]
 }

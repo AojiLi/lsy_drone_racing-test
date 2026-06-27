@@ -34,7 +34,7 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | rejected_not_promoted | `v62d_006...step_020000000.pkl` | valid long-rollout run, but no velocity/frontier improvement; next combine speed-bin generator with velocity coef |
 | v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | rejected_not_promoted | `v62d_007...step_015000000.pkl` | best-of-family combination failed velocity objective and late drifted; next switch back to generator velocity distribution |
 | v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | rejected_not_promoted | `v62d_008...step_030000000.pkl` | velocity improved 22.84%, but position worsened 20.84%; next combine velocity contrast with spatial guards |
-| v62d_009 | E_best_of_family_combination | preserve velocity contrast while restoring spatial discipline | `command_generator_profile=velocity_contrast_spatial_guarded` | support_passed_ready_to_train | pending | support passed; launch approved 30M command from scratch |
+| v62d_009 | E_best_of_family_combination | preserve velocity contrast while restoring spatial discipline | `command_generator_profile=velocity_contrast_spatial_guarded` | rejected_not_promoted | `v62d_009...step_015000000.pkl` | spatial discipline restored at 15M, but velocity worsened; run v62d meta-review before v62d_010 |
 
 ## v62d_001 Result
 
@@ -887,3 +887,75 @@ Launch the 30M candidate from scratch with the command recorded in the support
 decision packet. Do not promote or reject `v62d_009` until the 30M run,
 milestone eval, best-checkpoint audit, three-review analysis, decision packet,
 reader note, and registry/state update are complete.
+
+## v62d_009 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_009_velocity_contrast_spatial_guarded_generator_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_009_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_009_velocity_contrast_spatial_guarded_generator_30m/v62d_009_velocity_contrast_spatial_guarded_generator_30m_step_015000000.pkl
+```
+
+It is not promoted. The spatial guard fixed the v62d_008 position/cross-track
+regression at the best balanced checkpoint, but it also removed the velocity
+breakthrough.
+
+| Metric | v62c 7M | v62d_008 best | v62d_009 best |
+|---|---:|---:|---:|
+| reward | -4.8459 | -4.6294 | -4.8927 |
+| command position error | 0.6573 | 0.7943 | 0.6570 |
+| cross-track error | 0.5214 | 0.5449 | 0.4833 |
+| command velocity error | 0.7397 | 0.5708 | 0.7811 |
+| done mean | 0.00391 | 0.00219 | 0.00391 |
+| action delta | 0.000006 | 0.000016 | 0.000012 |
+| balanced score | -7.5365 | -7.4853 | -7.5566 |
+
+Promotion contract check:
+
+```text
+velocity improvement: fails, worsens by 5.59%
+position guardrail: passes, effectively tied
+cross-track guardrail: passes, improves by 7.31%
+done mean: tied
+action/logprob audit: ok
+```
+
+The 30M/final checkpoint had the best velocity inside this candidate:
+
+```text
+command_velocity_error = 0.7021
+```
+
+but that is only about `5.08%` better than v62c 7M, below the `10%-15%`
+promotion threshold, and it collapses spatial tracking:
+
+```text
+position error = 0.9161
+cross-track error = 0.7357
+```
+
+Post-audit on the best balanced checkpoint:
+
+```text
+action_clipping=ok
+action_sampling_logprob=ok
+advantage_scale=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=3.18e-7
+```
+
+The next move is not another immediate generator-only candidate. Run a v62d
+meta-review before v62d_010, focused on the velocity/spatial tradeoff and the
+repeated weak critic/value-scale pattern.
