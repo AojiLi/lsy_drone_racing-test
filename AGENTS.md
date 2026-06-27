@@ -357,6 +357,18 @@
   exploration pressure and/or correct clipped/squashed action PPO log-prob,
   add reward scaling or return/value normalization, then rerun the same bounded
   1M gate.
+- Current v62b PPO-signal audit finding:
+  `scripts/audit_v62b_brax_ppo_signals.py` checks action sampling/logprob,
+  advantage scale, reward scale, and initial action std before reward tuning.
+  Default `initial_log_std=-0.5` is not healthy: std `0.6065`, any-dim action
+  clipping `34.34%`, raw-vs-clipped logprob abs mean `0.3427`, advantage
+  mean/std `-36.41/33.90`, and reward mean `-3.21`. The v62 final checkpoint
+  still has any-dim clipping `40.12%` and logprob mismatch `0.3968`.
+  `initial_log_std=-2.0` made all audit verdicts pass in the same rollout
+  probe. Do not tune tracker reward yet. First run a narrow v62b PPO-signal fix
+  with lower initial std, lower or zero entropy pressure, and clipped/squashed
+  action logprob consistency; keep the clean no-gate reward unchanged until the
+  audit checks are healthy.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

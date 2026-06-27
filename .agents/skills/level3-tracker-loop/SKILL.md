@@ -682,3 +682,15 @@ v62b learning-signal fix: reduce exploration pressure, address the mismatch
 between unclipped Gaussian log-prob and clipped env actions or implement a
 squashed-action PPO path, add reward scaling/return normalization, then rerun
 the same bounded 1M pre/post eval gate.
+
+The v62b signal audit is now recorded in
+`experiments/level3_ppo_loop/analysis/2026-06-27_v62b_brax_ppo_signal_audit.md`.
+Before reward tuning, check action sampling/logprob consistency, advantage
+scale, reward scale, and initial std. The default `initial_log_std=-0.5` failed:
+std `0.6065`, any-dim action clipping `34.34%`, raw-vs-clipped logprob abs mean
+`0.3427`, advantage mean/std `-36.41/33.90`, and reward mean `-3.21`. The v62
+final checkpoint still had any-dim clipping `40.12%` and logprob mismatch
+`0.3968`. `initial_log_std=-2.0` passed all audit verdicts. Keep the clean
+no-gate reward unchanged for the next v62b fix; first lower initial std, lower
+or disable entropy pressure, and make the PPO logprob path consistent with the
+environment action.
