@@ -28,7 +28,8 @@ Under the 16-rollout tracker evaluation protocol:
 |---|---|---|---|---|---|---|
 | v62d_001 | A_value_return_stabilization | reduce critic target magnitude without changing rewards/obs | `value_target_scale=50.0`, `num_minibatches=8`, `update_epochs=4` | rejected_not_promoted | `v62d_001...step_005000000.pkl` | critic scale fixed, but velocity/done/action_delta regressed; next isolate conservative PPO |
 | v62d_002 | D_PPO_stabilizer | test value scale under conservative v62c-like PPO update pressure | `value_target_scale=50.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_002...step_005000000.pkl` | cleaner than v62d_001 but still worse than v62c 7M on velocity/done/action_delta; next switch to velocity reward numbers |
-| v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | support_passed_ready_to_train | pending | builder/checker passed; train from scratch 30M |
+| v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_003...step_020000000.pkl` | 2.4% velocity gain is below promotion threshold and action delta worsened 7.9x; next switch to generator distribution |
+| v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | pending builder/checker | proposed_support | pending | implement speed-bin balanced generator support before 30M training |
 
 ## v62d_001 Result
 
@@ -174,3 +175,89 @@ The checker verified default behavior is unchanged when the flag is omitted,
 the override only affects clean command reward `vel_error_coef`, checkpoint and
 summary metadata record the coefficient, and both `config/level3.toml` and
 `config/level3_tracker_free_space.toml` remain unchanged.
+
+## v62d_003 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_003_velocity_coef_2x_30m_analysis.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_003_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+lsy_drone_racing/control/checkpoints/v62d_003_velocity_coef_2x_30m/v62d_003_velocity_coef_2x_30m_step_020000000.pkl
+```
+
+It is not promoted. It is the best v62d_003 milestone, but it only improves
+velocity by `2.4%`, below the `10%-15%` promotion threshold, and action delta
+worsens by `7.9x` versus v62c 7M.
+
+| Metric | v62c 7M | v62d_003 best |
+|---|---:|---:|
+| reward | -4.8459 | -5.1643 |
+| command position error | 0.6573 | 0.6381 |
+| cross-track error | 0.5214 | 0.5022 |
+| command velocity error | 0.7397 | 0.7219 |
+| done mean | 0.00391 | 0.00391 |
+| action delta | 0.000006 | 0.000050 |
+| balanced score | -7.5365 | -7.7744 |
+
+Post-audit on the best checkpoint passed:
+
+```text
+action_clipping=ok
+action_sampling_logprob=ok
+advantage_scale=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=3.10e-7
+```
+
+The failure is behavioral rather than action-distribution math. A blunt
+velocity reward coefficient increase did not teach sufficient speed obedience.
+
+Next recommended candidate:
+
+```text
+v62d_004_speed_bin_balanced_generator
+```
+
+Switch to Family C generator velocity distribution:
+
+```text
+rebalance command generator toward explicit speed bins,
+longer constant-speed windows,
+brake ramps,
+low-speed-through windows,
+and recover-speed transitions.
+```
+
+Keep v62c-style PPO/reward settings unless the v62d_004 support packet
+explicitly changes them:
+
+```text
+command_vel_error_coef=default
+value_target_scale=1.0
+num_minibatches=4
+update_epochs=1
+```
+
+## v62d_004 Plan
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_004_hypothesis.md
+```
+
+This candidate changes generator semantics, so builder/checker support is
+required before any 30M training. It must keep `config/level3.toml` unchanged,
+keep actor observation `level3_reference_tracker_command_v3`, and avoid all
+gate/aperture/race/finish/stage rewards.
