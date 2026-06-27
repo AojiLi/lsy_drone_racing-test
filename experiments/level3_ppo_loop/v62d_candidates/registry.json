@@ -1209,7 +1209,7 @@
         "num_minibatches": 4,
         "update_epochs": 1
       },
-      "status": "planned_support_required",
+      "status": "support_passed_ready_to_train",
       "lane_name": "v62d_007_speedbin_velocity_coef_2x_30m",
       "train_from_scratch": true,
       "hypothesis_packet": "experiments/level3_ppo_loop/v62d_candidates/v62d_007_hypothesis.md",
@@ -1224,7 +1224,7 @@
         "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_007_speedbin_velocity_coef_2x_30m_20260627"
       },
       "support": {
-        "status": "not_started",
+        "status": "passed_all_green",
         "required_checks": [
           "config/level3.toml unchanged",
           "config/level3_tracker_free_space.toml unchanged",
@@ -1233,7 +1233,33 @@
           "reward_coefficients only override generic command vel_error_coef=1.2",
           "command_generator_profile=speed_bin_balanced",
           "action/logprob audit ok"
-        ]
+        ],
+        "packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_007_speedbin_velocity_coef_2x_support.md",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_007_support_decision.md",
+        "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_007_speedbin_velocity_coef_2x_support_summary.json",
+        "audit_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_007_speedbin_velocity_coef_2x_support_audit.json",
+        "checker": "ALL GREEN",
+        "support_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_007_speedbin_velocity_coef_2x_support/v62d_007_speedbin_velocity_coef_2x_support_final.pkl",
+        "wandb_url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_007_speedbin_velocity_coef_2x_support_20260627",
+        "actual_timesteps": 262144,
+        "steady_state_steps_per_s": 1182853.2979657676,
+        "steady_state_vs_pytorch_ratio": 29.719932109692653,
+        "final_eval": {
+          "action_abs_mean": 0.030905609019100666,
+          "action_delta_penalty": 1.7550876123095804e-05,
+          "command_position_error": 0.5121537633240223,
+          "command_velocity_error": 0.7791044190526009,
+          "cross_track_error": 0.3174210339784622,
+          "done_mean": 0.0,
+          "obs_abs_mean": 0.26204071566462517,
+          "reward_mean": -3.775528073310852
+        },
+        "action_clipping": "ok",
+        "action_sampling_logprob": "ok",
+        "advantage_scale": "large_monitor_only",
+        "reward_scale": "ok",
+        "stored_vs_env_logprob_abs_mean": 3.117438609478995e-07,
+        "sample_clip_fraction": 0.0
       }
     }
   ]

@@ -48,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         default="default",
         help="Command reference generator profile used for audit rollouts.",
     )
+    parser.add_argument(
+        "--command-vel-error-coef",
+        type=float,
+        help="Override the generic ReferenceCommandReward velocity-error coefficient.",
+    )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument(
@@ -298,6 +303,7 @@ def main() -> None:
             action_low,
             action_high,
             dt=1.0 / float(config.env.freq),
+            reward_coefficients=ppo_smoke.command_reward_coefficients(args),
             command_generator_profile=args.command_generator_profile,
         )
         rollout = build_audit_rollout_fn(
@@ -367,6 +373,7 @@ def main() -> None:
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
             "command_generator_profile": args.command_generator_profile,
+            "reward_coefficients": ppo_smoke.command_reward_coefficients(args),
             "scenarios": scenarios,
             "overall_findings": {
                 "default_or_first_scenario": (
