@@ -409,6 +409,21 @@
   loss remained high. Do not start 60M+ maturation yet. Next run
   `v62c_milestone_value_velocity_review`: rank saved 1M-9M milestones plus
   final and inspect W&B value/advantage/velocity curves.
+- Current v62c milestone value/velocity review:
+  `experiments/level3_ppo_loop/analysis/2026-06-27_v62c_milestone_value_velocity_review.md`
+  evaluated initial plus saved `1M-9M` and final checkpoints under the same
+  16-rollout tracker eval protocol. Best overall checkpoint is `7M`
+  (`..._step_007340032.pkl`), best position/cross-track checkpoint is `2M`,
+  and final is worse than `7M` on reward, position, cross-track, velocity, done
+  rate, and balanced score. Velocity obedience is the blocker: compared with
+  the initial policy, velocity error is already worse at `1M` and never
+  recovers below initial; within the trained curve, `7M` is the least-bad
+  velocity point and `8M` starts post-peak worsening. Do not launch 60M+
+  v62c maturation or resume from final. Next support lane is
+  `v62d_value_velocity_stabilization_support`: keep tanh-squashed Gaussian,
+  keep `level3_reference_tracker_command_v3`, keep no gate/aperture/race
+  rewards, and use builder/checker to address value/return scale and generic
+  command-velocity obedience before another bounded follow-up.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

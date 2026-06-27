@@ -728,3 +728,18 @@ that JAX/Brax v62c can learn and should remain the active speed backend.
 Do not jump to 60M+ yet: velocity error worsened, action magnitude/delta
 increased, and train-batch value loss stayed high. Next perform
 `v62c_milestone_value_velocity_review` before changing reward or budget.
+
+The v62c milestone value/velocity review is recorded in
+`experiments/level3_ppo_loop/analysis/2026-06-27_v62c_milestone_value_velocity_review.md`.
+Under the same 16-rollout tracker eval protocol, `7M` is the best overall
+checkpoint and the least-bad trained velocity checkpoint; `2M` is best only for
+position/cross-track; final is worse than `7M` on reward, position, cross-track,
+velocity, done rate, and balanced score. Velocity obedience remains the hard
+blocker: velocity error is already worse than initial at `1M` and never
+recovers below initial; within the trained curve, `8M` starts post-peak
+velocity worsening after the `7M` best point. Do not launch 60M+ v62c maturation
+or resume from final. Next use builder/checker for
+`v62d_value_velocity_stabilization_support`: keep the tanh-squashed action
+path, clean command-v3 observation, and no-gate/no-aperture/no-race reward
+boundary while addressing value/return scale and generic command-velocity
+obedience before another bounded follow-up.
