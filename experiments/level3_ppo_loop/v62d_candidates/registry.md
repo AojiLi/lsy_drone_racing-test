@@ -35,6 +35,7 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | rejected_not_promoted | `v62d_007...step_015000000.pkl` | best-of-family combination failed velocity objective and late drifted; next switch back to generator velocity distribution |
 | v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | rejected_not_promoted | `v62d_008...step_030000000.pkl` | velocity improved 22.84%, but position worsened 20.84%; next combine velocity contrast with spatial guards |
 | v62d_009 | E_best_of_family_combination | preserve velocity contrast while restoring spatial discipline | `command_generator_profile=velocity_contrast_spatial_guarded` | rejected_not_promoted | `v62d_009...step_015000000.pkl` | spatial discipline restored at 15M, but velocity worsened; run v62d meta-review before v62d_010 |
+| v62d_010 | E_best_of_family_combination | preserve velocity contrast while adding a generic cross-track reward guard | `command_generator_profile=velocity_contrast_constant_speed`, `trajectory_cross_track_coef=1.8` | rejected_not_promoted | `v62d_010...step_005000000.pkl` | 5M improves spatial but loses velocity; 30M improves velocity only by spatial collapse; run 10-candidate meta-review before v62d_011 |
 
 ## v62d_001 Result
 
@@ -959,3 +960,170 @@ stored_vs_env_logprob_abs_mean=3.18e-7
 The next move is not another immediate generator-only candidate. Run a v62d
 meta-review before v62d_010, focused on the velocity/spatial tradeoff and the
 repeated weak critic/value-scale pattern.
+
+## v62d Meta-Review Before v62d_010
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_meta_review_before_v62d_010.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_meta_review_launch_v62d_010.md
+```
+
+Additional generated per-command metrics:
+
+```text
+experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_meta_per_command_eval.json
+experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_meta_per_command_eval.csv
+```
+
+Conclusion:
+
+```text
+v62d_008 teaches velocity but loosens pass-through spatial tracking.
+v62d_009 restores spatial discipline but erases the velocity breakthrough.
+```
+
+The next candidate is:
+
+```text
+v62d_010_velocity_contrast_cross_track_guard
+```
+
+Planned single new knob:
+
+```text
+command_generator_profile=velocity_contrast_constant_speed
+trajectory_cross_track_coef=1.8
+```
+
+Rationale:
+
+```text
+Keep the v62d_008 velocity-contrast generator, because it is the only candidate
+that produced a real velocity improvement. Add a generic moving-trajectory
+cross-track reward guard instead of shrinking the generator again.
+```
+
+Required next step:
+
+```text
+builder/checker support before training, because the current trainer exposes
+only --command-vel-error-coef and must safely pass/record/audit
+trajectory_cross_track_coef.
+```
+
+## v62d_010 Support
+
+Support packet:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_010_velocity_contrast_cross_track_guard_support.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_010_support_decision.md
+```
+
+The support gate added safe clean-command reward coefficient overrides:
+
+```text
+--reward-coeff trajectory_cross_track_coef=1.8
+```
+
+Checker result:
+
+```text
+ALL GREEN
+```
+
+The checker verified:
+
+```text
+trajectory_cross_track_coef=1.8 is accepted
+gate_cross_bonus and obstacle_coef are rejected
+checkpoint metadata records reward_coefficients
+audit uses the same reward coefficients
+config/level3.toml unchanged
+config/level3_tracker_free_space.toml unchanged
+```
+
+## v62d_010 Result
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_010_velocity_contrast_cross_track_guard_30m_analysis.md
+```
+
+Subagent reviews:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_010_velocity_contrast_cross_track_guard_30m_subagent_reviews.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_010_decision.md
+```
+
+Best checkpoint inside this candidate:
+
+```text
+5M
+lsy_drone_racing/control/checkpoints/v62d_010_velocity_contrast_cross_track_guard_30m/v62d_010_velocity_contrast_cross_track_guard_30m_step_005000000.pkl
+```
+
+It is not promoted. The best balanced checkpoint improves spatial behavior
+under the velocity-contrast profile but loses velocity obedience:
+
+| Metric | v62c same-profile | v62d_010 best |
+|---|---:|---:|
+| reward | -5.4641 | -5.8413 |
+| command position error | 0.7297 | 0.6613 |
+| cross-track error | 0.5185 | 0.4946 |
+| command velocity error | 0.7954 | 0.9339 |
+| done mean | 0.00391 | 0.00586 |
+| balanced score | -8.3369 | -8.6649 |
+
+The best velocity checkpoint is `30M / final`:
+
+```text
+command_velocity_error = 0.6061
+```
+
+But it collapses spatial tracking:
+
+```text
+position error = 0.9581
+cross-track error = 0.7451
+balanced score = -9.9886
+```
+
+Post-run audit for the `5M` checkpoint:
+
+```text
+action_clipping=ok
+action_sampling_logprob=ok
+advantage_scale=ok
+initial_std=ok
+reward_scale=ok
+stored_vs_env_logprob_abs_mean=3.16e-7
+sample_clip_fraction=0.0
+```
+
+Conclusion:
+
+```text
+v62d_010 does not solve the velocity/spatial tradeoff. The current frontier
+remains v62c 7M. Because v62d has now completed 10 candidates, do not launch
+v62d_011 until a 10-candidate meta-review is written.
+```

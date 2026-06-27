@@ -1740,6 +1740,143 @@
       },
       "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_generator_30m_summary.json",
       "reason": "Spatial guards restored position/cross-track at 15M but lost the v62d_008 velocity breakthrough; the 30M velocity point improves only 5.08% and collapses spatial tracking."
+    },
+    {
+      "id": "v62d_010",
+      "family": "E_best_of_family_combination",
+      "hypothesis": "Preserve v62d_008 velocity-contrast constant-speed generator and add a generic trajectory_cross_track_coef=1.8 reward guard.",
+      "changed_knobs": {
+        "command_generator_profile": "velocity_contrast_constant_speed",
+        "trajectory_cross_track_coef": 1.8,
+        "command_vel_error_coef": "default",
+        "num_envs": 1024,
+        "num_steps": 32,
+        "value_target_scale": 1.0,
+        "num_minibatches": 4,
+        "update_epochs": 1
+      },
+      "status": "rejected_not_promoted",
+      "lane_name": "v62d_010_velocity_contrast_cross_track_guard_30m",
+      "training_command": "pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_010_velocity_contrast_cross_track_guard_30m --config level3_tracker_free_space.toml --seed 26501 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_010_velocity_contrast_cross_track_guard_30m/v62d_010_velocity_contrast_cross_track_guard_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_010_velocity_contrast_cross_track_guard_30m_summary.json --action-distribution tanh_squashed_gaussian --command-generator-profile velocity_contrast_constant_speed --reward-coeff trajectory_cross_track_coef=1.8 --value-target-scale 1.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_010_velocity_contrast_cross_track_guard_30m --wandb-run-id v62d_010_velocity_contrast_cross_track_guard_30m_20260627 --jax-device gpu",
+      "wandb": {
+        "project": "ADR-PPO-Racing-Level3",
+        "entity": "aojili77-technical-university-of-munich",
+        "run_id": "v62d_010_velocity_contrast_cross_track_guard_30m_20260627",
+        "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_010_velocity_contrast_cross_track_guard_30m_20260627"
+      },
+      "decision": "hold_for_10_candidate_meta_review_before_v62d011",
+      "next_recommendation": "Run the required 10-candidate v62d meta-review before v62d_011; do not continue v62d_010 to 60M or resume from final.",
+      "support": {
+        "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_010_velocity_contrast_cross_track_guard_support.md",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_010_support_decision.md",
+        "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_010_velocity_contrast_cross_track_guard_support_summary.json",
+        "audit_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_010_velocity_contrast_cross_track_guard_support_audit.json",
+        "support_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_010_velocity_contrast_cross_track_guard_support/v62d_010_velocity_contrast_cross_track_guard_support_final.pkl",
+        "wandb_url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_010_velocity_contrast_cross_track_guard_support_20260627",
+        "checker_result": "ALL GREEN",
+        "actual_timesteps": 262144,
+        "steady_state_steps_per_s": 1280159.1190988035,
+        "reward_coefficients": {
+          "trajectory_cross_track_coef": 1.8
+        },
+        "action_logprob_audit": "ok",
+        "config_level3_unchanged": true,
+        "config_tracker_free_space_unchanged": true
+      },
+      "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_010_velocity_contrast_cross_track_guard_30m_analysis.md",
+      "subagent_reviews": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_010_velocity_contrast_cross_track_guard_30m_subagent_reviews.md",
+      "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_010_decision.md",
+      "reader_note": "drone_notes/level3_loops/v62d-010-cross-track-guard.md",
+      "milestone_eval": {
+        "json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_010_velocity_contrast_cross_track_guard_30m_milestone_eval.json",
+        "csv": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_010_velocity_contrast_cross_track_guard_30m_milestone_eval.csv"
+      },
+      "best_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_010_velocity_contrast_cross_track_guard_30m/v62d_010_velocity_contrast_cross_track_guard_30m_step_005000000.pkl",
+      "best_checkpoint_label": "5M",
+      "best_metrics": {
+        "reward_mean": -5.841285049915314,
+        "command_position_error": 0.6613079383969307,
+        "cross_track_error": 0.49463352747261524,
+        "command_velocity_error": 0.9338932819664478,
+        "done_mean": 0.005859375,
+        "action_delta_penalty": 1.787618465637006e-05,
+        "balanced_score": -8.664900681762246,
+        "velocity_change_vs_v62c_7m": 0.26248990691127594,
+        "position_change_vs_v62c_7m": 0.006076513876055666,
+        "cross_change_vs_v62c_7m": -0.05135802717175762
+      },
+      "best_velocity_checkpoint": {
+        "checkpoint": "30M",
+        "checkpoint_file": "lsy_drone_racing/control/checkpoints/v62d_010_velocity_contrast_cross_track_guard_30m/v62d_010_velocity_contrast_cross_track_guard_30m_step_030000000.pkl",
+        "reward_mean": -6.454838156700134,
+        "command_position_error": 0.958114986307919,
+        "cross_track_error": 0.7451428649947047,
+        "command_velocity_error": 0.6060645785182714,
+        "done_mean": 0.004520416259765625,
+        "action_delta_penalty": 3.315354824451333e-05,
+        "balanced_score": -9.988601330390878,
+        "velocity_change_vs_v62c_7m": -0.1806875281246065,
+        "position_change_vs_v62c_7m": 0.45762197812677863,
+        "cross_change_vs_v62c_7m": 0.4290858953684666
+      },
+      "post_audit": {
+        "checkpoint": "lsy_drone_racing/control/checkpoints/v62d_010_velocity_contrast_cross_track_guard_30m/v62d_010_velocity_contrast_cross_track_guard_30m_step_005000000.pkl",
+        "checkpoint_global_step": 5013504,
+        "action_clipping": "ok",
+        "action_sampling_logprob": "ok",
+        "advantage_scale": "ok",
+        "reward_scale": "ok",
+        "initial_std": "ok",
+        "stored_vs_env_logprob_abs_mean": 3.1570380087941885e-07,
+        "sample_clip_fraction": 0.0,
+        "value_mean": -49.196129715885036,
+        "value_std": 0.04644391913616731,
+        "return_mean": -68.84292255633045,
+        "return_std": 7.398515938337025
+      },
+      "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_010_velocity_contrast_cross_track_guard_30m_summary.json",
+      "reason": "5M restores some spatial tracking but loses velocity obedience; 30M/final improves velocity only by sacrificing position/cross-track. The candidate does not beat v62c 7M or v62d_008."
     }
-  ]
+  ],
+  "meta_reviews": [
+    {
+      "id": "v62d_meta_review_before_v62d_010",
+      "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_meta_review_before_v62d_010.md",
+      "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_meta_review_launch_v62d_010.md",
+      "reader_note": "drone_notes/level3_loops/v62d-meta-review-before-v62d010.md",
+      "per_command_eval_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_meta_per_command_eval.json",
+      "per_command_eval_csv": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_meta_per_command_eval.csv",
+      "reviewed_candidates": [
+        "v62c_7m",
+        "v62d_003",
+        "v62d_004",
+        "v62d_008",
+        "v62d_009"
+      ],
+      "finding": "Velocity-contrast constant-speed generator is the only strong velocity signal; its failure is pass-through spatial drift. Spatial-guarded generator removes velocity gain.",
+      "decision_outcome": "launch_best_of_family_combination",
+      "next_candidate_id": "v62d_010",
+      "updated_at": "2026-06-27T17:08:42+02:00"
+    }
+  ],
+  "planned_next_candidate": {
+    "id": "v62d_10_candidate_meta_review_before_v62d_011",
+    "status": "required_meta_review_before_training",
+    "reason": "v62d candidate count reached 10 and v62d_010 did not promote; write a 10-candidate meta-review before choosing v62d_011.",
+    "review_scope": [
+      "v62c_7m",
+      "v62d_001",
+      "v62d_002",
+      "v62d_003",
+      "v62d_004",
+      "v62d_005",
+      "v62d_006",
+      "v62d_007",
+      "v62d_008",
+      "v62d_009",
+      "v62d_010"
+    ],
+    "must_not_launch_training_until_written": true,
+    "triggered_by_decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_010_decision.md"
+  }
 }

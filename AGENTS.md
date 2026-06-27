@@ -425,26 +425,31 @@
   rewards, and use builder/checker to address value/return scale and generic
   command-velocity obedience before another bounded follow-up.
 - Current v62d high-budget tracker search finding:
-  candidates `v62d_001` through `v62d_009` have completed. The current formal
+  candidates `v62d_001` through `v62d_010` have completed. The current formal
   comparison baseline remains `v62c 7M` unless a future decision explicitly
   promotes a candidate. `v62d_008_velocity_contrast_constant_speed_generator_30m`
-  is the first candidate with a strong velocity-obedience signal: best
-  checkpoint `30M` improves command velocity error by `22.84%`
-  (`0.7397 -> 0.5708`) and passes action/logprob audit. It is not promoted
-  because position error worsens by `20.84%` (`0.6573 -> 0.7943`), violating
-  the `<=5%` promotion guardrail. The next candidate is
-  `v62d_009_velocity_contrast_spatial_guarded_generator`: preserve v62d_008's
-  low/medium/high velocity contrast while adding speed-bin-like spatial guards.
-  Its support gate passed and the 30M run completed. Best balanced checkpoint
-  is `15M`: position error is effectively tied with v62c 7M (`0.6570` vs
-  `0.6573`) and cross-track improves (`0.4833` vs `0.5214`), but velocity
-  worsens (`0.7811` vs `0.7397`) and balanced score is slightly worse
-  (`-7.5566` vs `-7.5365`). The 30M/final checkpoint improves velocity only
-  about `5.08%`, below the `10%-15%` promotion threshold, while position and
-  cross-track collapse. Do not promote v62d_009 and do not continue it as-is.
-  The immediate next action is a v62d meta-review before v62d_010, comparing
-  v62c 7M plus v62d_003/v62d_004/v62d_008/v62d_009 per-command failures and
-  critic/value diagnostics to choose one next knob.
+  was the first candidate with a strong velocity-obedience signal: best
+  checkpoint `30M` improved command velocity error by `22.84%`
+  (`0.7397 -> 0.5708`) and passed action/logprob audit, but it was not
+  promoted because position error worsened by `20.84%` (`0.6573 -> 0.7943`).
+  `v62d_009_velocity_contrast_spatial_guarded_generator` restored spatial
+  behavior at `15M` but erased the velocity breakthrough. The meta-review
+  before v62d_010:
+  `experiments/level3_ppo_loop/analysis/2026-06-27_v62d_meta_review_before_v62d_010.md`
+  therefore launched `v62d_010_velocity_contrast_cross_track_guard`, keeping
+  `command_generator_profile=velocity_contrast_constant_speed` and adding one
+  generic no-gate reward override `trajectory_cross_track_coef=1.8`. The support
+  gate passed, but the 30M run did not promote. Best balanced checkpoint is
+  `5M`: position/cross-track improve under the same profile (`0.6613` /
+  `0.4946`), but velocity worsens to `0.9339` and balanced score is worse than
+  v62c. The `30M/final` checkpoint improves velocity to `0.6061` only by
+  spatial collapse (`position=0.9581`, `cross_track=0.7451`). The action path
+  remains clean, but the critic is still weak (`explained_variance ~= 5.8e-5`).
+  Do not promote v62d_010, do not continue it to 60M, and do not launch
+  v62d_011 yet. Because 10 v62d candidates have completed, the immediate next
+  action is `v62d_10_candidate_meta_review_before_v62d_011`: compare v62c 7M
+  plus `v62d_001` through `v62d_010`, then decide the next single knob or
+  support fix.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

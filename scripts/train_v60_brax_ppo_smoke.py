@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import pickle
 import time
@@ -28,6 +29,25 @@ LOG_2PI_E = float(np.log(2.0 * np.pi * np.e))
 LOG_2 = float(np.log(2.0))
 TANH_EPS = 1e-6
 ACTION_DISTRIBUTIONS = ("clipped_gaussian", "tanh_squashed_gaussian")
+COMMAND_REWARD_OVERRIDE_NAMES = frozenset(
+    {
+        "pos_error_coef",
+        "vel_error_coef",
+        "heading_coef",
+        "action_coef",
+        "action_delta_coef",
+        "progress_bonus",
+        "trajectory_cross_track_coef",
+        "trajectory_along_speed_coef",
+        "trajectory_reverse_speed_coef",
+        "trajectory_overshoot_coef",
+        "semantic_brake_speed_coef",
+        "semantic_slow_speed_coef",
+        "semantic_slow_stop_coef",
+        "semantic_recover_speed_coef",
+        "crash_penalty",
+    }
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,6 +81,16 @@ def parse_args() -> argparse.Namespace:
         help="Override the generic ReferenceCommandReward velocity-error coefficient.",
     )
     parser.add_argument(
+        "--reward-coeff",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help=(
+            "Override one clean generic command-tracker reward coefficient. May be "
+            "repeated. Gate, obstacle, race, finish, and stage coefficients are not allowed."
+        ),
+    )
+    parser.add_argument(
         "--action-distribution", choices=ACTION_DISTRIBUTIONS, default="tanh_squashed_gaussian"
     )
     parser.add_argument("--max-episode-steps", type=int, default=500)
@@ -86,8 +116,26 @@ def parse_args() -> argparse.Namespace:
 def command_reward_coefficients(args: argparse.Namespace) -> dict[str, float]:
     """Return explicit command-reward coefficient overrides for this run."""
     coefficients: dict[str, float] = {}
+    for raw in getattr(args, "reward_coeff", []) or []:
+        if "=" not in raw:
+            raise ValueError(f"--reward-coeff must use NAME=VALUE, got {raw!r}.")
+        name, value_text = raw.split("=", 1)
+        name = name.strip()
+        if name not in COMMAND_REWARD_OVERRIDE_NAMES:
+            allowed = ", ".join(sorted(COMMAND_REWARD_OVERRIDE_NAMES))
+            raise ValueError(f"Unsupported clean command reward coefficient {name!r}. Allowed: {allowed}")
+        value = float(value_text.strip())
+        if not math.isfinite(value):
+            raise ValueError(f"Reward coefficient {name!r} must be finite, got {value_text!r}.")
+        coefficients[name] = value
     if args.command_vel_error_coef is not None:
-        coefficients["vel_error_coef"] = float(args.command_vel_error_coef)
+        vel_value = float(args.command_vel_error_coef)
+        existing = coefficients.get("vel_error_coef")
+        if existing is not None and not math.isclose(existing, vel_value):
+            raise ValueError(
+                "--command-vel-error-coef conflicts with --reward-coeff vel_error_coef=..."
+            )
+        coefficients["vel_error_coef"] = vel_value
     return coefficients
 
 

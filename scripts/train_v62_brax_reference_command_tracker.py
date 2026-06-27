@@ -62,6 +62,16 @@ def parse_args() -> argparse.Namespace:
         help="Override the generic ReferenceCommandReward velocity-error coefficient.",
     )
     parser.add_argument(
+        "--reward-coeff",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help=(
+            "Override one clean generic command-tracker reward coefficient. May be "
+            "repeated. Gate, obstacle, race, finish, and stage coefficients are not allowed."
+        ),
+    )
+    parser.add_argument(
         "--action-distribution",
         choices=ppo_smoke.ACTION_DISTRIBUTIONS,
         default="tanh_squashed_gaussian",
