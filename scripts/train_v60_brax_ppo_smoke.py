@@ -25,6 +25,9 @@ DEFAULT_CHECKPOINT = (
 PYTORCH_FAST_PATH_STEPS_PER_S = 39_800.0
 LOG_2PI = float(np.log(2.0 * np.pi))
 LOG_2PI_E = float(np.log(2.0 * np.pi * np.e))
+LOG_2 = float(np.log(2.0))
+TANH_EPS = 1e-6
+ACTION_DISTRIBUTIONS = ("clipped_gaussian", "tanh_squashed_gaussian")
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +49,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vf-coef", type=float, default=0.5)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--initial-log-std", type=float, default=-2.0)
+    parser.add_argument(
+        "--action-distribution", choices=ACTION_DISTRIBUTIONS, default="tanh_squashed_gaussian"
+    )
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
     parser.add_argument("--eval-rollouts", type=int, default=2)
@@ -87,10 +93,22 @@ def init_actor_critic_params(
 def actor_critic_apply(
     params: dict[str, Any], obs: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Return action mean, log std, and scalar value."""
+    """Return bounded action mean, log std, and scalar value.
+
+    This preserves the original clipped-Gaussian policy interface. Newer
+    squashed-Gaussian code uses `actor_critic_apply_raw`.
+    """
+    raw_mean, log_std, value = actor_critic_apply_raw(params, obs)
+    return jnp.tanh(raw_mean).astype(jnp.float32), log_std, value
+
+
+def actor_critic_apply_raw(
+    params: dict[str, Any], obs: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Return pre-squash action mean, log std, and scalar value."""
     hidden = jnp.tanh(obs @ params["trunk"]["w1"] + params["trunk"]["b1"])
     hidden = jnp.tanh(hidden @ params["trunk"]["w2"] + params["trunk"]["b2"])
-    mean = jnp.tanh(hidden @ params["actor"]["w"] + params["actor"]["b"])
+    mean = hidden @ params["actor"]["w"] + params["actor"]["b"]
     value = jnp.squeeze(hidden @ params["critic"]["w"] + params["critic"]["b"], axis=-1)
     log_std = params["actor"]["log_std"]
     return mean.astype(jnp.float32), log_std.astype(jnp.float32), value.astype(jnp.float32)
@@ -108,19 +126,84 @@ def gaussian_entropy(log_std: jax.Array) -> jax.Array:
     return 0.5 * jnp.sum(LOG_2PI_E + 2.0 * log_std)
 
 
+def tanh_log_det_jacobian(pre_tanh_action: jax.Array) -> jax.Array:
+    """Stable log |det d tanh(x) / dx| per action dimension."""
+    return 2.0 * (LOG_2 - pre_tanh_action - jax.nn.softplus(-2.0 * pre_tanh_action))
+
+
+def atanh_clipped(action: jax.Array) -> jax.Array:
+    """Numerically safe inverse tanh for bounded env actions."""
+    clipped = jnp.clip(action, -1.0 + TANH_EPS, 1.0 - TANH_EPS)
+    return 0.5 * (jnp.log1p(clipped) - jnp.log1p(-clipped))
+
+
+def tanh_squashed_gaussian_logprob_from_raw(
+    pre_tanh_action: jax.Array, mean: jax.Array, log_std: jax.Array
+) -> jax.Array:
+    """Logprob of tanh(pre_tanh_action) under a squashed Gaussian."""
+    raw_logprob = gaussian_logprob(pre_tanh_action, mean, log_std)
+    correction = jnp.sum(tanh_log_det_jacobian(pre_tanh_action), axis=-1)
+    return raw_logprob - correction
+
+
+def tanh_squashed_gaussian_logprob(
+    action: jax.Array, mean: jax.Array, log_std: jax.Array
+) -> jax.Array:
+    """Logprob of a bounded action under a tanh-squashed Gaussian."""
+    return tanh_squashed_gaussian_logprob_from_raw(atanh_clipped(action), mean, log_std)
+
+
+def action_logprob(
+    action: jax.Array, mean: jax.Array, log_std: jax.Array, action_distribution: str
+) -> jax.Array:
+    """Return policy logprob for an env action under the selected distribution."""
+    if action_distribution == "tanh_squashed_gaussian":
+        return tanh_squashed_gaussian_logprob(action, mean, log_std)
+    return gaussian_logprob(action, mean, log_std)
+
+
+def policy_apply_for_distribution(
+    params: dict[str, Any], obs: jax.Array, action_distribution: str
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Return the policy location matching the selected action distribution."""
+    if action_distribution == "tanh_squashed_gaussian":
+        return actor_critic_apply_raw(params, obs)
+    return actor_critic_apply(params, obs)
+
+
+def deterministic_env_action(mean: jax.Array, action_distribution: str) -> jax.Array:
+    """Return the deterministic env action for a policy location."""
+    if action_distribution == "tanh_squashed_gaussian":
+        return jnp.tanh(mean)
+    return jnp.clip(mean, -1.0, 1.0)
+
+
+def action_logprob_mode(action_distribution: str) -> str:
+    """Return a metadata label for the selected action/logprob path."""
+    if action_distribution == "tanh_squashed_gaussian":
+        return "tanh_squashed_gaussian_logprob_with_jacobian"
+    return "env_clipped_action_gaussian_logprob"
+
+
 def sample_env_action(
-    mean: jax.Array, log_std: jax.Array, key: jax.Array
+    mean: jax.Array, log_std: jax.Array, key: jax.Array, action_distribution: str
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """Sample an action and return the exact bounded action used by the env.
 
-    PPO stores/logprobs the action after env-bound clipping. With low initial
-    std this clipping should be rare, but when it happens the batch action still
-    matches what the environment executed.
+    PPO stores/logprobs the env action. For `tanh_squashed_gaussian`, `mean`
+    and `action_sample` live in pre-tanh space and `action_for_env` is the
+    squashed action. For `clipped_gaussian`, `action_sample` is clipped before
+    execution and the clipped env action is used for the stored logprob.
     """
     action_sample = mean + jnp.exp(log_std) * jax.random.normal(key, mean.shape)
-    action_for_env = jnp.clip(action_sample, -1.0, 1.0)
-    logprob = gaussian_logprob(action_for_env, mean, log_std)
-    clip_mask = (jnp.abs(action_sample) > 1.0).astype(jnp.float32)
+    if action_distribution == "tanh_squashed_gaussian":
+        action_for_env = jnp.tanh(action_sample)
+        logprob = tanh_squashed_gaussian_logprob_from_raw(action_sample, mean, log_std)
+        clip_mask = jnp.zeros_like(action_for_env)
+    else:
+        action_for_env = jnp.clip(action_sample, -1.0, 1.0)
+        logprob = gaussian_logprob(action_for_env, mean, log_std)
+        clip_mask = (jnp.abs(action_sample) > 1.0).astype(jnp.float32)
     return action_sample, action_for_env, logprob, clip_mask
 
 
@@ -205,7 +288,9 @@ def build_command_env_step(
     return env_step
 
 
-def build_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
+def build_rollout_fn(
+    env_step: Any, *, num_steps: int, action_distribution: str = "clipped_gaussian"
+) -> Any:
     """Build a stochastic PPO rollout scan."""
 
     def rollout_step(
@@ -214,12 +299,12 @@ def build_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
         state, key = carry
         key, action_key, plan_key = jax.random.split(key, 3)
         obs = state.obs
-        mean, log_std, value = actor_critic_apply(params, obs)
+        mean, log_std, value = policy_apply_for_distribution(params, obs, action_distribution)
         action_sample, action_for_env, logprob, clip_mask = sample_env_action(
-            mean, log_std, action_key
+            mean, log_std, action_key, action_distribution
         )
         raw_logprob = gaussian_logprob(action_sample, mean, log_std)
-        env_logprob_recomputed = gaussian_logprob(action_for_env, mean, log_std)
+        env_logprob_recomputed = action_logprob(action_for_env, mean, log_std, action_distribution)
         next_state, metrics = env_step(state, action_for_env, plan_key)
         transition = {
             "obs": obs,
@@ -258,7 +343,9 @@ def build_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
     return rollout
 
 
-def build_eval_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
+def build_eval_rollout_fn(
+    env_step: Any, *, num_steps: int, action_distribution: str = "clipped_gaussian"
+) -> Any:
     """Build a deterministic short evaluation rollout."""
 
     def rollout_step(
@@ -266,8 +353,10 @@ def build_eval_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
     ) -> tuple[tuple[Any, jax.Array], dict[str, jax.Array]]:
         state, key = carry
         key, plan_key = jax.random.split(key)
-        mean, _log_std, _value = actor_critic_apply(params, state.obs)
-        action_for_env = jnp.clip(mean, -1.0, 1.0)
+        mean, _log_std, _value = policy_apply_for_distribution(
+            params, state.obs, action_distribution
+        )
+        action_for_env = deterministic_env_action(mean, action_distribution)
         next_state, metrics = env_step(state, action_for_env, plan_key)
         return (next_state, key), metrics
 
@@ -341,6 +430,7 @@ def build_update_fn(
     clip_coef: float,
     ent_coef: float,
     vf_coef: float,
+    action_distribution: str = "clipped_gaussian",
 ) -> Any:
     """Build the clipped PPO update."""
     minibatch_size = batch_size // num_minibatches
@@ -348,8 +438,10 @@ def build_update_fn(
     def loss_fn(
         params: dict[str, Any], batch: dict[str, jax.Array]
     ) -> tuple[jax.Array, dict[str, jax.Array]]:
-        mean, log_std, new_values = actor_critic_apply(params, batch["obs"])
-        new_logprobs = gaussian_logprob(batch["actions"], mean, log_std)
+        mean, log_std, new_values = policy_apply_for_distribution(
+            params, batch["obs"], action_distribution
+        )
+        new_logprobs = action_logprob(batch["actions"], mean, log_std, action_distribution)
         entropy = gaussian_entropy(log_std)
         logratio = new_logprobs - batch["logprobs"]
         ratio = jnp.exp(logratio)
@@ -425,7 +517,7 @@ def compute_advantage_batch(
     gae_lambda: float,
 ) -> tuple[dict[str, jax.Array], dict[str, jax.Array]]:
     """Compute flattened PPO batch plus rollout summary metrics."""
-    _mean, _log_std, next_value = actor_critic_apply(params, final_obs)
+    _mean, _log_std, next_value = actor_critic_apply_raw(params, final_obs)
     advantages, returns = compute_gae(
         transitions["rewards"],
         transitions["dones"],
@@ -524,7 +616,8 @@ def save_checkpoint(
             "wandb_run_id": args.wandb_run_id,
             "initial_log_std": float(args.initial_log_std),
             "ent_coef": float(args.ent_coef),
-            "action_logprob_mode": "env_clipped_action_gaussian_logprob",
+            "action_distribution": args.action_distribution,
+            "action_logprob_mode": action_logprob_mode(args.action_distribution),
         },
         "metrics": metrics,
     }
@@ -590,8 +683,12 @@ def main() -> None:
             action_high,
             dt=1.0 / float(config.env.freq),
         )
-        rollout = build_rollout_fn(env_step, num_steps=int(args.num_steps))
-        eval_rollout = build_eval_rollout_fn(env_step, num_steps=int(args.num_steps))
+        rollout = build_rollout_fn(
+            env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
+        )
+        eval_rollout = build_eval_rollout_fn(
+            env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
+        )
         ppo_update = build_update_fn(
             optimizer,
             batch_size=batch_size,
@@ -600,6 +697,7 @@ def main() -> None:
             clip_coef=float(args.clip_coef),
             ent_coef=float(args.ent_coef),
             vf_coef=float(args.vf_coef),
+            action_distribution=args.action_distribution,
         )
 
         wandb_run = setup_wandb(args) if args.wandb_enabled else None
@@ -617,6 +715,8 @@ def main() -> None:
                 "actual_timesteps": actual_timesteps,
                 "num_minibatches": int(args.num_minibatches),
                 "update_epochs": int(args.update_epochs),
+                "action_distribution": args.action_distribution,
+                "action_logprob_mode": action_logprob_mode(args.action_distribution),
             }
         )
 

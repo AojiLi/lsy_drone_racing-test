@@ -384,6 +384,18 @@
   tuning. Next inspect the saved 1M-9M milestones plus final and review
   value/return scale before deciding whether to continue v62b, add
   value/return normalization, or tune command reward numbers.
+- Current v62c action-distribution decision: the user selected the formal
+  long-training route, so future v62 Brax/JAX tracker training should default
+  to `tanh_squashed_gaussian` with a tanh-Jacobian logprob correction. v62b was
+  useful as a clipped-Gaussian learning-signal fix, but it is now the fallback,
+  not the preferred long-training baseline. The support packet
+  `experiments/level3_ppo_loop/analysis/2026-06-27_v62c_tanh_squashed_gaussian_support.md`
+  passed smoke/audit checks: action clipping `0.0`, stored-vs-env logprob abs
+  mean about `3.21e-7`, and unchanged `config/level3.toml` /
+  `config/level3_tracker_free_space.toml`. Do not resume v62b clipped-Gaussian
+  checkpoints into v62c unless a future decision explicitly approves a
+  cross-distribution experiment. Next run a bounded v62c 10M W&B chunk before
+  any 60M+ maturation and monitor value/advantage scale.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

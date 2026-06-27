@@ -51,6 +51,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--skip-checkpoint", action="store_true")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--action-distribution",
+        choices=ppo_smoke.ACTION_DISTRIBUTIONS,
+        default="tanh_squashed_gaussian",
+    )
     parser.add_argument("--jax-device", default="gpu")
     return parser.parse_args()
 
@@ -84,7 +89,7 @@ def scalar_stats(values: np.ndarray) -> dict[str, float]:
     }
 
 
-def build_audit_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
+def build_audit_rollout_fn(env_step: Any, *, num_steps: int, action_distribution: str) -> Any:
     """Build a rollout scan that preserves sampled and clipped action diagnostics."""
 
     def rollout_step(
@@ -92,12 +97,16 @@ def build_audit_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
     ) -> tuple[tuple[Any, jax.Array], dict[str, jax.Array]]:
         state, key = carry
         key, action_key, plan_key = jax.random.split(key, 3)
-        mean, log_std, value = ppo_smoke.actor_critic_apply(params, state.obs)
+        mean, log_std, value = ppo_smoke.policy_apply_for_distribution(
+            params, state.obs, action_distribution
+        )
         action_sample, action_for_env, stored_logprob, clip_mask = ppo_smoke.sample_env_action(
-            mean, log_std, action_key
+            mean, log_std, action_key, action_distribution
         )
         raw_logprob = ppo_smoke.gaussian_logprob(action_sample, mean, log_std)
-        clipped_logprob = ppo_smoke.gaussian_logprob(action_for_env, mean, log_std)
+        env_action_logprob = ppo_smoke.action_logprob(
+            action_for_env, mean, log_std, action_distribution
+        )
         next_state, metrics = env_step(state, action_for_env, plan_key)
         transition = {
             "obs": state.obs,
@@ -107,7 +116,7 @@ def build_audit_rollout_fn(env_step: Any, *, num_steps: int) -> Any:
             "action_for_env": action_for_env,
             "clip_mask": clip_mask,
             "raw_logprob": raw_logprob,
-            "clipped_logprob": clipped_logprob,
+            "env_action_logprob": env_action_logprob,
             "stored_logprob": stored_logprob,
             "values": value,
             "rewards": next_state.reward,
@@ -142,7 +151,7 @@ def compute_advantage_summary(
     gae_lambda: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute raw advantages and returns."""
-    _mean, _log_std, next_value = ppo_smoke.actor_critic_apply(params, final_obs)
+    _mean, _log_std, next_value = ppo_smoke.actor_critic_apply_raw(params, final_obs)
     advantages, returns = ppo_smoke.compute_gae(
         transitions["rewards"],
         transitions["dones"],
@@ -191,10 +200,10 @@ def summarize_rollout(
     action_for_env = np.asarray(transitions["action_for_env"])
     clip_mask = np.asarray(transitions["clip_mask"], dtype=bool)
     raw_logprob = np.asarray(transitions["raw_logprob"])
-    clipped_logprob = np.asarray(transitions["clipped_logprob"])
+    env_action_logprob = np.asarray(transitions["env_action_logprob"])
     stored_logprob = np.asarray(transitions["stored_logprob"])
-    raw_vs_clipped = raw_logprob - clipped_logprob
-    stored_vs_env = stored_logprob - clipped_logprob
+    raw_vs_env_action = raw_logprob - env_action_logprob
+    stored_vs_env = stored_logprob - env_action_logprob
     sample_delta = action_sample - action_for_env
     log_std = np.asarray(transitions["log_std"])
     rewards = np.asarray(transitions["rewards"])
@@ -211,13 +220,13 @@ def summarize_rollout(
             "mean_abs_env_action": float(np.mean(np.abs(action_for_env))),
             "mean_abs_sample_minus_env_action": float(np.mean(np.abs(sample_delta))),
             "p95_abs_sample_minus_env_action": percentile(np.abs(sample_delta), 95),
-            "raw_vs_clipped_logprob_mean": float(np.mean(raw_vs_clipped)),
-            "raw_vs_clipped_logprob_abs_mean": float(np.mean(np.abs(raw_vs_clipped))),
-            "raw_vs_clipped_logprob_abs_p95": percentile(np.abs(raw_vs_clipped), 95),
+            "raw_vs_env_action_logprob_mean": float(np.mean(raw_vs_env_action)),
+            "raw_vs_env_action_logprob_abs_mean": float(np.mean(np.abs(raw_vs_env_action))),
+            "raw_vs_env_action_logprob_abs_p95": percentile(np.abs(raw_vs_env_action), 95),
             "stored_vs_env_logprob_abs_mean": float(np.mean(np.abs(stored_vs_env))),
             "stored_vs_env_logprob_abs_p95": percentile(np.abs(stored_vs_env), 95),
             "raw_logprob": scalar_stats(raw_logprob),
-            "clipped_action_logprob_proxy": scalar_stats(clipped_logprob),
+            "env_action_logprob": scalar_stats(env_action_logprob),
             "stored_logprob": scalar_stats(stored_logprob),
         },
         "advantage": scalar_stats(advantages),
@@ -272,7 +281,9 @@ def main() -> None:
             action_high,
             dt=1.0 / float(config.env.freq),
         )
-        rollout = build_audit_rollout_fn(env_step, num_steps=int(args.num_steps))
+        rollout = build_audit_rollout_fn(
+            env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
+        )
         keys = jax.random.split(jax.random.PRNGKey(args.seed), 6)
         base_param_key = keys[0]
         plan_key = keys[1]
@@ -323,6 +334,8 @@ def main() -> None:
             "num_envs": int(args.num_envs),
             "num_steps": int(args.num_steps),
             "seed": int(args.seed),
+            "action_distribution": args.action_distribution,
+            "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
             "scenarios": scenarios,
             "overall_findings": {
                 "default_or_first_scenario": (

@@ -706,3 +706,14 @@ position error `0.5153 -> 0.4006`, cross-track error `0.4351 -> 0.2803`, and
 done mean `0.00417 -> 0.0`. Velocity error worsened and value/advantage scale
 remained high in the final training batch. Next, evaluate saved milestones and
 inspect value/return scale before reward tuning.
+
+The v62c formal action-distribution support is recorded in
+`experiments/level3_ppo_loop/analysis/2026-06-27_v62c_tanh_squashed_gaussian_support.md`.
+The user chose the formal long-training path: use `tanh_squashed_gaussian`
+with tanh-Jacobian logprob correction as the preferred v62 action distribution.
+Keep `clipped_gaussian` only as an explicit compatibility fallback. The v62c
+smoke/audit checks showed action clipping `0.0`, stored-vs-env logprob abs mean
+about `3.21e-7`, and unchanged Level3/tracker configs. Do not resume v62b
+clipped-Gaussian checkpoints into v62c unless a future decision explicitly
+approves a cross-distribution experiment. The next step is a bounded v62c 10M
+W&B run, not immediate 60M+ maturation or reward tuning.

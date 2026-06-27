@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vf-coef", type=float, default=0.5)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--initial-log-std", type=float, default=-2.0)
+    parser.add_argument(
+        "--action-distribution",
+        choices=ppo_smoke.ACTION_DISTRIBUTIONS,
+        default="tanh_squashed_gaussian",
+    )
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--rp-limit-deg", type=float, default=50.0)
     parser.add_argument("--eval-rollouts", type=int, default=4)
@@ -121,7 +126,8 @@ def save_lane_checkpoint(
             "wandb_run_id": args.wandb_run_id,
             "initial_log_std": float(args.initial_log_std),
             "ent_coef": float(args.ent_coef),
-            "action_logprob_mode": "env_clipped_action_gaussian_logprob",
+            "action_distribution": args.action_distribution,
+            "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
         },
         "metrics": jsonable(metrics),
     }
@@ -237,8 +243,12 @@ def main() -> None:
             action_high,
             dt=1.0 / float(config.env.freq),
         )
-        rollout = ppo_smoke.build_rollout_fn(env_step, num_steps=int(args.num_steps))
-        eval_rollout = ppo_smoke.build_eval_rollout_fn(env_step, num_steps=int(args.num_steps))
+        rollout = ppo_smoke.build_rollout_fn(
+            env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
+        )
+        eval_rollout = ppo_smoke.build_eval_rollout_fn(
+            env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
+        )
         ppo_update = ppo_smoke.build_update_fn(
             optimizer,
             batch_size=batch_size,
@@ -247,6 +257,7 @@ def main() -> None:
             clip_coef=float(args.clip_coef),
             ent_coef=float(args.ent_coef),
             vf_coef=float(args.vf_coef),
+            action_distribution=args.action_distribution,
         )
         wandb_run = ppo_smoke.setup_wandb(args) if args.wandb_enabled else None
         eval_key = keys[5]
@@ -283,7 +294,8 @@ def main() -> None:
                 "initial_global_step": int(global_step),
                 "initial_log_std": float(args.initial_log_std),
                 "ent_coef": float(args.ent_coef),
-                "action_logprob_mode": "env_clipped_action_gaussian_logprob",
+                "action_distribution": args.action_distribution,
+                "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
                 "initial_eval": initial_eval,
             }
         )
@@ -376,7 +388,8 @@ def main() -> None:
             "checkpoint": str(args.checkpoint_path),
             "initial_log_std": float(args.initial_log_std),
             "ent_coef": float(args.ent_coef),
-            "action_logprob_mode": "env_clipped_action_gaussian_logprob",
+            "action_distribution": args.action_distribution,
+            "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
         }
         save_lane_checkpoint(
             args.checkpoint_path,
