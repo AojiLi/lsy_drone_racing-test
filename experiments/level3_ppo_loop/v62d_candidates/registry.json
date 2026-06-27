@@ -1676,17 +1676,31 @@
         "num_minibatches": 4,
         "update_epochs": 1
       },
-      "status": "planned_support_required",
+      "status": "support_passed_ready_to_train",
       "lane_name": "v62d_009_velocity_contrast_spatial_guarded_generator_30m",
-      "training_command": null,
+      "training_command": "pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_009_velocity_contrast_spatial_guarded_generator_30m --config level3_tracker_free_space.toml --seed 26491 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_009_velocity_contrast_spatial_guarded_generator_30m/v62d_009_velocity_contrast_spatial_guarded_generator_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_generator_30m_summary.json --action-distribution tanh_squashed_gaussian --command-generator-profile velocity_contrast_spatial_guarded --value-target-scale 1.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_009_velocity_contrast_spatial_guarded_generator_30m --wandb-run-id v62d_009_velocity_contrast_spatial_guarded_generator_30m_20260627 --jax-device gpu",
       "wandb": {
         "project": "ADR-PPO-Racing-Level3",
         "entity": "aojili77-technical-university-of-munich",
         "run_id": "v62d_009_velocity_contrast_spatial_guarded_generator_30m_20260627",
         "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_009_velocity_contrast_spatial_guarded_generator_30m_20260627"
       },
-      "decision": null,
-      "next_recommendation": null
+      "decision": "support_passed_launch_30m_from_scratch",
+      "next_recommendation": null,
+      "support": {
+        "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_009_velocity_contrast_spatial_guarded_support.md",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_009_support_decision.md",
+        "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_support_summary.json",
+        "audit_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_009_velocity_contrast_spatial_guarded_support_audit.json",
+        "support_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_009_velocity_contrast_spatial_guarded_support/v62d_009_velocity_contrast_spatial_guarded_support_final.pkl",
+        "wandb_url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_009_velocity_contrast_spatial_guarded_support_20260627",
+        "checker_result": "ALL GREEN",
+        "actual_timesteps": 262144,
+        "steady_state_steps_per_s": 1208480.8075698307,
+        "action_logprob_audit": "ok",
+        "config_level3_unchanged": true,
+        "config_tracker_free_space_unchanged": true
+      }
     }
   ]
 }

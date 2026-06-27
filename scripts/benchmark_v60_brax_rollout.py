@@ -30,6 +30,7 @@ COMMAND_GENERATOR_PROFILES = (
     "default",
     "speed_bin_balanced",
     "velocity_contrast_constant_speed",
+    "velocity_contrast_spatial_guarded",
 )
 
 
@@ -191,7 +192,11 @@ def sample_command_plans(
     num_envs = origin.shape[0]
     if command_generator_profile not in COMMAND_GENERATOR_PROFILES:
         raise ValueError(f"Unknown command generator profile: {command_generator_profile}")
-    key_count = 27 if command_generator_profile == "velocity_contrast_constant_speed" else 24
+    velocity_contrast_profile = command_generator_profile in (
+        "velocity_contrast_constant_speed",
+        "velocity_contrast_spatial_guarded",
+    )
+    key_count = 27 if velocity_contrast_profile else 24
     if command_generator_profile == "default":
         key_count = 18
     keys = jax.random.split(key, key_count)
@@ -200,7 +205,7 @@ def sample_command_plans(
     side = jnp.stack([-forward[:, 1], forward[:, 0], jnp.zeros_like(yaw)], axis=1)
     up = jnp.tile(jnp.array([[0.0, 0.0, 1.0]], dtype=jnp.float32), (num_envs, 1))
 
-    if command_generator_profile == "velocity_contrast_constant_speed":
+    if velocity_contrast_profile:
         contrast_bin = jax.random.randint(keys[1], (num_envs,), minval=0, maxval=3)
 
         def contrast_uniform(
@@ -229,18 +234,33 @@ def sample_command_plans(
             keys[6],
             jnp.array([[0.34, 0.46], [0.50, 0.64], [0.68, 0.86]], dtype=jnp.float32),
         )
-        pass_dist = jax.random.uniform(keys[7], (num_envs,), minval=0.62, maxval=1.02)
-        slow_dist = jax.random.uniform(keys[8], (num_envs,), minval=0.40, maxval=0.74)
-        recover_dist = jax.random.uniform(keys[9], (num_envs,), minval=0.55, maxval=0.95)
-        pass_curve = jax.random.uniform(keys[10], (num_envs,), minval=-0.16, maxval=0.16)
-        slow_curve = jax.random.uniform(keys[11], (num_envs,), minval=-0.07, maxval=0.07)
-        recover_turn = jax.random.uniform(keys[12], (num_envs,), minval=-0.48, maxval=0.48)
+        if command_generator_profile == "velocity_contrast_spatial_guarded":
+            pass_dist = jax.random.uniform(keys[7], (num_envs,), minval=0.44, maxval=0.76)
+            slow_dist = jax.random.uniform(keys[8], (num_envs,), minval=0.32, maxval=0.62)
+            recover_dist = jax.random.uniform(keys[9], (num_envs,), minval=0.42, maxval=0.78)
+            pass_curve = jax.random.uniform(keys[10], (num_envs,), minval=-0.14, maxval=0.14)
+            slow_curve = jax.random.uniform(keys[11], (num_envs,), minval=-0.06, maxval=0.06)
+            recover_turn = jax.random.uniform(keys[12], (num_envs,), minval=-0.45, maxval=0.45)
+        else:
+            pass_dist = jax.random.uniform(keys[7], (num_envs,), minval=0.62, maxval=1.02)
+            slow_dist = jax.random.uniform(keys[8], (num_envs,), minval=0.40, maxval=0.74)
+            recover_dist = jax.random.uniform(keys[9], (num_envs,), minval=0.55, maxval=0.95)
+            pass_curve = jax.random.uniform(keys[10], (num_envs,), minval=-0.16, maxval=0.16)
+            slow_curve = jax.random.uniform(keys[11], (num_envs,), minval=-0.07, maxval=0.07)
+            recover_turn = jax.random.uniform(keys[12], (num_envs,), minval=-0.48, maxval=0.48)
         altitude_keys = (keys[13], keys[14], keys[15], keys[16], keys[17], keys[18])
-        hold_steps = jax.random.randint(keys[19], (num_envs,), minval=46, maxval=81)
-        decel_fraction = 0.70
-        pass_decel_min_steps = 42
-        slow_min_steps = 62
-        recover_min_steps = 56
+        if command_generator_profile == "velocity_contrast_spatial_guarded":
+            hold_steps = jax.random.randint(keys[19], (num_envs,), minval=44, maxval=77)
+            decel_fraction = 0.44
+            pass_decel_min_steps = 38
+            slow_min_steps = 58
+            recover_min_steps = 52
+        else:
+            hold_steps = jax.random.randint(keys[19], (num_envs,), minval=46, maxval=81)
+            decel_fraction = 0.70
+            pass_decel_min_steps = 42
+            slow_min_steps = 62
+            recover_min_steps = 56
     elif command_generator_profile == "speed_bin_balanced":
         pass_speed = uniform_from_bins(
             keys[1],

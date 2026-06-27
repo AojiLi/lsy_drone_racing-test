@@ -435,8 +435,15 @@
   the `<=5%` promotion guardrail. The next candidate is
   `v62d_009_velocity_contrast_spatial_guarded_generator`: preserve v62d_008's
   low/medium/high velocity contrast while adding speed-bin-like spatial guards.
-  Use builder/checker before any 30M run because this changes generator
-  semantics.
+  Its support gate has passed: the new generator profile is exposed through
+  `COMMAND_GENERATOR_PROFILES`, support smoke completed `262,144` steps, the
+  checkpoint metadata records `level3_reference_tracker_command_v3`,
+  `tanh_squashed_gaussian`, `command_generator_profile=velocity_contrast_spatial_guarded`,
+  and `reward_coefficients={}`, action/logprob audit passed, and read-only
+  checker reported `ALL GREEN`. The immediate next action is to launch the
+  approved 30M v62d_009 candidate from scratch, then evaluate 5M milestones,
+  audit the best checkpoint, run the three required reviews, and decide whether
+  it beats the v62c 7M frontier.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

@@ -34,7 +34,7 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | rejected_not_promoted | `v62d_006...step_020000000.pkl` | valid long-rollout run, but no velocity/frontier improvement; next combine speed-bin generator with velocity coef |
 | v62d_007 | E_best_of_family_combination | combine speed-bin generator with direct velocity-obedience coefficient | `command_generator_profile=speed_bin_balanced`, `command_vel_error_coef=1.2` | rejected_not_promoted | `v62d_007...step_015000000.pkl` | best-of-family combination failed velocity objective and late drifted; next switch back to generator velocity distribution |
 | v62d_008 | C_generator_velocity_distribution | force desired-speed obedience through paired constant-speed contrast windows | `command_generator_profile=velocity_contrast_constant_speed` | rejected_not_promoted | `v62d_008...step_030000000.pkl` | velocity improved 22.84%, but position worsened 20.84%; next combine velocity contrast with spatial guards |
-| v62d_009 | E_best_of_family_combination | preserve velocity contrast while restoring spatial discipline | `command_generator_profile=velocity_contrast_spatial_guarded` | planned_support_required | pending | implement guarded generator profile with builder/checker before 30M |
+| v62d_009 | E_best_of_family_combination | preserve velocity contrast while restoring spatial discipline | `command_generator_profile=velocity_contrast_spatial_guarded` | support_passed_ready_to_train | pending | support passed; launch approved 30M command from scratch |
 
 ## v62d_001 Result
 
@@ -822,3 +822,68 @@ num_steps=32
 ```
 
 Do not launch 30M until support smoke and checker pass.
+
+## v62d_009 Support
+
+Support packet:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_009_velocity_contrast_spatial_guarded_support.md
+```
+
+Support decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_009_support_decision.md
+```
+
+The support change adds a new explicit generator profile:
+
+```text
+command_generator_profile=velocity_contrast_spatial_guarded
+```
+
+It keeps v62d_008's low/medium/high velocity contrast while shortening
+pass/slow/recover distances and moving the deceleration fraction toward the
+speed-bin family.
+
+Support smoke completed `262,144` steps with:
+
+```text
+actual_timesteps=262144
+steady_state_steps_per_s=1208481
+action_clipping=ok
+action_sampling_logprob=ok
+stored_vs_env_logprob_abs_mean ~= 3.16e-7
+reward_coefficients={}
+```
+
+The support checkpoint metadata records:
+
+```text
+observation_layout=level3_reference_tracker_command_v3
+action_distribution=tanh_squashed_gaussian
+command_generator_profile=velocity_contrast_spatial_guarded
+reward_coefficients={}
+num_envs=1024
+num_steps=32
+value_target_scale=1.0
+```
+
+Both configs remain unchanged:
+
+```text
+config/level3.toml
+config/level3_tracker_free_space.toml
+```
+
+Read-only checker result:
+
+```text
+ALL GREEN
+```
+
+Launch the 30M candidate from scratch with the command recorded in the support
+decision packet. Do not promote or reject `v62d_009` until the 30M run,
+milestone eval, best-checkpoint audit, three-review analysis, decision packet,
+reader note, and registry/state update are complete.
