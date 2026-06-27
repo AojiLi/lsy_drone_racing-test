@@ -31,7 +31,7 @@ Under the 16-rollout tracker evaluation protocol:
 | v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_003...step_020000000.pkl` | 2.4% velocity gain is below promotion threshold and action delta worsened 7.9x; next switch to generator distribution |
 | v62d_004 | C_generator_velocity_distribution | rebalance command generator speed bins and transitions | `command_generator_profile=speed_bin_balanced`, defaults preserved | rejected_not_promoted | `v62d_004...step_005000000.pkl` | useful distribution signal, but velocity gain below threshold and action_delta worsened |
 | v62d_005 | A_value_return_stabilization | stabilize critic/value scale under speed-bin generator | `command_generator_profile=speed_bin_balanced`, `value_target_scale=10.0` | rejected_not_promoted | `v62d_005...step_015000000.pkl` | critic diagnostics improved, but velocity/action smoothness regressed badly |
-| v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | proposed_support | pending | run builder/checker support before 30M training |
+| v62d_006 | D_PPO_stabilizer | give brake/slow/recover behavior longer temporal credit | `command_generator_profile=speed_bin_balanced`, `num_envs=256`, `num_steps=128` | support_passed_ready_to_train | pending | support ALL GREEN; launch one 30M from scratch |
 
 ## v62d_001 Result
 
@@ -463,4 +463,49 @@ command_vel_error_coef=default
 action_distribution=tanh_squashed_gaussian
 observation_layout=level3_reference_tracker_command_v3
 no gate/aperture/race/finish/stage reward
+```
+
+## v62d_006 Support
+
+Support packet:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_006_longrollout_support.md
+```
+
+Support decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_006_support_decision.md
+```
+
+Checker result:
+
+```text
+ALL GREEN
+```
+
+Support smoke completed `262,144` steps with:
+
+```text
+num_envs=256
+num_steps=128
+actual_timesteps=262144
+steady_state_steps_per_s=413322
+action_clipping=ok
+action_sampling_logprob=ok
+stored_vs_env_logprob_abs_mean ~= 3.17e-7
+config/level3.toml unchanged
+config/level3_tracker_free_space.toml unchanged
+```
+
+The audit reports `advantage_scale=large` and `reward_scale=large`, which is
+expected with the longer horizon and must be monitored during the 30M run. It is
+not a support blocker because action/logprob, finite metrics, metadata, and
+config boundaries passed.
+
+Approved next command is the 30M command recorded in:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_006_hypothesis.md
 ```

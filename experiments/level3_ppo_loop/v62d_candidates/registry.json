@@ -945,7 +945,7 @@
         "num_minibatches": 4,
         "update_epochs": 1
       },
-      "status": "proposed_support",
+      "status": "support_passed_ready_to_train",
       "lane_name": "v62d_006_speedbin_longrollout_256x128_30m",
       "train_from_scratch": true,
       "hypothesis_packet": "experiments/level3_ppo_loop/v62d_candidates/v62d_006_hypothesis.md",
@@ -957,6 +957,20 @@
         "entity": "aojili77-technical-university-of-munich",
         "run_id": "v62d_006_speedbin_longrollout_256x128_30m_20260627",
         "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_006_speedbin_longrollout_256x128_30m_20260627"
+      },
+      "support": {
+        "packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_006_longrollout_support.md",
+        "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_006_support_decision.md",
+        "summary_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_006_speedbin_longrollout_256x128_support_summary.json",
+        "audit_json": "experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_006_speedbin_longrollout_256x128_support_audit.json",
+        "checker": "ALL GREEN",
+        "support_checkpoint": "lsy_drone_racing/control/checkpoints/v62d_006_speedbin_longrollout_256x128_support/v62d_006_speedbin_longrollout_256x128_support_final.pkl",
+        "wandb_url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_006_speedbin_longrollout_256x128_support_20260627",
+        "action_clipping": "ok",
+        "action_sampling_logprob": "ok",
+        "advantage_scale": "large_monitor_only",
+        "reward_scale": "large_monitor_only",
+        "steady_state_steps_per_s": 413321.9294790293
       }
     }
   ]
