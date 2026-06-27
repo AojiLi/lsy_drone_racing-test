@@ -287,6 +287,39 @@
         },
         "requires_builder_checker": true
       }
+    },
+    {
+      "id": "v62d_003",
+      "family": "B_velocity_obedience_reward_numbers",
+      "hypothesis": "Double the generic command velocity-error coefficient so the tracker pays more attention to desired trajectory velocity instead of winning spatial tracking by aggressive chasing.",
+      "changed_knobs": {
+        "command_vel_error_coef": 1.2,
+        "value_target_scale": 1.0,
+        "num_minibatches": 4,
+        "update_epochs": 1
+      },
+      "status": "support_passed_ready_to_train",
+      "lane_name": "v62d_003_velocity_coef_2x_30m",
+      "train_from_scratch": true,
+      "training_command": "pixi run -e gpu python scripts/train_v62_brax_reference_command_tracker.py --lane-name v62d_003_velocity_coef_2x_30m --config level3_tracker_free_space.toml --seed 26431 --num-envs 1024 --num-steps 32 --total-timesteps 30015488 --num-minibatches 4 --update-epochs 1 --checkpoint-interval 5000000 --checkpoint-path lsy_drone_racing/control/checkpoints/v62d_003_velocity_coef_2x_30m/v62d_003_velocity_coef_2x_30m_final.pkl --summary-json experiments/level3_ppo_loop/analysis/tracker_stage_metrics/v62d_003_velocity_coef_2x_30m_summary.json --action-distribution tanh_squashed_gaussian --command-vel-error-coef 1.2 --value-target-scale 1.0 --eval-rollouts 16 --wandb-enabled --wandb-mode online --wandb-project-name ADR-PPO-Racing-Level3 --wandb-entity aojili77-technical-university-of-munich --wandb-run-name v62d_003_velocity_coef_2x_30m --wandb-run-id v62d_003_velocity_coef_2x_30m_20260627 --jax-device gpu",
+      "wandb": {
+        "project": "ADR-PPO-Racing-Level3",
+        "entity": "aojili77-technical-university-of-munich",
+        "run_id": "v62d_003_velocity_coef_2x_30m_20260627",
+        "url": "https://wandb.ai/aojili77-technical-university-of-munich/ADR-PPO-Racing-Level3/runs/v62d_003_velocity_coef_2x_30m_20260627"
+      },
+      "support": {
+        "packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_003_velocity_coef_2x_support.md",
+        "hypothesis_packet": "experiments/level3_ppo_loop/v62d_candidates/v62d_003_hypothesis.md",
+        "checker": "ALL GREEN",
+        "builder_smoke_summary": "/tmp/v62d_003_velocity_coef_2x_support_smoke.json",
+        "checker_smoke_summary": "/tmp/v62d_003_velocity_coef_2x_checker_smoke.json"
+      },
+      "milestones": [],
+      "best_checkpoint": null,
+      "post_audit": null,
+      "decision": null,
+      "next_recommendation": null
     }
   ]
 }

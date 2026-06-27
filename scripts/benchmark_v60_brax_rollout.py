@@ -492,9 +492,15 @@ def command_reward(
     prev_action_norm: jax.Array,
     terminated: jax.Array,
     truncated: jax.Array,
+    *,
+    reward_coefficients: dict[str, float] | None = None,
 ) -> tuple[jax.Array, dict[str, jax.Array]]:
     """Compute v60 clean command reward in JAX."""
-    coeff = REFERENCE_TRACKER_REWARD_DEFAULTS
+    coeff = (
+        REFERENCE_TRACKER_REWARD_DEFAULTS
+        if reward_coefficients is None
+        else REFERENCE_TRACKER_REWARD_DEFAULTS | reward_coefficients
+    )
     pos = obs["pos"]
     prev_pos = prev_obs["pos"]
     vel = obs["vel"]

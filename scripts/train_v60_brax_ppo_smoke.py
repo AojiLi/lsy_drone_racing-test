@@ -56,6 +56,11 @@ def parse_args() -> argparse.Namespace:
         help=("Scale critic targets by this positive value while keeping GAE in raw reward units."),
     )
     parser.add_argument(
+        "--command-vel-error-coef",
+        type=float,
+        help="Override the generic ReferenceCommandReward velocity-error coefficient.",
+    )
+    parser.add_argument(
         "--action-distribution", choices=ACTION_DISTRIBUTIONS, default="tanh_squashed_gaussian"
     )
     parser.add_argument("--max-episode-steps", type=int, default=500)
@@ -70,6 +75,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb-mode", default="offline")
     parser.add_argument("--jax-device", default="gpu")
     return parser.parse_args()
+
+
+def command_reward_coefficients(args: argparse.Namespace) -> dict[str, float]:
+    """Return explicit command-reward coefficient overrides for this run."""
+    coefficients: dict[str, float] = {}
+    if args.command_vel_error_coef is not None:
+        coefficients["vel_error_coef"] = float(args.command_vel_error_coef)
+    return coefficients
 
 
 def init_actor_critic_params(
@@ -220,7 +233,12 @@ def select_done(done: jax.Array, old_value: jax.Array, new_value: jax.Array) -> 
 
 
 def build_command_env_step(
-    step_fn: Any, action_low: jax.Array, action_high: jax.Array, *, dt: float
+    step_fn: Any,
+    action_low: jax.Array,
+    action_high: jax.Array,
+    *,
+    dt: float,
+    reward_coefficients: dict[str, float] | None = None,
 ) -> Any:
     """Build one JAX command-tracker env step."""
 
@@ -244,6 +262,7 @@ def build_command_env_step(
             state.info["last_action_norm"],
             terminated,
             truncated,
+            reward_coefficients=reward_coefficients,
         )
         history_row = v60_rollout.history_rows(raw_obs)
         history = jnp.concatenate(
@@ -642,6 +661,7 @@ def save_checkpoint(
             "value_target_scale": float(args.value_target_scale),
             "action_distribution": args.action_distribution,
             "action_logprob_mode": action_logprob_mode(args.action_distribution),
+            "reward_coefficients": command_reward_coefficients(args),
         },
         "metrics": metrics,
     }
@@ -708,6 +728,7 @@ def main() -> None:
             action_low,
             action_high,
             dt=1.0 / float(config.env.freq),
+            reward_coefficients=command_reward_coefficients(args),
         )
         rollout = build_rollout_fn(
             env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution

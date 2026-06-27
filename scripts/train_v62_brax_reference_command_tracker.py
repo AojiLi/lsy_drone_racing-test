@@ -57,6 +57,11 @@ def parse_args() -> argparse.Namespace:
         help=("Scale critic targets by this positive value while keeping GAE in raw reward units."),
     )
     parser.add_argument(
+        "--command-vel-error-coef",
+        type=float,
+        help="Override the generic ReferenceCommandReward velocity-error coefficient.",
+    )
+    parser.add_argument(
         "--action-distribution",
         choices=ppo_smoke.ACTION_DISTRIBUTIONS,
         default="tanh_squashed_gaussian",
@@ -135,6 +140,7 @@ def save_lane_checkpoint(
             "value_target_scale": float(args.value_target_scale),
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
+            "reward_coefficients": ppo_smoke.command_reward_coefficients(args),
         },
         "metrics": jsonable(metrics),
     }
@@ -251,6 +257,7 @@ def main() -> None:
             action_low,
             action_high,
             dt=1.0 / float(config.env.freq),
+            reward_coefficients=ppo_smoke.command_reward_coefficients(args),
         )
         rollout = ppo_smoke.build_rollout_fn(
             env_step, num_steps=int(args.num_steps), action_distribution=args.action_distribution
@@ -406,6 +413,7 @@ def main() -> None:
             "value_target_scale": float(args.value_target_scale),
             "action_distribution": args.action_distribution,
             "action_logprob_mode": ppo_smoke.action_logprob_mode(args.action_distribution),
+            "reward_coefficients": ppo_smoke.command_reward_coefficients(args),
         }
         save_lane_checkpoint(
             args.checkpoint_path,

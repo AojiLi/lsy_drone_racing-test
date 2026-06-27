@@ -28,6 +28,7 @@ Under the 16-rollout tracker evaluation protocol:
 |---|---|---|---|---|---|---|
 | v62d_001 | A_value_return_stabilization | reduce critic target magnitude without changing rewards/obs | `value_target_scale=50.0`, `num_minibatches=8`, `update_epochs=4` | rejected_not_promoted | `v62d_001...step_005000000.pkl` | critic scale fixed, but velocity/done/action_delta regressed; next isolate conservative PPO |
 | v62d_002 | D_PPO_stabilizer | test value scale under conservative v62c-like PPO update pressure | `value_target_scale=50.0`, `num_minibatches=4`, `update_epochs=1` | rejected_not_promoted | `v62d_002...step_005000000.pkl` | cleaner than v62d_001 but still worse than v62c 7M on velocity/done/action_delta; next switch to velocity reward numbers |
+| v62d_003 | B_velocity_obedience_reward_numbers | strengthen generic command velocity obedience | `vel_error_coef=1.2`, `value_target_scale=1.0`, `num_minibatches=4`, `update_epochs=1` | support_passed_ready_to_train | pending | builder/checker passed; train from scratch 30M |
 
 ## v62d_001 Result
 
@@ -142,3 +143,34 @@ value_target_scale=1.0
 num_minibatches=4
 update_epochs=1
 ```
+
+## v62d_003 Support
+
+Support packet:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_003_velocity_coef_2x_support.md
+```
+
+Hypothesis:
+
+```text
+experiments/level3_ppo_loop/v62d_candidates/v62d_003_hypothesis.md
+```
+
+The support change adds an explicit training CLI knob:
+
+```text
+--command-vel-error-coef 1.2
+```
+
+Checker result:
+
+```text
+ALL GREEN
+```
+
+The checker verified default behavior is unchanged when the flag is omitted,
+the override only affects clean command reward `vel_error_coef`, checkpoint and
+summary metadata record the coefficient, and both `config/level3.toml` and
+`config/level3_tracker_free_space.toml` remain unchanged.
