@@ -419,11 +419,7 @@
   the initial policy, velocity error is already worse at `1M` and never
   recovers below initial; within the trained curve, `7M` is the least-bad
   velocity point and `8M` starts post-peak worsening. Do not launch 60M+
-  v62c maturation or resume from final. Next support lane is
-  `v62d_value_velocity_stabilization_support`: keep tanh-squashed Gaussian,
-  keep `level3_reference_tracker_command_v3`, keep no gate/aperture/race
-  rewards, and use builder/checker to address value/return scale and generic
-  command-velocity obedience before another bounded follow-up.
+  v62c maturation or resume from final.
 - Current v62d high-budget tracker search finding:
   candidates `v62d_001` through `v62d_010` have completed. The current formal
   comparison baseline remains `v62c 7M` unless a future decision explicitly
@@ -445,11 +441,15 @@
   v62c. The `30M/final` checkpoint improves velocity to `0.6061` only by
   spatial collapse (`position=0.9581`, `cross_track=0.7451`). The action path
   remains clean, but the critic is still weak (`explained_variance ~= 5.8e-5`).
-  Do not promote v62d_010, do not continue it to 60M, and do not launch
-  v62d_011 yet. Because 10 v62d candidates have completed, the immediate next
-  action is `v62d_10_candidate_meta_review_before_v62d_011`: compare v62c 7M
-  plus `v62d_001` through `v62d_010`, then decide the next single knob or
-  support fix.
+  Do not promote v62d_010 and do not continue it to 60M. The 10-candidate
+  meta-review
+  `experiments/level3_ppo_loop/analysis/2026-06-27_v62d_10_candidate_meta_review.md`
+  concluded that `v62d_001` through `v62d_010` all failed to promote over
+  `v62c 7M`, triggering the active objective's hold condition. The current
+  decision packet is
+  `experiments/level3_ppo_loop/decisions/2026-06-27_v62d_10_candidate_hold.md`.
+  Do not launch `v62d_011`, continue `v62d_010`, or run 60M+ maturation until
+  the user reviews the hold and approves the next direction.
 - loop122 analysis packet:
   `experiments/level3_ppo_loop/analysis/level3_loop_122_structural_v51_planner_guidance_obs_ppo256_30m_analysis.md`.
 

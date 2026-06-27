@@ -1127,3 +1127,64 @@ v62d_010 does not solve the velocity/spatial tradeoff. The current frontier
 remains v62c 7M. Because v62d has now completed 10 candidates, do not launch
 v62d_011 until a 10-candidate meta-review is written.
 ```
+
+## v62d 10-Candidate Meta-Review
+
+Analysis:
+
+```text
+experiments/level3_ppo_loop/analysis/2026-06-27_v62d_10_candidate_meta_review.md
+```
+
+Decision:
+
+```text
+experiments/level3_ppo_loop/decisions/2026-06-27_v62d_10_candidate_hold.md
+```
+
+Reader note:
+
+```text
+drone_notes/level3_loops/v62d-10-candidate-meta-review.md
+```
+
+Conclusion:
+
+```text
+hold_for_user_review
+```
+
+The active v62d objective requires candidate execution to pause if 10
+consecutive candidates fail to improve the frontier. That condition is met:
+
+```text
+v62d_001 through v62d_010 all failed to promote over v62c 7M.
+```
+
+The current frontier remains:
+
+```text
+v62c 7M
+lsy_drone_racing/control/checkpoints/v62c_tanh_squashed_gaussian_10m/v62c_tanh_squashed_gaussian_10m_step_007340032.pkl
+```
+
+Most useful partial signal:
+
+```text
+v62d_008 improves velocity by 22.84% but worsens position by 20.84%.
+```
+
+Main diagnosis:
+
+```text
+v62d has found a velocity/spatial tradeoff, not a strong generic tracker.
+Velocity obedience can be learned, but current reward/generator/PPO choices do
+not preserve spatial tracking at the same time.
+```
+
+Required next action:
+
+```text
+Do not launch v62d_011 automatically. User review is required before choosing
+the next lane.
+```

@@ -1857,26 +1857,44 @@
       "decision_outcome": "launch_best_of_family_combination",
       "next_candidate_id": "v62d_010",
       "updated_at": "2026-06-27T17:08:42+02:00"
+    },
+    {
+      "id": "v62d_10_candidate_meta_review",
+      "analysis_packet": "experiments/level3_ppo_loop/analysis/2026-06-27_v62d_10_candidate_meta_review.md",
+      "decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_10_candidate_hold.md",
+      "reader_note": "drone_notes/level3_loops/v62d-10-candidate-meta-review.md",
+      "reviewed_candidates": [
+        "v62c_7m",
+        "v62d_001",
+        "v62d_002",
+        "v62d_003",
+        "v62d_004",
+        "v62d_005",
+        "v62d_006",
+        "v62d_007",
+        "v62d_008",
+        "v62d_009",
+        "v62d_010"
+      ],
+      "finding": "Ten consecutive v62d candidates failed to promote over v62c 7M. v62d_008 is the best partial velocity signal, but no candidate preserved both velocity obedience and spatial tracking.",
+      "decision_outcome": "hold_for_user_review",
+      "next_candidate_id": null,
+      "user_review_required": true,
+      "updated_at": "2026-06-27T17:38:56+02:00"
     }
   ],
   "planned_next_candidate": {
-    "id": "v62d_10_candidate_meta_review_before_v62d_011",
-    "status": "required_meta_review_before_training",
-    "reason": "v62d candidate count reached 10 and v62d_010 did not promote; write a 10-candidate meta-review before choosing v62d_011.",
-    "review_scope": [
-      "v62c_7m",
-      "v62d_001",
-      "v62d_002",
-      "v62d_003",
-      "v62d_004",
-      "v62d_005",
-      "v62d_006",
-      "v62d_007",
-      "v62d_008",
-      "v62d_009",
-      "v62d_010"
+    "id": "user_review_required_after_v62d_10_candidate_meta_review",
+    "status": "hold_for_user_review",
+    "reason": "v62d_001 through v62d_010 all failed to promote over v62c 7M; active objective requires pausing candidate execution after 10 consecutive non-improving candidates.",
+    "must_not_launch_training_until_user_approves": true,
+    "allowed_review_directions": [
+      "command_conditioned_reward_or_generator_fix",
+      "targeted_critic_value_support",
+      "staged_command_curriculum",
+      "architecture_or_capacity_change",
+      "stop_v62d_and_return_to_planner_or_another_lane"
     ],
-    "must_not_launch_training_until_written": true,
-    "triggered_by_decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_010_decision.md"
+    "triggered_by_decision_packet": "experiments/level3_ppo_loop/decisions/2026-06-27_v62d_10_candidate_hold.md"
   }
 }
